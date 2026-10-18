@@ -1,20 +1,28 @@
-//! Document types: room, platforms (tables/breadboards) and placed nodes.
-
-use std::fmt;
+//! Document types: room, platforms (tables, breadboards, custom plates) and placed nodes.
 
 use glam::{DQuat, DVec2, DVec3};
+use lab_geom::FlatPath;
 use serde::{Deserialize, Serialize};
 
-use crate::units::{INCH, Mm};
+use crate::holes::HoleGrid;
+use crate::limits::{LEG_MAX_SPAN, MAX_LEGS};
+use crate::migrate::{LoadError, LoadReport};
+use crate::outline::{Outline, OutlineError};
+use crate::room::Room;
+use crate::units::Mm;
 
 /// Bumped whenever the serialized layout changes; older files are migrated on load.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PlatformId(pub u64);
+
+/// A door or window in a room wall.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct OpeningId(pub u64);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -27,6 +35,7 @@ pub struct Document {
 }
 
 impl Document {
+    /// An empty document: the default room, no platforms, no nodes.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
@@ -38,11 +47,27 @@ impl Document {
         }
     }
 
-    /// Returns a fresh id, unique across nodes and platforms in this document.
+    /// Mutating allocation. Only for building documents outside `History` (samples,
+    /// `default_document`, tests); app code uses [`Document::next_free_id`].
     pub fn allocate_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// Non-mutating: the id the next new object should use (plus k for several). Ids are unique
+    /// across nodes, platforms and openings, and only grow (M1-SPEC D12).
+    pub fn next_free_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// `next_id = max(next_id, used + 1)`.
+    pub(crate) fn bump_next_id(&mut self, used: u64) {
+        self.next_id = self.next_id.max(used.saturating_add(1));
+    }
+
+    pub(crate) fn set_next_id(&mut self, next: u64) {
+        self.next_id = next;
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
@@ -61,39 +86,61 @@ impl Document {
         self.platforms.iter().find(|p| p.id == id)
     }
 
+    pub fn platform_index(&self, id: PlatformId) -> Option<usize> {
+        self.platforms.iter().position(|p| p.id == id)
+    }
+
+    /// The nodes placed on platform `id`, in document order.
+    pub fn nodes_on(&self, id: PlatformId) -> impl Iterator<Item = &Node> {
+        self.nodes.iter().filter(move |n| n.platform == id)
+    }
+
+    /// Whether any node, platform or opening uses `raw` as its id.
+    pub fn contains_id(&self, raw: u64) -> bool {
+        self.nodes.iter().any(|n| n.id.0 == raw)
+            || self.platforms.iter().any(|p| p.id.0 == raw)
+            || self.room.openings.iter().any(|o| o.id.0 == raw)
+    }
+
+    /// Largest id in use; 0 if the document has no nodes, platforms or openings.
+    pub fn max_id(&self) -> u64 {
+        let nodes = self.nodes.iter().map(|n| n.id.0);
+        let platforms = self.platforms.iter().map(|p| p.id.0);
+        let openings = self.room.openings.iter().map(|o| o.id.0);
+        nodes.chain(platforms).chain(openings).max().unwrap_or(0)
+    }
+
+    /// Equality ignoring `next_id` (which only grows). Use in every undo/redo test.
+    pub fn content_eq(&self, other: &Document) -> bool {
+        self.schema_version == other.schema_version
+            && self.name == other.name
+            && self.room == other.room
+            && self.platforms == other.platforms
+            && self.nodes == other.nodes
+    }
+
+    /// Pretty JSON.
     pub fn to_json(&self) -> serde_json::Result<String> {
         serde_json::to_string_pretty(self)
     }
 
-    pub fn from_json(json: &str) -> Result<Self, LoadError> {
-        let doc: Document = serde_json::from_str(json)?;
-        if doc.schema_version > SCHEMA_VERSION {
-            return Err(LoadError::NewerSchema(doc.schema_version));
-        }
-        Ok(doc)
+    /// Parses, migrates, repairs and validates a project (M1-SPEC §3.11).
+    pub fn from_json(json: &str) -> Result<(Document, LoadReport), LoadError> {
+        crate::migrate::load(json)
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum LoadError {
-    #[error("project file is malformed: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("project was saved by a newer LabSetup (schema {0})")]
-    NewerSchema(u32),
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PlatformKind {
+    OpticalTable,
+    Breadboard,
+    Custom,
 }
 
-/// The lab room. A rectangle for now; arbitrary outlines and openings come later.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Room {
-    /// Floor size along room X and Y, centred on the room origin.
-    pub size: DVec2,
-    pub height: Mm,
-}
-
-impl Default for Room {
-    fn default() -> Self {
-        Self { size: DVec2::new(6000.0, 5000.0), height: 3000.0 }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Surface {
+    Stainless,
+    BlackAnodized,
 }
 
 /// An optical table, breadboard or custom platform.
@@ -101,12 +148,14 @@ impl Default for Room {
 pub struct Platform {
     pub id: PlatformId,
     pub name: String,
-    /// Top-surface size along platform X and Y. Rectangular for now.
-    pub size: DVec2,
+    pub kind: PlatformKind,
+    pub surface: Surface,
+    /// Top-surface outline in the platform frame.
+    pub outline: Outline,
     pub thickness: Mm,
     /// Height of the top surface above the floor.
     pub top_height: Mm,
-    /// Centre of the platform in room coordinates.
+    /// Frame origin in room coordinates.
     pub position: DVec2,
     /// Rotation about room +Z.
     pub rotation_z: f64,
@@ -116,119 +165,126 @@ pub struct Platform {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Support {
-    /// Four legs, inset from the corners, reaching the floor.
+    /// Legs inset from the outline, reaching the floor.
     Legs { size: Mm, inset: Mm },
     /// Sits directly on whatever is below it (e.g. a breadboard on a table).
     Fixed,
 }
 
-/// A regular grid of tapped holes on a platform's top surface.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct HoleGrid {
-    pub pitch: Mm,
-    /// Distance from the platform edge to the first hole centre.
-    pub margin: Mm,
-    pub thread: Thread,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Thread {
-    M4,
-    M6,
-    Unc8_32,
-    Unc1_4_20,
-}
-
-impl Thread {
-    pub fn label(self) -> &'static str {
-        match self {
-            Thread::M4 => "M4",
-            Thread::M6 => "M6",
-            Thread::Unc8_32 => "8-32",
-            Thread::Unc1_4_20 => "1/4-20",
-        }
+impl Platform {
+    fn rotation(&self) -> DVec2 {
+        DVec2::from_angle(self.rotation_z)
     }
 
-    /// Nominal major diameter, used to draw the hole.
-    pub fn diameter(self) -> Mm {
-        match self {
-            Thread::M4 => 4.0,
-            Thread::M6 => 6.0,
-            Thread::Unc8_32 => 0.164 * INCH,
-            Thread::Unc1_4_20 => 0.25 * INCH,
-        }
-    }
-}
-
-impl HoleGrid {
-    /// Metric table standard: M6 on 25 mm centres.
-    pub fn metric() -> Self {
-        Self { pitch: 25.0, margin: 12.5, thread: Thread::M6 }
+    /// Platform-local point to room coordinates.
+    pub fn local_to_room(&self, p: DVec2) -> DVec2 {
+        self.position + self.rotation().rotate(p)
     }
 
-    /// Imperial table standard: 1/4-20 on 1 inch centres.
-    pub fn imperial() -> Self {
-        Self { pitch: INCH, margin: 0.5 * INCH, thread: Thread::Unc1_4_20 }
+    /// Room point to platform-local coordinates.
+    pub fn room_to_local(&self, p: DVec2) -> DVec2 {
+        let r = self.rotation();
+        DVec2::new(r.x, -r.y).rotate(p - self.position)
     }
 
-    /// Number of hole columns (along X) and rows (along Y) that fit on a surface of `size`.
-    pub fn counts(&self, size: DVec2) -> (u32, u32) {
-        let fit = |len: Mm| {
-            let usable = len - 2.0 * self.margin;
-            if usable < 0.0 { 0 } else { (usable / self.pitch + 1e-9).floor() as u32 + 1 }
+    /// The flattened outline (fillets as arcs within FLATTEN_TOLERANCE), validated.
+    pub fn outline_path(&self) -> Result<FlatPath, OutlineError> {
+        self.outline.flatten()
+    }
+
+    /// Leg centres in the platform frame (M1-SPEC §3.3); empty for `Support::Fixed`.
+    pub fn leg_positions(&self) -> Vec<DVec2> {
+        let Support::Legs { size, inset } = self.support else {
+            return Vec::new();
         };
-        (fit(size.x), fit(size.y))
-    }
-
-    /// Centre of hole (`col`, `row`) in platform coordinates, or `None` if it is off the grid.
-    pub fn hole_position(&self, size: DVec2, hole: HoleRef) -> Option<DVec2> {
-        let (cols, rows) = self.counts(size);
-        if hole.col >= cols || hole.row >= rows {
-            return None;
-        }
-        Some(DVec2::new(
-            -size.x / 2.0 + self.margin + hole.col as f64 * self.pitch,
-            -size.y / 2.0 + self.margin + hole.row as f64 * self.pitch,
-        ))
-    }
-
-    /// The hole closest to `point` (platform coordinates), clamped to the grid.
-    pub fn nearest_hole(&self, size: DVec2, point: DVec2) -> Option<HoleRef> {
-        let (cols, rows) = self.counts(size);
-        if cols == 0 || rows == 0 {
-            return None;
-        }
-        let index = |p: f64, half: f64, count: u32| {
-            let i = ((p + half - self.margin) / self.pitch).round();
-            i.clamp(0.0, (count - 1) as f64) as u32
+        let Ok(path) = self.outline_path() else {
+            return Vec::new();
         };
-        Some(HoleRef { col: index(point.x, size.x / 2.0, cols), row: index(point.y, size.y / 2.0, rows) })
-    }
-}
-
-/// A hole on a platform grid. Displayed as row letter + column number, e.g. `C14`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct HoleRef {
-    pub col: u32,
-    pub row: u32,
-}
-
-impl fmt::Display for HoleRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Spreadsheet-style row letters: A..Z, AA..AZ, ...
-        let mut letters = Vec::new();
-        let mut n = self.row + 1;
-        while n > 0 {
-            n -= 1;
-            letters.push(b'A' + (n % 26) as u8);
-            n /= 26;
+        let flat = &path.points;
+        let mut corners: Vec<DVec2> = self.outline.corners().iter().map(|c| c.point).collect();
+        if lab_geom::signed_area(&corners) < 0.0 {
+            corners.reverse();
         }
-        letters.reverse();
-        write!(f, "{}{}", String::from_utf8_lossy(&letters), self.col + 1)
+        let n = corners.len();
+
+        // 1. Corner candidates at distance `inset` from both edges of every corner up to 150°.
+        let max_angle = 150f64.to_radians() + 1e-9;
+        let candidates: Vec<DVec2> = (0..n)
+            .filter(|&k| lab_geom::interior_angle(&corners, k) <= max_angle)
+            .map(|k| {
+                let p = corners[k];
+                let u = (corners[(k + n - 1) % n] - p).normalize_or_zero();
+                let v = (corners[(k + 1) % n] - p).normalize_or_zero();
+                let theta = u.dot(v).clamp(-1.0, 1.0).acos();
+                p + (u + v).normalize_or_zero() * (inset / (theta / 2.0).sin())
+            })
+            .collect();
+
+        // 2. Span fill between consecutive candidates along the outline.
+        let m = candidates.len();
+        let mut points = Vec::with_capacity(m * 2);
+        for k in 0..m {
+            let a = candidates[k];
+            points.push(a);
+            let b = candidates[(k + 1) % m];
+            let d = a.distance(b);
+            if m > 1 && d > LEG_MAX_SPAN {
+                let extra = (d / LEG_MAX_SPAN).ceil() as usize - 1;
+                for s in 1..=extra {
+                    points.push(a + (b - a) * (s as f64 / (extra + 1) as f64));
+                }
+            }
+        }
+
+        // 3. Keep test and 4. spacing.
+        let select = |points: &[DVec2]| {
+            let mut kept: Vec<DVec2> = Vec::new();
+            for &c in points {
+                if kept.len() == MAX_LEGS {
+                    break;
+                }
+                let inside =
+                    lab_geom::point_in_polygon(flat, c) && lab_geom::distance_to_boundary(flat, c) >= size * 0.7072;
+                if inside && kept.iter().all(|k| k.distance(c) >= size) {
+                    kept.push(c);
+                }
+            }
+            kept
+        };
+        let legs = select(&points);
+        if !legs.is_empty() {
+            return legs;
+        }
+
+        // 5. Fallback: the bounding box corners inset, then the centre.
+        let (lo, hi) = self.outline.bounds();
+        let legs = select(&[
+            DVec2::new(lo.x + inset, lo.y + inset),
+            DVec2::new(hi.x - inset, lo.y + inset),
+            DVec2::new(hi.x - inset, hi.y - inset),
+            DVec2::new(lo.x + inset, hi.y - inset),
+        ]);
+        if !legs.is_empty() {
+            return legs;
+        }
+        let centre = (lo + hi) / 2.0;
+        if lab_geom::point_in_polygon(flat, centre) { vec![centre] } else { Vec::new() }
+    }
+
+    /// Room-space bounding box of the platform, down to the floor for legs, otherwise to the
+    /// underside.
+    pub fn room_aabb(&self) -> (DVec3, DVec3) {
+        let points: Vec<DVec2> = self.outline.corners().iter().map(|c| self.local_to_room(c.point)).collect();
+        let (lo, hi) = lab_geom::bounds(&points);
+        let bottom = match self.support {
+            Support::Legs { .. } => 0.0,
+            Support::Fixed => self.top_height - self.thickness,
+        };
+        (lo.extend(bottom), hi.extend(self.top_height))
     }
 }
 
-/// A placed object. In M0 every node carries a primitive shape; catalog parts with meshes and
+/// A placed object. In M0/M1 every node carries a primitive shape; catalog parts with meshes and
 /// connectors replace this in M2.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
@@ -237,7 +293,7 @@ pub struct Node {
     /// Catalog part id, e.g. `generic:post-12.7`.
     pub part: String,
     pub platform: PlatformId,
-    /// Centre of the shape, relative to the centre of the platform's top surface.
+    /// Centre of the shape in the platform frame (origin on the top surface).
     pub position: DVec3,
     pub rotation: DQuat,
     pub shape: Shape,
@@ -247,9 +303,14 @@ pub struct Node {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Shape {
-    Box { size: DVec3 },
+    Box {
+        size: DVec3,
+    },
     /// Axis along local +Z, centred on the node position.
-    Cylinder { radius: Mm, length: Mm },
+    Cylinder {
+        radius: Mm,
+        length: Mm,
+    },
 }
 
 impl Shape {
@@ -269,50 +330,144 @@ pub enum Finish {
     Stainless,
     Mirror,
     Glass,
-    Painted { rgb: [u8; 3] },
+    Painted {
+        rgb: [u8; 3],
+    },
     /// A visualised laser beam (not a physical part).
-    Beam { wavelength_nm: f64 },
+    Beam {
+        wavelength_nm: f64,
+    },
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
+    use crate::outline::{OutlineCorner, RectCorner};
 
-    #[test]
-    fn metric_grid_counts_and_positions() {
-        let grid = HoleGrid::metric();
-        let size = DVec2::new(1200.0, 900.0);
-        assert_eq!(grid.counts(size), (48, 36));
-        let first = grid.hole_position(size, HoleRef { col: 0, row: 0 }).unwrap();
-        assert_eq!(first, DVec2::new(-587.5, -437.5));
-        let last = grid.hole_position(size, HoleRef { col: 47, row: 35 }).unwrap();
-        assert_eq!(last, DVec2::new(587.5, 437.5));
-        assert!(grid.hole_position(size, HoleRef { col: 48, row: 0 }).is_none());
+    fn v(x: f64, y: f64) -> DVec2 {
+        DVec2::new(x, y)
+    }
+
+    fn table(outline: Outline, inset: f64) -> Platform {
+        Platform {
+            id: PlatformId(1),
+            name: "Table A".into(),
+            kind: PlatformKind::OpticalTable,
+            surface: Surface::Stainless,
+            outline,
+            thickness: 210.0,
+            top_height: 800.0,
+            position: DVec2::ZERO,
+            rotation_z: 0.0,
+            hole_grid: Some(HoleGrid::metric()),
+            support: Support::Legs { size: 120.0, inset },
+        }
+    }
+
+    fn key(p: DVec2) -> (i64, i64) {
+        ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64)
     }
 
     #[test]
-    fn imperial_grid_fits_whole_inches() {
-        let grid = HoleGrid::imperial();
-        // 4 ft x 2 ft breadboard: 48 x 24 holes.
-        assert_eq!(grid.counts(DVec2::new(48.0 * INCH, 24.0 * INCH)), (48, 24));
+    fn l1_rectangle_legs_match_m0() {
+        let p = table(Outline::Rectangle { size: v(1200.0, 900.0) }, 120.0);
+        let legs = p.leg_positions();
+        let (hx, hy) = (600.0 - 120.0, 450.0 - 120.0);
+        let m0: BTreeSet<_> = [v(-hx, -hy), v(hx, -hy), v(hx, hy), v(-hx, hy)].into_iter().map(key).collect();
+        assert_eq!(legs.len(), 4);
+        for leg in &legs {
+            let near = [v(-hx, -hy), v(hx, -hy), v(hx, hy), v(-hx, hy)].iter().any(|m| m.distance(*leg) < 1e-9);
+            assert!(near, "{leg}");
+        }
+        assert_eq!(legs.iter().copied().map(key).collect::<BTreeSet<_>>(), m0);
     }
 
     #[test]
-    fn nearest_hole_snaps_and_clamps() {
-        let grid = HoleGrid::metric();
-        let size = DVec2::new(1200.0, 900.0);
-        let hole = grid.nearest_hole(size, DVec2::new(-580.0, -440.0)).unwrap();
-        assert_eq!(hole, HoleRef { col: 0, row: 0 });
-        let far = grid.nearest_hole(size, DVec2::new(10_000.0, 10_000.0)).unwrap();
-        assert_eq!(far, HoleRef { col: 47, row: 35 });
-        let p = grid.hole_position(size, HoleRef { col: 20, row: 10 }).unwrap();
-        assert_eq!(grid.nearest_hole(size, p + DVec2::splat(9.0)).unwrap(), HoleRef { col: 20, row: 10 });
+    fn l1_span_fill() {
+        let legs = table(Outline::Rectangle { size: v(3000.0, 1500.0) }, 150.0).leg_positions();
+        assert_eq!(legs.len(), 6);
+        assert!(legs.iter().any(|p| p.distance(v(0.0, -600.0)) < 1e-9));
+        assert!(legs.iter().any(|p| p.distance(v(0.0, 600.0)) < 1e-9));
+        assert_eq!(table(Outline::Rectangle { size: v(2400.0, 1200.0) }, 150.0).leg_positions().len(), 4);
+        // A clockwise polygon gives the same legs.
+        let mut corners = Outline::Rectangle { size: v(3000.0, 1500.0) }.corners();
+        corners.reverse();
+        let cw = table(Outline::Polygon { corners }, 150.0).leg_positions();
+        assert_eq!(cw.iter().copied().map(key).collect::<BTreeSet<_>>(), legs.iter().copied().map(key).collect());
     }
 
     #[test]
-    fn hole_labels() {
-        assert_eq!(HoleRef { col: 13, row: 2 }.to_string(), "C14");
-        assert_eq!(HoleRef { col: 0, row: 25 }.to_string(), "Z1");
-        assert_eq!(HoleRef { col: 0, row: 26 }.to_string(), "AA1");
+    fn l1_l_shape_has_five_legs() {
+        let outline =
+            Outline::LShape { size: v(1200.0, 900.0), notch: v(400.0, 300.0), notch_corner: RectCorner::XPosYPos };
+        let legs = table(outline, 150.0).leg_positions();
+        assert_eq!(legs.len(), 5);
+        assert!(!legs.iter().any(|p| p.x > 200.0 - 1e-9 && p.y > 150.0 - 1e-9));
+    }
+
+    #[test]
+    fn l1_forty_gon() {
+        // Alternating tips and dents: 20 convex corners below 150°.
+        let corners: Vec<OutlineCorner> = (0..40)
+            .map(|k| {
+                let a = k as f64 * std::f64::consts::TAU / 40.0;
+                let r = if k % 2 == 0 { 2000.0 } else { 1500.0 };
+                OutlineCorner::sharp(v(a.cos(), a.sin()) * r)
+            })
+            .collect();
+        let p = table(Outline::Polygon { corners }, 150.0);
+        let legs = p.leg_positions();
+        assert!(!legs.is_empty() && legs.len() <= MAX_LEGS, "{}", legs.len());
+        let flat = p.outline_path().unwrap().points;
+        for leg in &legs {
+            assert!(lab_geom::point_in_polygon(&flat, *leg));
+            assert!(lab_geom::distance_to_boundary(&flat, *leg) >= 120.0 * 0.7072);
+        }
+        // A regular 40-gon has no corner below 150°: the fallback leaves only the centre.
+        let corners: Vec<OutlineCorner> = (0..40)
+            .map(|k| OutlineCorner::sharp(DVec2::from_angle(k as f64 * std::f64::consts::TAU / 40.0) * 1000.0))
+            .collect();
+        let legs = table(Outline::Polygon { corners }, 150.0).leg_positions();
+        assert_eq!(legs.len(), 1);
+        assert!(legs[0].length() < 1e-9);
+    }
+
+    #[test]
+    fn fixed_support_and_frames() {
+        let mut p = table(Outline::Rectangle { size: v(600.0, 400.0) }, 120.0);
+        p.position = v(1000.0, -500.0);
+        p.rotation_z = std::f64::consts::FRAC_PI_2;
+        let room = p.local_to_room(v(300.0, 0.0));
+        assert!(room.distance(v(1000.0, -200.0)) < 1e-9);
+        assert!(p.room_to_local(room).distance(v(300.0, 0.0)) < 1e-9);
+        let (lo, hi) = p.room_aabb();
+        assert!(lo.distance(DVec3::new(800.0, -800.0, 0.0)) < 1e-9, "{lo}");
+        assert!(hi.distance(DVec3::new(1200.0, -200.0, 800.0)) < 1e-9, "{hi}");
+        p.support = Support::Fixed;
+        assert!(p.leg_positions().is_empty());
+        assert_eq!(p.room_aabb().0.z, 590.0);
+    }
+
+    #[test]
+    fn ids_and_lookup() {
+        let mut doc = Document::new("Test");
+        assert_eq!(doc.max_id(), 0);
+        assert_eq!(doc.next_free_id(), 1);
+        assert_eq!(doc.allocate_id(), 1);
+        assert_eq!(doc.next_free_id(), 2);
+        doc.bump_next_id(10);
+        assert_eq!(doc.next_free_id(), 11);
+        doc.bump_next_id(3);
+        assert_eq!(doc.next_free_id(), 11);
+        let mut other = doc.clone();
+        other.set_next_id(50);
+        assert!(doc.content_eq(&other));
+        assert_ne!(doc, other);
+        other.name = "Other".into();
+        assert!(!doc.content_eq(&other));
+        assert!(!doc.contains_id(1));
+        assert_eq!(doc.schema_version, SCHEMA_VERSION);
     }
 }

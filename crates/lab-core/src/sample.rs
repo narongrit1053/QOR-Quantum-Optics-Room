@@ -5,7 +5,9 @@ use std::f64::consts::FRAC_PI_2;
 
 use glam::{DQuat, DVec2, DVec3};
 
+use crate::holes::{HoleGrid, HoleRef, HoleSet, compute_holes};
 use crate::model::*;
+use crate::outline::Outline;
 use crate::units::Mm;
 
 /// Beam height above the table surface.
@@ -25,10 +27,20 @@ pub fn facing(dir: DVec3) -> DQuat {
 struct Builder<'a> {
     doc: &'a mut Document,
     platform: PlatformId,
+    /// The platform's holes (computed once; the builder never edits the platform).
+    holes: HoleSet,
 }
 
 impl Builder<'_> {
-    fn add(&mut self, name: &str, part: &str, position: DVec3, rotation: DQuat, shape: Shape, finish: Finish) -> NodeId {
+    fn add(
+        &mut self,
+        name: &str,
+        part: &str,
+        position: DVec3,
+        rotation: DQuat,
+        shape: Shape,
+        finish: Finish,
+    ) -> NodeId {
         let id = NodeId(self.doc.allocate_id());
         self.doc.nodes.push(Node {
             id,
@@ -45,9 +57,7 @@ impl Builder<'_> {
     }
 
     fn hole(&self, col: u32, row: u32) -> DVec2 {
-        let platform = self.doc.platform(self.platform).expect("builder platform exists");
-        let grid = platform.hole_grid.as_ref().expect("demo table has a hole grid");
-        grid.hole_position(platform.size, HoleRef { col, row }).expect("demo hole is on the grid")
+        self.holes.hole_at(HoleRef { col, row }).expect("INVARIANT: the demo hole exists")
     }
 
     /// Base + post holder + post, ending at `post_top` above the table.
@@ -94,11 +104,28 @@ impl Builder<'_> {
             Shape::Box { size: DVec3::new(38.0, 38.0, 13.0) },
             Finish::AnodizedBlack,
         );
-        self.add(label, "generic:mirror-1in", centre, facing(normal), Shape::Cylinder { radius: 12.7, length: 6.0 }, Finish::Mirror);
+        self.add(
+            label,
+            "generic:mirror-1in",
+            centre,
+            facing(normal),
+            Shape::Cylinder { radius: 12.7, length: 6.0 },
+            Finish::Mirror,
+        );
     }
 
     /// A round optic (lens or waveplate) in a ring mount, axis along `axis`.
-    fn ring_optic(&mut self, label: &str, part: &str, col: u32, row: u32, axis: DVec3, ring_radius: Mm, ring_length: Mm) {
+    #[allow(clippy::too_many_arguments)] // a private demo builder, kept as in M0
+    fn ring_optic(
+        &mut self,
+        label: &str,
+        part: &str,
+        col: u32,
+        row: u32,
+        axis: DVec3,
+        ring_radius: Mm,
+        ring_length: Mm,
+    ) {
         let at = self.hole(col, row);
         let rot = facing(axis);
         self.post_stack(label, at, axis.y.atan2(axis.x) + FRAC_PI_2, BEAM_HEIGHT - ring_radius);
@@ -110,7 +137,14 @@ impl Builder<'_> {
             Shape::Cylinder { radius: ring_radius, length: ring_length },
             Finish::AnodizedBlack,
         );
-        self.add(label, part, at.extend(BEAM_HEIGHT), rot, Shape::Cylinder { radius: 12.7, length: ring_length + 1.0 }, Finish::Glass);
+        self.add(
+            label,
+            part,
+            at.extend(BEAM_HEIGHT),
+            rot,
+            Shape::Cylinder { radius: 12.7, length: ring_length + 1.0 },
+            Finish::Glass,
+        );
     }
 
     fn detector(&mut self, label: &str, col: u32, row: u32, facing_dir: DVec3) {
@@ -142,19 +176,23 @@ impl Builder<'_> {
 pub fn demo_document() -> Document {
     let mut doc = Document::new("Demo — Rb-87 beam path");
     let table = PlatformId(doc.allocate_id());
-    doc.platforms.push(Platform {
+    let platform = Platform {
         id: table,
         name: "Table A".into(),
-        size: DVec2::new(1200.0, 900.0),
+        kind: PlatformKind::OpticalTable,
+        surface: Surface::Stainless,
+        outline: Outline::Rectangle { size: DVec2::new(1200.0, 900.0) },
         thickness: 210.0,
         top_height: 800.0,
         position: DVec2::ZERO,
         rotation_z: 0.0,
         hole_grid: Some(HoleGrid::metric()),
         support: Support::Legs { size: 120.0, inset: 120.0 },
-    });
+    };
+    let holes = compute_holes(&platform).expect("INVARIANT: the demo table is valid");
+    doc.platforms.push(platform);
 
-    let mut b = Builder { doc: &mut doc, platform: table };
+    let mut b = Builder { doc: &mut doc, platform: table, holes };
 
     // Laser head sitting directly on the table, beam leaving its +X face.
     let laser_centre = b.hole(6, 8);
@@ -217,6 +255,8 @@ mod tests {
     #[test]
     fn demo_document_is_consistent() {
         let doc = demo_document();
+        assert_eq!(doc.validate(), Ok(()));
+        assert!(doc.room.openings.is_empty());
         assert!(doc.nodes.len() > 30);
         let mut ids: Vec<_> = doc.nodes.iter().map(|n| n.id).collect();
         ids.sort();
@@ -247,7 +287,9 @@ mod tests {
     fn json_round_trip() {
         let doc = demo_document();
         let json = doc.to_json().unwrap();
-        assert_eq!(Document::from_json(&json).unwrap(), doc);
+        let (loaded, report) = Document::from_json(&json).unwrap();
+        assert_eq!(loaded, doc);
+        assert_eq!(report, crate::migrate::LoadReport::default());
     }
 
     #[test]
@@ -255,7 +297,10 @@ mod tests {
         let mut doc = demo_document();
         doc.schema_version = SCHEMA_VERSION + 1;
         let json = doc.to_json().unwrap();
-        assert!(matches!(Document::from_json(&json), Err(LoadError::NewerSchema(_))));
+        assert!(matches!(
+            Document::from_json(&json),
+            Err(crate::migrate::LoadError::NewerSchema { found: 3, supported: 2 })
+        ));
     }
 
     #[test]
