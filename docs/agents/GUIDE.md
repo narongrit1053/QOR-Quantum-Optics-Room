@@ -1,6 +1,8 @@
-# Agent operating guide (Paperclip team, M1)
+# Agent operating guide (Multica team, M1)
 
-Every LabSetup task in Paperclip links here. Read it fully before starting.
+Every LabSetup issue in Multica links here. Read it fully before starting.
+
+The work moved from Paperclip to Multica on 2026-10-19. Each Multica issue carries the history of its Paperclip predecessor (LAB-n) in its first comment.
 
 ## The work
 
@@ -47,9 +49,17 @@ Helpers are in `scripts/dev` (see its README): `shot.ps1` captures the window, `
 - Stage paths explicitly; never `git add -A`. Commit only files your task owns.
 - Never push, never rewrite history on `m1`, never delete branches.
 
-## Reporting (in the Paperclip issue)
+## Multica basics
 
-When you finish, comment with:
+- Use the `multica` CLI for everything: `multica issue get <KEY>`, `multica issue comment add <KEY> --content-file <file>` (use `--content-file` for multi-line text on Windows), `multica issue update <KEY> --status <status>`.
+- Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`. Set them yourself; the server does not change them when a run starts or ends.
+- If your run was started by a comment, reply **under that comment** (`--parent <comment-id>`); a top-level comment on that issue is rejected.
+- To hand work to another agent, **@-mention it by name** in your comment (for example `@QA Reviewer`). The mention starts a run for that agent. Say exactly which issue it should act on.
+- M1 is one parent issue with staged sub-issues. Later stages wait in `backlog`; the Lead Engineer promotes them.
+
+## Reporting
+
+When you finish, comment on your issue with:
 
 1. Branch and tip commit.
 2. Every gate you ran, with the result (real output, not intentions).
@@ -57,16 +67,24 @@ When you finish, comment with:
 4. Deviations from the spec.
 5. Anything blocked.
 
-Then mark the issue done (or blocked, with the reason).
+Then set the issue to `done` (or `blocked`, with the reason).
 
 ## Reviews
 
 Review issues are **adversarial**: assume the work is incomplete or wrong until proven otherwise. Re-run the gates yourself in the task's worktree. Check every acceptance criterion against real evidence, file ownership (`git diff m1...m1-<ID>`), interfaces exactly as the spec defines them (later tasks code against them), and correctness: logic bugs, unhandled edge cases the spec calls out, panics on user data, `unwrap`/`expect` on file contents, missing tests. Do not edit the task's files.
 
-- **Pass:** no blocker or major issues. Comment the verdict on the review issue and mark it done. That unblocks the merge.
-- **Fail:** comment each blocker or major issue (with `file:line` and evidence) **on the implementation issue** and set that issue back to `todo`. The comment wakes its engineer. Leave your review issue open (`in_review`), not done.
-- **Engineer, after fixing:** commit, mark the implementation issue done, then comment on the review issue "Fixed in `<commit>`, please re-review". That comment wakes the reviewer, who reviews again from the top.
-- After three failed rounds, the reviewer sets the review issue to `blocked` and comments a summary for the Lead Engineer and the board.
+- **Pass:** no blocker or major issues. Comment the verdict on the review issue and set it `done`.
+- **Fail:** comment each blocker or major issue (with `file:line` and evidence) on the **implementation** issue, @-mentioning its engineer, and set that issue back to `todo`. Set your review issue to `in_review` (not done).
+- **Engineer, after fixing:** commit, set the implementation issue `done`, and comment there @-mentioning the reviewer: "Fixed in `<commit>`, please re-review <review issue key>". The reviewer reviews again from the top and updates the review issue.
+- After three failed rounds, the reviewer sets the review issue `blocked` and @-mentions the Lead Engineer with a summary.
+
+## Lead Engineer: running the stages
+
+You own the parent issue "M1". Multica wakes you when every sub-issue in the earliest unfinished stage is `done` or `cancelled`. Each wave has two stages: implementation, then review. When woken:
+
+1. **An implementation stage finished:** set that wave's review sub-issues to `todo`.
+2. **A review stage finished:** merge the wave (below), then set the next wave's implementation sub-issues to `todo`. After the last wave, set "T7" to `todo` (it is yours).
+3. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
 
 ## Merges (Lead Engineer only)
 
