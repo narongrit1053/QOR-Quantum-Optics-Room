@@ -1,0 +1,11 @@
+[package]
+name = "lab-geom"
+description = "Pure 2D/3D geometry for LabSetup: polygons, fillets, triangulation, distances, extrusion and mitred walls."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+glam.workspace = true
+thiserror.workspace = true

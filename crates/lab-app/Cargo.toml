@@ -6,17 +6,30 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# TODO(T6a): uncomment once crates/lab-app/src/lib.rs exists (a [lib] path without the file breaks the build).
+# [lib]
+# name = "lab_app"
+# path = "src/lib.rs"
+
 [[bin]]
 name = "labsetup"
 path = "src/main.rs"
 
 [dependencies]
 lab-core.workspace = true
+lab-geom.workspace = true
+lab-file.workspace = true
 lab-viewport.workspace = true
 lab-ui.workspace = true
 slint.workspace = true
 async-channel.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
-windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_System_Com",
+] }
