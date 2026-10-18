@@ -628,9 +628,12 @@ export component AppWindow inherits Window {
             }
         }
 
-        // ── Floating pill toolbar (bottom centre) ────────────────────────────
+        // ── Floating pill toolbar (bottom centre of the free viewport span) ──
         toolbar := Rectangle {
-            x: sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - self.width) / 2;
+            property <length> free-span: (inspector-panel.shown ? inspector-panel.x : root.width) - (sidebar.x + sidebar.width);
+            property <bool> compact: self.free-span < 550px;
+
+            x: (sidebar.x + sidebar.width) + (self.free-span - self.width) / 2;
             y: root.height - self.height - 18px;
             width: tools.preferred-width;
             height: 42px;
@@ -641,6 +644,7 @@ export component AppWindow inherits Window {
             drop-shadow-blur: 24px;
             drop-shadow-offset-y: 8px;
             drop-shadow-color: Theme.shadow;
+            animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
 
             tools := HorizontalLayout {
                 padding: 6px;
@@ -673,15 +677,15 @@ export component AppWindow inherits Window {
                     label: "Select";
                     active: true;
                 }
-                ToolButton {
+                if !toolbar.compact: ToolButton {
                     label: "Move";
                     available: false;
                 }
-                ToolButton {
+                if !toolbar.compact: ToolButton {
                     label: "Rotate";
                     available: false;
                 }
-                ToolButton {
+                if !toolbar.compact: ToolButton {
                     label: "Measure";
                     available: false;
                 }
@@ -700,16 +704,21 @@ export component AppWindow inherits Window {
             }
         }
 
-        // ── Status chip (bottom left of the viewport) ────────────────────────
-        Rectangle {
+        // ── Status chip (bottom left of the viewport, stacks above toolbar if narrow) ──
+        status-chip := Rectangle {
+            property <bool> stack: (self.x + status-row.preferred-width + 12px) > toolbar.x;
+
             x: sidebar.x + sidebar.width + Theme.inset;
-            y: root.height - self.height - 18px;
+            y: self.stack
+                ? toolbar.y - (root.toast != "" ? 48px : 0px) - self.height - 8px
+                : root.height - self.height - 18px;
             height: 26px;
             width: status-row.preferred-width;
             border-radius: 13px;
             background: Theme.panel-bg;
             border-width: 1px;
             border-color: Theme.panel-border;
+            animate y { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
 
             status-row := HorizontalLayout {
                 padding-left: 10px;

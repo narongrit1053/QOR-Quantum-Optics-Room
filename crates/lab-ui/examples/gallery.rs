@@ -1160,10 +1160,16 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     if hover_undo {
         let weak = ui.as_weak();
+        let (w, _h) = size.unwrap_or((1440.0, 900.0));
         slint::Timer::single_shot(std::time::Duration::from_millis(250), move || {
             if let Some(ui) = weak.upgrade() {
+                let (undo_x, undo_y) = if w < 1200.0 {
+                    (368.0, 581.0)
+                } else {
+                    (531.0, 862.0)
+                };
                 ui.window().dispatch_event(WindowEvent::PointerMoved {
-                    position: slint::LogicalPosition::new(670.0, 861.0),
+                    position: slint::LogicalPosition::new(undo_x, undo_y),
                 });
             }
         });

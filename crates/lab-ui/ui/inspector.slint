@@ -376,7 +376,7 @@ export component PlatformInspector inherits Rectangle {
                 selected(i) => { root.choice-selected("platform.grid.thread", i); }
             }
         }
-        if root.grid-standard != 0: ControlRow {
+        if root.grid-standard == 3: ControlRow {
             label: "Origin";
             SegmentedControl {
                 items: ["Auto", "Fixed"];
