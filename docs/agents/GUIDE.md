@@ -63,8 +63,10 @@ Then mark the issue done (or blocked, with the reason).
 
 Review issues are **adversarial**: assume the work is incomplete or wrong until proven otherwise. Re-run the gates yourself in the task's worktree. Check every acceptance criterion against real evidence, file ownership (`git diff m1...m1-<ID>`), interfaces exactly as the spec defines them (later tasks code against them), and correctness: logic bugs, unhandled edge cases the spec calls out, panics on user data, `unwrap`/`expect` on file contents, missing tests. Do not edit the task's files.
 
-- **Pass:** no blocker or major issues. Comment the verdict and mark done.
-- **Fail:** comment each blocker or major issue with `file:line` and evidence, then reassign the implementation issue back to its engineer with status `todo` and a comment linking your findings. Mark the review blocked until the fix lands.
+- **Pass:** no blocker or major issues. Comment the verdict on the review issue and mark it done. That unblocks the merge.
+- **Fail:** comment each blocker or major issue (with `file:line` and evidence) **on the implementation issue** and set that issue back to `todo`. The comment wakes its engineer. Leave your review issue open (`in_review`), not done.
+- **Engineer, after fixing:** commit, mark the implementation issue done, then comment on the review issue "Fixed in `<commit>`, please re-review". That comment wakes the reviewer, who reviews again from the top.
+- After three failed rounds, the reviewer sets the review issue to `blocked` and comments a summary for the Lead Engineer and the board.
 
 ## Merges (Lead Engineer only)
 
