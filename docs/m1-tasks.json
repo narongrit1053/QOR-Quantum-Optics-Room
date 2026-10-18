@@ -1,0 +1,256 @@
+[
+ {
+  "id": "T0",
+  "title": "Scaffold workspace, new crate stubs, capture v1 fixture",
+  "crate": "workspace",
+  "files": [
+   "Cargo.toml",
+   "Cargo.lock",
+   "crates/lab-core/Cargo.toml",
+   "crates/lab-viewport/Cargo.toml",
+   "crates/lab-app/Cargo.toml",
+   "crates/lab-geom/Cargo.toml",
+   "crates/lab-geom/src/lib.rs",
+   "crates/lab-file/Cargo.toml",
+   "crates/lab-file/src/lib.rs",
+   "crates/lab-core/tests/fixtures/demo_v1.json"
+  ],
+  "depends_on": [],
+  "interfaces": "FIRST step, before any other change: on the untouched M0 code, temporarily add crates/lab-core/examples/dump_demo_v1.rs (prints lab_core::sample::demo_document().to_json().unwrap()), run it with cargo run -p lab-core --example dump_demo_v1 --offline, save stdout to crates/lab-core/tests/fixtures/demo_v1.json, then delete the example. Root Cargo.toml: members += crates/lab-geom, crates/lab-file. [workspace.dependencies] += lab-geom = { path = \"crates/lab-geom\" }, lab-file = { path = \"crates/lab-file\" }, flate2 = \"1.1\". Add [profile.dev.package.lab-core] opt-level = 2 and [profile.dev.package.lab-geom] opt-level = 2. lab-geom/Cargo.toml: glam, thiserror (workspace). lab-file/Cargo.toml: lab-core, serde, serde_json, thiserror, flate2 (workspace); [dev-dependencies] tempfile = \"3\". lab-core += lab-geom. lab-viewport += lab-geom. lab-app += lab-geom, lab-file, serde_json. T0 must NOT create lab-app/src/lib.rs. Because a [lib] path without the file breaks the build, T0 adds the [lib] section (path = \"src/lib.rs\", name lab_app) commented out with a TODO(T6a) marker, and T6a is allowed to uncomment it (sole exception to ownership, a one-line change). windows-sys features become [\"Win32_Foundation\", \"Win32_Graphics_Dwm\", \"Win32_UI_Controls_Dialogs\", \"Win32_System_Com\"]. lab-geom/src/lib.rs and lab-file/src/lib.rs are stubs with only a //! doc comment.",
+  "acceptance": "The fixture exists, is valid JSON with schema_version 1, and was generated from M0 code (record the commit hash in the commit message). cargo build --workspace --offline succeeds. cargo build -v shows no 'Compiling bevy_' lines (no Bevy rebuild). Cargo.lock gains no new external packages (git diff Cargo.lock adds only lab-geom and lab-file). scripts/check-offline.ps1 passes with 419 + 2 runtime crates. All 22 M0 tests still pass."
+ },
+ {
+  "id": "T1",
+  "title": "lab-geom: polygons, fillets, distances, triangulation, extrusion, mitred walls",
+  "crate": "lab-geom",
+  "files": [
+   "crates/lab-geom/src/lib.rs",
+   "crates/lab-geom/src/polygon.rs",
+   "crates/lab-geom/src/fillet.rs",
+   "crates/lab-geom/src/distance.rs",
+   "crates/lab-geom/src/triangulate.rs",
+   "crates/lab-geom/src/mesh.rs",
+   "crates/lab-geom/src/walls.rs"
+  ],
+  "depends_on": [
+   "T0"
+  ],
+  "interfaces": "Exactly the public API in spec §2 (PolygonLimits, PolygonError, signed_area, bounds, orient, segments_intersect, validate_simple_polygon, interior_angle, outward_normal, FilletCorner, FlatPath, FilletError, flatten_fillets, point_in_polygon, distance_to_segment, distance_to_boundary, distance_to_region, horizontal_crossings, TriangulateError, triangulate, TriMesh, PlatformMeshes, extrude, flat_polygon, circle_points, OpeningSpec, WallGeometry, WallError, opening_limits, build_walls). First commit: all signatures with unimplemented!() bodies, so T2 can compile against them. Pure: glam + thiserror only.",
+  "acceptance": "cargo test -p lab-geom passes every test listed in spec §2.7, including 100 seeded star-shaped and 100 orthogonal triangulation fuzz cases (area sum, count, CCW), extrude is_closed, and the wall cases (4 closed bodies for a rectangle, L reflex sigma > 0, opening_limits jamb and t+jamb, OpeningsOverlap, no lintel strip when sill+height == H, 120-degree mitre without overlap). No unwrap on inputs. clippy clean."
+ },
+ {
+  "id": "T2",
+  "title": "lab-core v2 model: outlines, holes, room, validation, commands, history, presets, migration",
+  "crate": "lab-core",
+  "files": [
+   "crates/lab-core/src/lib.rs",
+   "crates/lab-core/src/limits.rs",
+   "crates/lab-core/src/units.rs",
+   "crates/lab-core/src/prefs.rs",
+   "crates/lab-core/src/model.rs",
+   "crates/lab-core/src/outline.rs",
+   "crates/lab-core/src/holes.rs",
+   "crates/lab-core/src/room.rs",
+   "crates/lab-core/src/validate.rs",
+   "crates/lab-core/src/command.rs",
+   "crates/lab-core/src/history.rs",
+   "crates/lab-core/src/selection.rs",
+   "crates/lab-core/src/presets.rs",
+   "crates/lab-core/src/migrate.rs",
+   "crates/lab-core/src/sample.rs",
+   "crates/lab-core/tests/migration.rs",
+   "crates/lab-core/tests/property.rs"
+  ],
+  "depends_on": [
+   "T0",
+   "T1"
+  ],
+  "interfaces": "Exactly spec §3: Document (next_free_id, content_eq, from_json -> (Document, LoadReport)), Platform (kind, surface, outline, legs, room_aabb, outline_path), Outline/RectCorner/OutlineCorner/OutlineError, Thread/HoleGrid/GridOrigin/ExclusionZone/ZoneShape/GridStandard/LatticeIndex/HoleRef/HoleSet/lattice_origin/candidate_range/compute_holes, Room/Opening/OpeningId/OpeningFix and the with_* helpers + refit_openings, PlatformError/GridError/RoomError, Command (incl. RemovePlatform cascade + RestorePlatform), PlatformAspects, ChangeSet (nodes_* renames, single_target, touches), CommandError, History (state ids, labels, execute_labeled, execute_coalescing, end_gesture, failure policy), SelectionTarget, LengthUnit + parse/format, WallDisplay, presets (PRESETS, platform_from_preset taking an explicit id, apply_preset, next_platform_name, default_document), migrate (v1_to_v2 with Auto-or-At origin rule), limits. Consumers: T3, T4b, T6a. lab-viewport and lab-app stop compiling when this merges (expected).",
+  "acceptance": "cargo test -p lab-core passes: all ported M0 tests with identical expected values (compare via content_eq where undo is involved), and the new tests H1-H8 (1716 / 1536 / 1716 / oracle / nearest (387.5,137.5) / limits / under 200 ms debug / label independence), O1, L1 (6 legs for 3000x1500, 4 for 2400x1200, 5 for an L), R1, C1, C2, P1 (64 seeds x 60 steps), S1, U1 (incl. 47.244 in round trip and 1' 6\"), M1-M5 against tests/fixtures/demo_v1.json (hole positions within 1e-9, labels identical, node positions unchanged), PR1. lab-core has no GPU/UI deps. clippy clean."
+ },
+ {
+  "id": "T3",
+  "title": "lab-file: zip container, atomic save, projects, autosave/recovery, settings, I/O worker",
+  "crate": "lab-file",
+  "files": [
+   "crates/lab-file/src/lib.rs",
+   "crates/lab-file/src/zip.rs",
+   "crates/lab-file/src/atomic.rs",
+   "crates/lab-file/src/project.rs",
+   "crates/lab-file/src/autosave.rs",
+   "crates/lab-file/src/settings.rs",
+   "crates/lab-file/src/worker.rs",
+   "crates/lab-file/tests/files.rs"
+  ],
+  "depends_on": [
+   "T0",
+   "T2"
+  ],
+  "interfaces": "Exactly spec §4: FileError/FileErrorKind; atomic_write; ProjectFormat, ProjectLocation (display_name), LoadedProject, SaveOptions, PROJECT_JSON, PROJECT_EXTENSION, encode_archive, decode_bytes, load_project, save_project (verify-by-decode, .vN.bak, folder rules); default_root, SessionInfo, AutosaveSession (start, dir, write, clear, end; NO Drop impl), RecoveryCandidate (load, discard, release, newer_format), find_recoverable; Settings {display_unit, wall_display, last_dir}, settings_path, load_settings, save_settings; IoJob, IoResult, IoWorker (start with on_result callback, submit, shutdown; catch_unwind per job). Deflate via flate2::write::DeflateEncoder / flate2::read::DeflateDecoder, CRC via flate2::Crc. Consumers: T6a (types), T6b (flows).",
+  "acceptance": "cargo test -p lab-file passes Z1-Z7, A1-A4, P1-P7, S1-S4 (S1 uses a real child process that exits without cleanup), W1, T1; Z8 is #[ignore] and is run once manually in T7. No new external crate in Cargo.lock (flate2 1.1.10 and tempfile 3.27.0 are already locked). Encoding is byte-deterministic. clippy clean."
+ },
+ {
+  "id": "T4a",
+  "title": "Hole shader spike: WESL ExtendedMaterial with presence mask",
+  "crate": "lab-viewport",
+  "files": [
+   "crates/lab-viewport/src/hole_material.rs",
+   "crates/lab-viewport/src/hole_grid.wesl"
+  ],
+  "depends_on": [
+   "T0"
+  ],
+  "interfaces": "Work in a scratch git worktree of the M0 commit (for example D:\\Try\\LabSetup-spike, outside the repo), wired into M0's scene.rs top surface with a hand-built quad mesh whose UV_0 is platform-local mm. Deliver only the two files into the repo, unwired (T4b adds 'mod hole_material;'). API exactly as in spec §5.5: MAX_ZONES, HOLE_GRID_SHADER (uuid_handle!), HoleGridParams (ShaderType; field order must match the WESL struct), HoleGridExt (#[uniform(100)], #[texture(101)] #[sampler(102)]), HoleTopMaterial, HoleGridPlugin (synchronous Assets<Shader>::insert + MaterialPlugin), HoleMask, build_mask(cols, rows, present), mask_image, GridGeometry, ZoneParam, hole_params, shade_cpu. No lab-core dependency inside these files. Tests live in a #[cfg(test)] module inside hole_material.rs.",
+  "acceptance": "In the spike worktree: the app shows crisp holes on the M0 table, with an L-shaped test mask and one circle zone (show_zones=1), at 0.05 m, 0.3 m, 1 m, 5 m and 40 m in both 3D and Top (PrintWindow screenshots attached to the commit message or docs). No visible shimmer while orbiting. A full-resolution frame takes no more than M0 +5% at 1440x900 (LABSETUP_TRACE). Idle is 0.00% CPU/GPU after spawning. The mask tests and the shade_cpu energy and no-pop tests from spec §5.9 pass in the worktree (cargo test -p lab-viewport). If the shader cannot be made to work, implement fallback (a) or (b) from risk R1 and report which was used and why."
+ },
+ {
+  "id": "T5",
+  "title": "lab-ui: types, fields, inspectors, overlays, AppWindow API, gallery",
+  "crate": "lab-ui",
+  "files": [
+   "crates/lab-ui/ui/theme.slint",
+   "crates/lab-ui/ui/types.slint",
+   "crates/lab-ui/ui/components.slint",
+   "crates/lab-ui/ui/fields.slint",
+   "crates/lab-ui/ui/inspector.slint",
+   "crates/lab-ui/ui/overlays.slint",
+   "crates/lab-ui/ui/app.slint",
+   "crates/lab-ui/examples/gallery.rs"
+  ],
+  "depends_on": [
+   "T0"
+  ],
+  "interfaces": "Exactly spec §6. Structs (SceneRow with kind, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview without px-per-unit, PreviewLabel, PresetRow) are defined in the leaf file ui/types.slint, imported by fields/inspector/overlays/app, and re-exported from app.slint with `export { ... } from \"types.slint\";` (never defined in app.slint: that causes 'Recursive import'; never export non-Window components from app.slint). The EditState and TableFocus globals live in fields.slint. NumberField / TextField contract: no binding of text, the no-op rule on Enter, blur via EditState.focus-viewport, committed(id, text) -> bool, edited, focused. CornerTable, ZoneList, DoorList, PreviewCard (every Path shares one stroke-width of 1.5px and the inset-aware label maths of §6.1, using a 150px - stroke square centred horizontally, not the card width), Sheet (own sheet-keys FocusScope focused on open, Return/Escape in key-pressed, focus back to the viewport on close), Toast, ProjectMenu, PresetMenu, PasteSheet (multi-line text area; Ctrl+Return applies and Escape cancels via a capture FocusScope; Enter inserts a newline). SegmentedControl is controlled: `in property <int> current`, the click only emits selected(i); M0 view-mode uses `current: root.view-mode; selected(i) => { root.view-mode = i; root.view-mode-requested(i); }`. Every AppWindow property and callback listed in §6.3 (choice properties are `in` and bound one-way; has-selection and frame-all() are removed; scene-row-clicked(int, int)), with the field, choice and action id strings of §6.3. Toolbar undo/redo tooltips use the built-in Tooltip with `text: @markdown(\"\\{root.undo-label}\")` (at most one Tooltip per element). The root 'shortcuts' FocusScope capture-key-pressed table and the focus-tick to keys.focus() wiring of §6.4; viewport keys check Shift+F (event.modifiers.shift) before plain F. No std-widgets inside the inspector (Flickable instead); ListView stays for the scene list.",
+  "acceptance": "cargo build -p lab-ui --offline has no warnings (no recursive imports, no 'Exported component ... doesn't inherit Window'). cargo run -p lab-ui --example gallery shows the six states (keys 1-6) at 1440x900 and 960x620 (screenshots). In the gallery: Enter on an unchanged field does not call field-committed; Ctrl+Z with a clean focused field calls action('edit.undo'); Ctrl+Z after typing in a field does text undo instead; Enter in a corner cell moves to the next row; Shift+F calls view.frame_selection and F calls view.frame_all; a choice that the mock refuses leaves the SegmentedControl thumb where it was, and setting the property from Rust afterwards still moves it; with a sheet open, Return/Escape reach the sheet even if a field had focus before it opened, and focus returns to the viewport on close; in PasteSheet Enter inserts a newline and Ctrl+Return applies (or, if capture ordering fails, the documented fallback); PreviewCard labels sit on their corners within 1 px at both window sizes; tooltips show the undo/redo labels."
+ },
+ {
+  "id": "T6-spike",
+  "title": "Win32 file dialog spike on a dialog thread",
+  "crate": "lab-app",
+  "files": [
+   "crates/lab-app/src/dialogs.rs"
+  ],
+  "depends_on": [
+   "T0"
+  ],
+  "interfaces": "Work in a scratch worktree of M0. Implement spec §7.6 dialogs.rs: DialogKind, DialogResult, show_file_dialog(owner: isize, kind, initial_dir, done) on a new thread with CoInitializeEx(COINIT_APARTMENTTHREADED), OPENFILENAMEW::default() with lStructSize, a 32,768-wide-char buffer, the exact filters and flags, CommDlgExtendedError, and the result returned through slint::invoke_from_event_loop; plus owner_hwnd(window) (same raw-window-handle pattern as M0's style_title_bar). Temporarily trigger it from an M0 toolbar button in the worktree only. The file is committed to the repo by T6b.",
+  "acceptance": "In the running M0 worktree app, with the viewport rendering and orbiting: Open, Save (archive) and Save (folder) dialogs open modal to the main window, Cancel returns Cancelled, a choice returns the path, and the UI stays responsive with no hang or RefCell panic after 20 open/cancel cycles. The behaviour of the owner window (disabled while the dialog is open) is documented. If cross-thread ownership misbehaves, switch to fallback R4 (UI thread via Timer::single_shot(0), no borrow alive) and document it."
+ },
+ {
+  "id": "T4b",
+  "title": "Viewport integration: sync, platforms with holes, picking, framing, settle frames",
+  "crate": "lab-viewport",
+  "files": [
+   "crates/lab-viewport/src/lib.rs",
+   "crates/lab-viewport/src/host.rs",
+   "crates/lab-viewport/src/scene.rs",
+   "crates/lab-viewport/src/sync.rs",
+   "crates/lab-viewport/src/mesh.rs",
+   "crates/lab-viewport/src/platform.rs",
+   "crates/lab-viewport/src/picking.rs",
+   "crates/lab-viewport/src/camera.rs",
+   "crates/lab-viewport/src/room.rs (stub only)"
+  ],
+  "depends_on": [
+   "T1",
+   "T2",
+   "T4a"
+  ],
+  "interfaces": "Spec §5.1-§5.8: ViewportRequest {Input, SetViewMode, Frame(FrameTarget), Select(Option<SelectionTarget>), LoadDocument, ApplyChanges{snapshot, changes}, SetWallDisplay, Resize, ReleaseTexture}; ViewportEvent {Ready, FrameReady, SelectionChanged(Option<SelectionTarget>), HoverChanged, SceneError}; FrameTarget; start() unchanged. Internal: normal_to_render/from_render, trimesh_to_bevy, SyncOp + plan_full + plan_changes, SceneIndex/PlatformEntities, PlatformRoot with ChildOf children (parts and nodes), spawn_platform_parts, PickId, HighlightLook with struct variants only (Standard { material: Handle<StandardMaterial>, base_color: Color, owner: SelectionTarget }, HoleTop { material: Handle<HoleTopMaterial>, owner: SelectionTarget }; the top is constructed as HoleTop { material, owner: SelectionTarget::Platform(id) }), SettleFrames, OrbitCamera focus()/eye() (current-frame eye in render space)/mode(), pub(crate) animate_camera, frame_box. Wires hole_material (mod + HoleGridPlugin registration). Creates room.rs as a stub with the exact §5.6 signatures (RoomPlugin, WallFade, WallInfo, WallState { alpha, target, material: AssetId<StandardMaterial> } deriving Clone + Copy, spawn_room floor-only, wall_occludes returning false). Retires hole_tile_image and its test.",
+  "acceptance": "cargo test -p lab-viewport passes: the kept M0 tests, the mask/energy tests from T4a, mesh-conversion winding, the seeded plan_changes vs plan_full fake-world test (64 seeds x 40 steps), and hole_params. Manual check in the app (with a temporary main from T6c, or after T6c): the demo table renders identically to M0 (same hole positions), an L and a custom polygon platform render with correct holes in 3D and Top, platforms are pickable and highlighted (zones shown while selected), and FrameReady stops within 3 frames after an ApplyChanges. Idle 0.00%."
+ },
+ {
+  "id": "T4c",
+  "title": "Room: mitred walls with openings, footprints, occlusion fade",
+  "crate": "lab-viewport",
+  "files": [
+   "crates/lab-viewport/src/room.rs"
+  ],
+  "depends_on": [
+   "T4b"
+  ],
+  "interfaces": "Replaces the T4b stub with the full spec §5.6: spawn_room (floor; wall bodies with PickId(SelectionTarget::Room), WallInfo, WallState { alpha: 1.0, target: 1.0, material: handle.id() } and HighlightLook::Standard { material, base_color, owner: SelectionTarget::Room }; footprints at z = 1 mm), wall_occludes (eye past the outer face with 50 mm hysteresis, OR a segment from the eye to the orbit focus or any platform top centre crossing the wall plan quad below its height; Cyrus-Beck), update_wall_fade (runs in Update .after(crate::camera::animate_camera); eye = from_render(OrbitCamera::eye()) or from_render(camera Transform.translation), never GlobalTransform, which is a frame stale in Update; WallDisplay Auto/Always/Hidden, no fading in Top view, opaque at rest, Blend only between 0 and 1, Hidden at 0, keep_alive while unsettled, no animation on the first run after a spawn). Signatures must not change from the T4b stub.",
+  "acceptance": "cargo test -p lab-viewport passes the wall_occludes tests, including the judges' L-room counterexample (6000x5000 room with a 2000x1667 notch, eye (8000,-2000,3000), target (500,2000,800): the reflex wall occludes). Manual: orbit outside a rectangular room and an L room; walls between the camera and the tables fade in about 250 ms and the app then idles (FrameReady stops within 300 ms); after a fast orbit drag that ends with a wall newly in front, that wall still ends faded (no stale-eye miss); doors and windows are real openings; the Top view keeps walls; the first-fade hitch is measured and recorded."
+ },
+ {
+  "id": "T6a",
+  "title": "lab-app library: Session, edit pipeline, view models",
+  "crate": "lab-app",
+  "files": [
+   "crates/lab-app/src/lib.rs",
+   "crates/lab-app/src/session.rs",
+   "crates/lab-app/src/edit.rs",
+   "crates/lab-app/src/views.rs",
+   "crates/lab-app/Cargo.toml (only uncommenting the [lib] section left by T0)"
+  ],
+  "depends_on": [
+   "T2",
+   "T3"
+  ],
+  "interfaces": "Spec §7.2-§7.4: Session (new_clean, from_loaded, from_recovered, is_dirty, needs_autosave, execute(cmd, label), undo, redo, mark_saved, title, fix_selection); edit.rs (EditContext, EditOutcome {Nothing, Command{command,label,select,fixes}, Preference, OpenPaste}, PreferenceChange, EditError, field_value, field_edit, choice_edit, action_edit, preview_edit, PreviewTarget, parse_pasted_corners, label_for) implementing the no-op rule, pinning, refit fixes, kind switches, grid choices and additions/deletions; views.rs (*Data structs mirroring the Slint structs field-for-field, with OutlinePreviewData having no px-per-unit field; scene_rows, platform_view, room_view, node_view, outline_preview, corner_labels, wall_labels, wall_choice_label, preset_rows, window_title, project_detail, outside_warning, invalid_row). No Slint types in this library.",
+  "acceptance": "cargo test -p lab-app --lib passes E1-E11 (notably: in inches, re-committing '47.244' on a 1200 mm width returns Nothing; pinning keeps every node's hole position), V1-V5, F1, F2. The library compiles without the binary (main.rs may still be broken). clippy clean."
+ },
+ {
+  "id": "T6c",
+  "title": "App shell: AppState, bridge, persistent UI models, controller",
+  "crate": "lab-app",
+  "files": [
+   "crates/lab-app/src/main.rs",
+   "crates/lab-app/src/app_state.rs",
+   "crates/lab-app/src/bridge.rs",
+   "crates/lab-app/src/ui_models.rs",
+   "crates/lab-app/src/controller.rs",
+   "crates/lab-app/src/files.rs (stub)",
+   "crates/lab-app/src/dialogs.rs (stub)"
+  ],
+  "depends_on": [
+   "T4b",
+   "T5",
+   "T6a"
+  ],
+  "interfaces": "Spec §7.1, §7.5, §7.7: AppState, Timers, PendingSave, PendingAction, AfterSave, SheetKind; bridge.rs (M0 wake_ui, listen_to_viewport, show_newest_frame, input forwarding moved unchanged); UiModels holding one Rc<VecModel> per list property (scene, inspector, platform-outline-fields, platform-corners, platform-preview-labels, platform-placement, platform-grid-fields, platform-zones, platform-support-fields, presets, room-fields, room-corners, room-preview-labels, room-doors, room-walls, sheet-buttons, library), updated in place with set_row_data/push/remove; controller.rs public surface: connect, refresh_all, replace_document, show_toast, show_sheet; the edit, undo/redo and selection flows and the borrow rule. M0 wiring changes: ui.set_has_selection is replaced by ui.set_selection_kind; ui.on_frame_all is removed (Frame all arrives as action('view.frame_all') -> Frame(FrameTarget::All); 'view.frame_selection' -> Frame(FrameTarget::Selection)); on_scene_row_clicked takes (kind, id). Choice properties are refreshed synchronously inside choice-selected, including on refusal. Stubs with the exact §7.6 signatures for files.rs (handle_file_action shows a toast 'Not available yet', arm_autosave no-op, on_close_requested returns HideWindow, startup no-op, initial_session returns the demo document) and dialogs.rs.",
+  "acceptance": "cargo build --workspace --offline succeeds; cargo test --workspace passes except file flows (still stubs). Manual: every platform and room field, choice and action works with undo/redo (labels shown in tooltips, toast, undo selects the changed object, and undo of a choice moves the SegmentedControl thumb back); Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y work right after Enter in a field; F frames all and Shift+F frames the selection; focus survives Tab and Enter through the corner table; mm/in toggle re-formats fields without marking the project edited; the title shows 'Edited' only when dirty and clears on undo back; the inspector-error banner shows validation messages; idle 0.00% after edits."
+ },
+ {
+  "id": "T6b",
+  "title": "Files, dialogs, autosave and crash recovery flows",
+  "crate": "lab-app",
+  "files": [
+   "crates/lab-app/src/files.rs",
+   "crates/lab-app/src/dialogs.rs"
+  ],
+  "depends_on": [
+   "T3",
+   "T6c",
+   "T6-spike"
+  ],
+  "interfaces": "Replaces the T6c stubs, keeping their signatures (spec §7.6): handle_file_action (deferred with slint::Timer::single_shot(Duration::ZERO)), handle_sheet_button, handle_io_result, arm_autosave (single-shot 60 s, only when needs_autosave), on_close_requested (KeepWindowShown when dirty or a save is in flight), startup (one recovery sheet per candidate with Restore/Discard/Later; newer format: Later only), initial_session. dialogs.rs is the T6-spike file. Uses lab_file::{IoWorker, IoJob, IoResult, AutosaveSession, find_recoverable, load_project, save_project, SaveOptions, ProjectLocation, Settings, save_settings}. Quit sequence: EndSession, io.shutdown(10 s), save_settings, drop the viewport sender, quit_event_loop.",
+  "acceptance": "cargo test --workspace --offline is green and scripts/check-offline.ps1 passes. Manual: New/Open/Open Demo/Save/Save As/Save as Folder (the typed name becomes the folder) with dialogs; 'Save changes?' on New, Open and close (Return triggers Save and Escape triggers Cancel even if a field had focus); save errors (read-only file) show a sheet and keep the document dirty; open errors leave the document untouched; a migrated file shows the note and a one-time .v1.bak is written on first save; after more than 60 s of unsaved edits, killing the process in Task Manager and restarting offers Restore, which recovers the edits; a deliberately panicking debug build (temporary, not committed) also leaves a recoverable autosave; no timer runs while clean (idle 0.00%)."
+ },
+ {
+  "id": "T7",
+  "title": "Verification, measurements and documentation",
+  "crate": "docs",
+  "files": [
+   "docs/DESIGN.md",
+   "README.md",
+   "scripts/*"
+  ],
+  "depends_on": [
+   "T0",
+   "T1",
+   "T2",
+   "T3",
+   "T4a",
+   "T4b",
+   "T4c",
+   "T5",
+   "T6-spike",
+   "T6a",
+   "T6c",
+   "T6b"
+  ],
+  "interfaces": "No code interfaces. Updates DESIGN.md §4.2 (v2 model, display units as a user preference), §4.5 (container: zip with project.json, data descriptors read, Save as Folder), §11 (M1 done) and adds §14 'M1 results'. Updates README controls (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, Ctrl+N/O/S, Ctrl+Shift+S, F / Shift+F, Delete, Ctrl+Enter in the paste sheet).",
+  "acceptance": "Every exit criterion in spec §9 is verified and recorded: test counts per crate; screenshots of the custom polygon and L tables at 5 zoom levels in 3D and Top; idle 0.00% CPU/GPU after startup, edit, undo, wall fade and save, and with autosave armed (M0 PostMessage/PrintWindow method); a full-resolution frame time compared with M0; the first-fade hitch; Z8 zip interop run once; offline check crate count; the end-to-end script passes; Thorlabs preset part-number hints verified against thorlabs.com, with unconfirmed hints blanked in presets.rs through a request to the T2 owner (or a follow-up commit noted in §14)."
+ }
+]
