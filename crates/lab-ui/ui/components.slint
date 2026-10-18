@@ -91,54 +91,195 @@ export component ListRow inherits Rectangle {
 }
 
 // Two or more mutually exclusive options with a sliding thumb.
+// Controlled component (D22): `current` is driven by the owner and a click only emits
+// `selected(i)`. The control never assigns `current` itself, so a refused choice leaves
+// the thumb where it was and later updates from Rust always move it. `current < 0`
+// hides the thumb.
 export component SegmentedControl inherits Rectangle {
     in property <[string]> items;
-    in-out property <int> current;
+    // Optional second line per segment (smaller, tertiary text).
+    in property <[string]> details;
+    in property <int> current;
+    // Preferred segment width; in a stretching layout the segments share the width instead.
     in property <length> segment-width: 64px;
+    // Smaller height and type, for compact pickers such as [mm | in].
+    in property <bool> compact;
+    // Panel background and drop shadow, for controls that float over the viewport.
+    in property <bool> floating: true;
+    in property <bool> enabled: true;
+    in property <string> item-font-family: Theme.font;
     callback selected(int);
 
-    width: items.length * segment-width + 4px;
-    height: 30px;
-    border-radius: 9px;
-    background: Theme.panel-bg;
-    border-width: 1px;
+    property <length> seg: (self.width - 4px) / max(1, root.items.length);
+    property <bool> has-details: root.details.length > 0;
+
+    preferred-width: root.items.length * root.segment-width + 4px;
+    min-width: root.items.length * 24px + 4px;
+    height: root.compact ? 24px : root.has-details ? 40px : 30px;
+    border-radius: root.compact ? 7px : 9px;
+    background: root.floating ? Theme.panel-bg : Theme.control-bg;
+    border-width: root.floating ? 1px : 0px;
     border-color: Theme.panel-border;
-    drop-shadow-blur: 18px;
-    drop-shadow-offset-y: 6px;
+    drop-shadow-blur: root.floating ? 18px : 0px;
+    drop-shadow-offset-y: root.floating ? 6px : 0px;
     drop-shadow-color: Theme.shadow;
+    opacity: root.enabled ? 1 : 0.5;
 
     Rectangle {
-        x: 2px + root.current * root.segment-width;
+        visible: root.current >= 0 && root.current < root.items.length;
+        x: 2px + max(0, root.current) * root.seg;
         y: 2px;
-        width: root.segment-width;
+        width: root.seg;
         height: parent.height - 4px;
-        border-radius: 7px;
+        border-radius: root.compact ? 5px : 7px;
         background: Theme.control-thumb;
+        drop-shadow-blur: root.floating ? 0px : 4px;
+        drop-shadow-offset-y: root.floating ? 0px : 1px;
+        drop-shadow-color: #00000059;
         animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
     }
 
     for item[i] in root.items: Rectangle {
-        x: 2px + i * root.segment-width;
+        x: 2px + i * root.seg;
         y: 2px;
-        width: root.segment-width;
+        width: root.seg;
         height: parent.height - 4px;
-        Text {
-            text: item;
-            color: i == root.current ? Theme.text : Theme.text-secondary;
-            font-size: 12px;
-            font-weight: 600;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            animate color { duration: Theme.quick; }
+        VerticalLayout {
+            alignment: center;
+            spacing: 0px;
+            Text {
+                text: item;
+                color: i == root.current ? Theme.text : Theme.text-secondary;
+                font-family: root.item-font-family;
+                font-size: root.compact ? 11px : 12px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                overflow: elide;
+                animate color { duration: Theme.quick; }
+            }
+            if root.has-details && root.details[i] != "": Text {
+                text: root.details[i];
+                color: Theme.text-tertiary;
+                font-size: 10px;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
         }
         TouchArea {
+            enabled: root.enabled;
             clicked => {
+                // Controlled: never assign root.current here (D22).
                 if (root.current != i) {
-                    root.current = i;
                     root.selected(i);
                 }
             }
         }
+    }
+}
+
+// A rounded text button for inspector and sheet actions.
+export component PillButton inherits Rectangle {
+    in property <string> label;
+    // Small trailing hint, such as a keyboard shortcut.
+    in property <string> hint;
+    in property <bool> primary;
+    in property <bool> destructive;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 28px;
+    preferred-width: row.preferred-width;
+    min-width: row.min-width;
+    border-radius: 14px;
+    background: !root.enabled ? Theme.control-bg
+        : root.primary ? (root.destructive ? Theme.danger : Theme.accent).brighter(touch.has-hover ? 0.12 : 0)
+        : root.destructive && touch.has-hover ? Theme.danger-soft
+        : touch.has-hover ? Theme.control-hover.brighter(0.4) : Theme.control-bg.brighter(0.2);
+    border-width: root.primary ? 0px : 1px;
+    border-color: root.destructive ? Theme.danger.with-alpha(0.35) : Theme.field-border;
+    opacity: root.enabled ? 1 : 0.45;
+    animate background { duration: Theme.quick; }
+
+    row := HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        alignment: center;
+        Text {
+            text: root.label;
+            color: root.primary ? white : root.destructive ? Theme.danger : Theme.text;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            color: root.primary ? #FFFFFFB3 : Theme.text-tertiary;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A round button holding a single glyph (undo, redo, add, close).
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <bool> enabled: true;
+    in property <bool> active;
+    in property <bool> destructive;
+    in property <length> size: 30px;
+    in property <length> icon-size: 15px;
+    out property <bool> hovered: touch.has-hover;
+    callback clicked();
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: root.active ? Theme.accent-soft
+        : touch.has-hover && root.enabled ? (root.destructive ? Theme.danger-soft : Theme.control-hover.brighter(0.4))
+        : transparent;
+    animate background { duration: Theme.quick; }
+
+    Text {
+        text: root.icon;
+        color: !root.enabled ? Theme.text-tertiary.with-alpha(0.6)
+            : root.destructive && touch.has-hover ? Theme.danger
+            : root.active ? Theme.accent : Theme.text;
+        font-family: Theme.font-symbol;
+        font-size: root.icon-size;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// An indeterminate progress ring. It only animates while it exists, so put it behind an `if`.
+export component Spinner inherits Rectangle {
+    in property <color> tint: Theme.accent;
+    width: 12px;
+    height: 12px;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 12 2 A 10 10 0 1 1 2 12";
+        stroke: root.tint;
+        stroke-width: 2px;
+        fill: transparent;
+        transform-rotation: (animation-tick() / 1ms) * 0.36deg;
     }
 }
 

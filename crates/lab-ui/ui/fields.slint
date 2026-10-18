@@ -1,0 +1,779 @@
+// Editable fields and row editors for the inspector (spec §6.1).
+//
+// Field contract (D17): a field never binds `TextInput.text` to its value. It copies the
+// value in explicitly, so a refresh from Rust never clobbers what the user is typing.
+// Enter on unchanged text is a no-op that only moves focus to the viewport; a successful
+// commit also moves focus away, so the next Ctrl+Z undoes the document.
+
+import { Theme } from "theme.slint";
+import { CornerRow, ZoneRow, DoorRow, WallChoice } from "types.slint";
+import { IconButton, PillButton } from "components.slint";
+
+export global EditState {
+    // A focused field holds text that differs from its value. While true, Ctrl+Z / Ctrl+Y
+    // go to the TextInput (text undo) instead of the document.
+    in-out property <bool> field-dirty;
+    // Some text field has keyboard focus (Delete and Backspace then edit text).
+    in-out property <bool> text-focused;
+    // Incremented to ask AppWindow to move keyboard focus to the viewport.
+    in-out property <int> focus-viewport;
+    // Id of the field that has focus, "" when none. Focus-gained and focus-lost handlers run
+    // in no particular order; a field only clears the state above if it still owns this id.
+    in-out property <string> focused-id;
+}
+
+// Programmatic focus: set `request` to a field id and that field takes focus (then the
+// request is cleared). Corner tables use it to move to the next row on Enter.
+export global TableFocus {
+    in-out property <string> request;
+}
+
+export component NumberField inherits Rectangle {
+    // Field id (spec §6.3).
+    in property <string> id;
+    // Formatted document value.
+    in property <string> value;
+    // "mm", "in", "°" or "".
+    in property <string> unit;
+    in property <bool> enabled: true;
+    in property <bool> invalid;
+    in property <length> field-width: 96px;
+    // Fill the width the parent layout offers instead of using field-width.
+    in property <bool> stretch;
+    // Where a successful Enter sends focus: "" = the viewport, otherwise a field id.
+    in property <string> next-id;
+    in property <bool> align-left;
+    in property <length> font-size: Theme.font-body;
+    in property <int> font-weight: 400;
+    // Borderless until focused (used for titles).
+    in property <bool> plain;
+    in property <string> placeholder;
+    out property <bool> has-focus: input.has-focus;
+
+    // Returns true when the text was accepted (or was a no-op).
+    callback committed(string /* id */, string /* text */) -> bool;
+    // Live edits; only corner and zone cells use them.
+    callback edited(string /* id */, string /* text */);
+    callback focused(string /* id */);
+    callback blurred(string /* id */);
+
+    property <string> last-synced;
+    property <bool> local-invalid;
+    property <bool> wanted: TableFocus.request != "" && TableFocus.request == root.id;
+
+    min-width: root.stretch ? 40px : root.field-width;
+    preferred-width: root.field-width;
+    max-width: root.stretch ? 10000px : root.field-width;
+    horizontal-stretch: root.stretch ? 1 : 0;
+    height: max(26px, root.font-size + 13px);
+    border-radius: Theme.radius-field;
+    background: root.plain && !input.has-focus ? transparent : Theme.field-bg;
+    border-width: 1px;
+    border-color: root.invalid || root.local-invalid ? Theme.danger
+        : input.has-focus ? Theme.accent
+        : root.plain ? transparent : Theme.field-border;
+    clip: true;
+    animate border-color { duration: Theme.quick; }
+
+    function update-dirty() {
+        if (input.has-focus) {
+            EditState.field-dirty = input.text != root.value;
+        }
+    }
+
+    // After Enter: to the next cell when there is one, otherwise to the viewport.
+    function leave() {
+        if (root.next-id != "") {
+            TableFocus.request = root.next-id;
+        } else {
+            EditState.focus-viewport += 1;
+        }
+    }
+
+    init => {
+        input.text = root.value;
+        root.last-synced = root.value;
+        if (root.wanted) {
+            TableFocus.request = "";
+            input.focus();
+        }
+    }
+
+    changed value => {
+        if (!input.has-focus || input.text == root.last-synced) {
+            input.text = root.value;
+        }
+        root.last-synced = root.value;
+        root.update-dirty();
+    }
+
+    changed wanted => {
+        if (root.wanted) {
+            TableFocus.request = "";
+            input.focus();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 4px;
+
+        Rectangle {
+            horizontal-stretch: 1;
+            min-width: 1px;
+
+            if root.placeholder != "" && input.text == "" && !input.has-focus: Text {
+                text: root.placeholder;
+                color: Theme.text-tertiary;
+                font-size: root.font-size;
+                horizontal-alignment: root.align-left ? TextHorizontalAlignment.left : TextHorizontalAlignment.right;
+                vertical-alignment: center;
+            }
+
+            input := TextInput {
+                width: 100%;
+                height: 100%;
+                enabled: root.enabled;
+                single-line: true;
+                color: root.enabled ? Theme.text : Theme.text-tertiary;
+                font-size: root.font-size;
+                font-weight: root.font-weight;
+                horizontal-alignment: root.align-left ? TextHorizontalAlignment.left : TextHorizontalAlignment.right;
+                vertical-alignment: center;
+                selection-background-color: Theme.accent.with-alpha(0.45);
+                selection-foreground-color: Theme.text;
+
+                accepted => {
+                    if (self.text == root.value) {
+                        // No-op rule (D17): nothing to commit.
+                        root.local-invalid = false;
+                        root.leave();
+                    } else if (root.committed(root.id, self.text)) {
+                        self.text = root.value;
+                        root.local-invalid = false;
+                        root.update-dirty();
+                        root.leave();
+                    } else {
+                        // Rejected: keep the text and the focus so it can be corrected.
+                        root.local-invalid = true;
+                        self.select-all();
+                        root.update-dirty();
+                    }
+                }
+
+                edited => {
+                    root.local-invalid = false;
+                    root.update-dirty();
+                    root.edited(root.id, self.text);
+                }
+
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        self.text = root.value;
+                        root.local-invalid = false;
+                        root.update-dirty();
+                        EditState.focus-viewport += 1;
+                        return accept;
+                    }
+                    reject
+                }
+
+                changed has-focus => {
+                    if (self.has-focus) {
+                        EditState.focused-id = root.id;
+                        EditState.text-focused = true;
+                        self.select-all();
+                        root.update-dirty();
+                        root.focused(root.id);
+                    } else {
+                        if (self.text != root.value && !root.committed(root.id, self.text)) {
+                            self.text = root.value;
+                        }
+                        root.local-invalid = false;
+                        if (EditState.focused-id == root.id) {
+                            EditState.focused-id = "";
+                            EditState.text-focused = false;
+                            EditState.field-dirty = false;
+                        }
+                        root.blurred(root.id);
+                    }
+                }
+            }
+        }
+
+        if root.unit != "": Text {
+            text: root.unit;
+            color: Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Same contract as NumberField, left-aligned and without a unit (names).
+export component TextField inherits NumberField {
+    align-left: true;
+    field-width: 160px;
+}
+
+// A label on the left and a NumberField on the right.
+export component LabeledField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> id;
+    in property <string> value;
+    in property <string> unit;
+    in property <bool> enabled: true;
+    in property <bool> invalid;
+    in property <length> field-width: 112px;
+    callback committed(string /* id */, string /* text */) -> bool;
+    callback edited(string /* id */, string /* text */);
+    callback focused(string /* id */);
+
+    height: 30px;
+    spacing: 8px;
+
+    Text {
+        text: root.label;
+        color: root.enabled ? Theme.text-secondary : Theme.text-tertiary;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+        overflow: elide;
+        horizontal-stretch: 1;
+    }
+    VerticalLayout {
+        alignment: center;
+        NumberField {
+            id: root.id;
+            value: root.value;
+            unit: root.unit;
+            enabled: root.enabled;
+            invalid: root.invalid;
+            field-width: root.field-width;
+            committed(i, t) => { return root.committed(i, t); }
+            edited(i, t) => { root.edited(i, t); }
+            focused(i) => { root.focused(i); }
+        }
+    }
+}
+
+// A small caption in front of a compact cell ("X", "W", "Sill").
+component CellLabel inherits Text {
+    color: Theme.text-tertiary;
+    font-size: Theme.font-caption;
+    vertical-alignment: center;
+    horizontal-alignment: right;
+}
+
+// The corner editor of custom platform outlines and room outlines.
+export component CornerTable inherits VerticalLayout {
+    in property <[CornerRow]> rows;
+    in property <bool> show-radius;
+    // "platform" or "room": the id prefix.
+    in property <string> prefix;
+    // Unit shown in the header ("mm" / "in").
+    in property <string> unit;
+    in-out property <int> focused-corner: -1;
+    in property <int> invalid-row: -1;
+    callback committed(string /* id */, string /* text */) -> bool;
+    callback edited(string /* id */, string /* text */);
+    callback action(string /* id */);
+
+    // The cell that most recently gained focus; a blur only clears focused-corner if it
+    // comes from that cell (focus handlers run in no particular order).
+    property <string> last-focus-id;
+    property <length> xw: root.show-radius ? 76px : 88px;
+    property <length> rw: 48px;
+    property <length> actions-width: 34px;
+
+    spacing: 2px;
+
+    HorizontalLayout {
+        height: 18px;
+        spacing: 4px;
+        alignment: start;
+        Text {
+            width: 18px;
+            text: "#";
+            color: Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Text {
+            width: root.xw;
+            text: root.unit != "" ? "X (" + root.unit + ")" : "X";
+            color: Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        Text {
+            width: root.xw;
+            text: root.unit != "" ? "Y (" + root.unit + ")" : "Y";
+            color: Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        if root.show-radius: Text {
+            width: root.rw;
+            text: "R";
+            color: Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    for row[i] in root.rows: Rectangle {
+        property <bool> row-focused: row.index == root.focused-corner;
+        property <bool> row-invalid: row.invalid || row.index == root.invalid-row;
+        property <bool> show-actions: hover.has-hover || insert-button.hovered || delete-button.hovered || self.row-focused;
+        height: 28px;
+        border-radius: 6px;
+        background: self.row-invalid ? Theme.danger-soft : transparent;
+
+        hover := TouchArea { }
+
+        HorizontalLayout {
+            spacing: 4px;
+            alignment: start;
+
+            VerticalLayout {
+                alignment: center;
+                width: 18px;
+                Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: row-focused ? Theme.accent : row-invalid ? Theme.danger : Theme.control-bg.brighter(0.5);
+                    animate background { duration: Theme.quick; }
+                    Text {
+                        text: row.index + 1;
+                        color: row-focused || row-invalid ? white : Theme.text-secondary;
+                        font-size: 10px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                NumberField {
+                    id: root.prefix + ".corner." + row.index + ".x";
+                    value: row.x;
+                    invalid: row-invalid;
+                    field-width: root.xw;
+                    next-id: i + 1 < root.rows.length ? root.prefix + ".corner." + (row.index + 1) + ".x" : "";
+                    committed(id, text) => { return root.committed(id, text); }
+                    edited(id, text) => { root.edited(id, text); }
+                    focused(id) => { root.focused-corner = row.index; root.last-focus-id = id; }
+                    blurred(id) => {
+                        if (root.last-focus-id == id) {
+                            root.focused-corner = -1;
+                            root.last-focus-id = "";
+                        }
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                NumberField {
+                    id: root.prefix + ".corner." + row.index + ".y";
+                    value: row.y;
+                    invalid: row-invalid;
+                    field-width: root.xw;
+                    next-id: i + 1 < root.rows.length ? root.prefix + ".corner." + (row.index + 1) + ".y" : "";
+                    committed(id, text) => { return root.committed(id, text); }
+                    edited(id, text) => { root.edited(id, text); }
+                    focused(id) => { root.focused-corner = row.index; root.last-focus-id = id; }
+                    blurred(id) => {
+                        if (root.last-focus-id == id) {
+                            root.focused-corner = -1;
+                            root.last-focus-id = "";
+                        }
+                    }
+                }
+            }
+            if root.show-radius: VerticalLayout {
+                alignment: center;
+                NumberField {
+                    id: root.prefix + ".corner." + row.index + ".r";
+                    value: row.r;
+                    field-width: root.rw;
+                    next-id: i + 1 < root.rows.length ? root.prefix + ".corner." + (row.index + 1) + ".r" : "";
+                    committed(id, text) => { return root.committed(id, text); }
+                    edited(id, text) => { root.edited(id, text); }
+                    focused(id) => { root.focused-corner = row.index; root.last-focus-id = id; }
+                    blurred(id) => {
+                        if (root.last-focus-id == id) {
+                            root.focused-corner = -1;
+                            root.last-focus-id = "";
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                width: root.actions-width;
+                spacing: 2px;
+                alignment: end;
+                VerticalLayout {
+                    alignment: center;
+                    insert-button := IconButton {
+                        icon: "+";
+                        size: 16px;
+                        icon-size: 13px;
+                        opacity: show-actions ? 1 : 0;
+                        animate opacity { duration: Theme.quick; }
+                        clicked => { root.action(root.prefix + ".corner." + row.index + ".insert"); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    delete-button := IconButton {
+                        icon: "−";
+                        size: 16px;
+                        icon-size: 13px;
+                        destructive: true;
+                        enabled: root.rows.length > 3;
+                        opacity: show-actions ? 1 : 0;
+                        animate opacity { duration: Theme.quick; }
+                        clicked => { root.action(root.prefix + ".corner." + row.index + ".delete"); }
+                    }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-top: 6px;
+        spacing: 8px;
+        alignment: start;
+        PillButton {
+            label: "+ Add corner";
+            clicked => { root.action(root.prefix + ".corner.append"); }
+        }
+        PillButton {
+            label: "Paste…";
+            clicked => { root.action(root.prefix + ".corners.paste"); }
+        }
+    }
+}
+
+// A compact labelled cell used by zone and door rows.
+component Cell inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> id;
+    in property <string> value;
+    in property <string> unit;
+    callback committed(string /* id */, string /* text */) -> bool;
+    callback edited(string /* id */, string /* text */);
+
+    spacing: 4px;
+    horizontal-stretch: 1;
+    CellLabel {
+        text: root.label;
+        width: 34px;
+    }
+    NumberField {
+        id: root.id;
+        value: root.value;
+        unit: root.unit;
+        stretch: true;
+        field-width: 80px;
+        committed(i, t) => { return root.committed(i, t); }
+        edited(i, t) => { root.edited(i, t); }
+    }
+}
+
+// A card holding one zone or door.
+component RowCard inherits Rectangle {
+    border-radius: 8px;
+    background: #FFFFFF06;
+    border-width: 1px;
+    border-color: Theme.hairline;
+}
+
+// Exclusion zones of a platform. Field ids platform.zone.{k}.name|x|y|w|h|r.
+export component ZoneList inherits VerticalLayout {
+    in property <[ZoneRow]> rows;
+    in property <string> unit;
+    callback committed(string /* id */, string /* text */) -> bool;
+    callback edited(string /* id */, string /* text */);
+    callback action(string /* id */);
+
+    spacing: 6px;
+
+    for zone in root.rows: RowCard {
+        VerticalLayout {
+            padding: 8px;
+            spacing: 4px;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: zone.kind == 0 ? "▭" : "◯";
+                    color: Theme.accent;
+                    font-family: Theme.font-symbol;
+                    font-size: 13px;
+                    width: 14px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                TextField {
+                    id: "platform.zone." + zone.index + ".name";
+                    value: zone.name;
+                    stretch: true;
+                    placeholder: "Zone " + (zone.index + 1);
+                    committed(i, t) => { return root.committed(i, t); }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: "✕";
+                        size: 22px;
+                        icon-size: 11px;
+                        destructive: true;
+                        clicked => { root.action("platform.zone." + zone.index + ".delete"); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Cell {
+                    label: "X";
+                    id: "platform.zone." + zone.index + ".x";
+                    value: zone.x;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+                Cell {
+                    label: "Y";
+                    id: "platform.zone." + zone.index + ".y";
+                    value: zone.y;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+            }
+            if zone.kind == 0: HorizontalLayout {
+                spacing: 8px;
+                Cell {
+                    label: "W";
+                    id: "platform.zone." + zone.index + ".w";
+                    value: zone.w;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+                Cell {
+                    label: "H";
+                    id: "platform.zone." + zone.index + ".h";
+                    value: zone.h;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+            }
+            if zone.kind == 1: HorizontalLayout {
+                spacing: 8px;
+                Cell {
+                    label: "R";
+                    id: "platform.zone." + zone.index + ".r";
+                    value: zone.r;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+    }
+
+    if root.rows.length == 0: Text {
+        text: "No exclusion zones";
+        color: Theme.text-tertiary;
+        font-size: Theme.font-caption;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        PillButton {
+            label: "+ Rectangle";
+            clicked => { root.action("platform.zone.add_rect"); }
+        }
+        PillButton {
+            label: "+ Circle";
+            clicked => { root.action("platform.zone.add_circle"); }
+        }
+    }
+}
+
+// Doors and windows of the room. Field ids room.door.{id}.name|offset|width|height|sill;
+// the wall dropdown emits choice room.door.{id}.wall (controlled: it shows `wall-label`).
+export component DoorList inherits VerticalLayout {
+    in property <[DoorRow]> rows;
+    in property <[WallChoice]> walls;
+    in property <string> unit;
+    callback committed(string /* id */, string /* text */) -> bool;
+    callback edited(string /* id */, string /* text */);
+    callback choice(string /* id */, int /* index */);
+    callback action(string /* id */);
+
+    spacing: 6px;
+
+    for door in root.rows: RowCard {
+        VerticalLayout {
+            padding: 8px;
+            spacing: 4px;
+            HorizontalLayout {
+                spacing: 6px;
+                TextField {
+                    id: "room.door." + door.id + ".name";
+                    value: door.name;
+                    stretch: true;
+                    committed(i, t) => { return root.committed(i, t); }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: "✕";
+                        size: 22px;
+                        icon-size: 11px;
+                        destructive: true;
+                        clicked => { root.action("room.door." + door.id + ".delete"); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                CellLabel {
+                    text: "Wall";
+                    width: 34px;
+                }
+                wall-button := Rectangle {
+                    height: 26px;
+                    horizontal-stretch: 1;
+                    border-radius: Theme.radius-field;
+                    background: wall-touch.has-hover ? Theme.control-hover : Theme.field-bg;
+                    border-width: 1px;
+                    border-color: Theme.field-border;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 4px;
+                        Text {
+                            text: door.wall-label;
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: "▾";
+                            color: Theme.text-tertiary;
+                            font-family: Theme.font-symbol;
+                            font-size: Theme.font-caption;
+                            vertical-alignment: center;
+                        }
+                    }
+                    wall-touch := TouchArea {
+                        clicked => { wall-popup.show(); }
+                    }
+                    wall-popup := PopupWindow {
+                        x: 0;
+                        y: parent.height + 2px;
+                        width: parent.width;
+                        Rectangle {
+                            background: #232428;
+                            border-radius: Theme.radius-control;
+                            border-width: 1px;
+                            border-color: Theme.panel-border;
+                            drop-shadow-blur: 18px;
+                            drop-shadow-offset-y: 6px;
+                            drop-shadow-color: Theme.shadow;
+                            VerticalLayout {
+                                padding: 4px;
+                                for wall in root.walls: Rectangle {
+                                    height: 26px;
+                                    border-radius: 5px;
+                                    background: wall.index == door.wall ? Theme.accent-soft
+                                        : choice-touch.has-hover ? Theme.control-hover : transparent;
+                                    Text {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        text: wall.label;
+                                        color: Theme.text;
+                                        font-size: Theme.font-body;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    choice-touch := TouchArea {
+                                        clicked => {
+                                            // Controlled: only emit; Rust refreshes wall-label.
+                                            if (wall.index != door.wall) {
+                                                root.choice("room.door." + door.id + ".wall", wall.index);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Cell {
+                    label: "Offset";
+                    id: "room.door." + door.id + ".offset";
+                    value: door.offset;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+                Cell {
+                    label: "Width";
+                    id: "room.door." + door.id + ".width";
+                    value: door.width;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Cell {
+                    label: "Height";
+                    id: "room.door." + door.id + ".height";
+                    value: door.height;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+                Cell {
+                    label: "Sill";
+                    id: "room.door." + door.id + ".sill";
+                    value: door.sill;
+                    committed(i, t) => { return root.committed(i, t); }
+                    edited(i, t) => { root.edited(i, t); }
+                }
+            }
+        }
+    }
+
+    if root.rows.length == 0: Text {
+        text: "No doors or windows";
+        color: Theme.text-tertiary;
+        font-size: Theme.font-caption;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        PillButton {
+            label: "+ Door";
+            clicked => { root.action("room.door.add"); }
+        }
+        PillButton {
+            label: "+ Window";
+            clicked => { root.action("room.window.add"); }
+        }
+    }
+}

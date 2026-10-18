@@ -1,0 +1,489 @@
+// Modal sheets, the toast and the popup menus (spec §6.1, §6.4, §6.5).
+
+import { Theme } from "theme.slint";
+import { PresetRow } from "types.slint";
+import { PillButton, SectionHeader } from "components.slint";
+
+// A modal confirmation sheet. It dims the window, swallows pointer input and owns the
+// keyboard while open: its `sheet-keys` scope takes focus on open, so Return (default
+// button) and Escape (last button) reach it even if a field had focus before.
+// AppWindow returns focus to the viewport when it closes.
+export component Sheet inherits Rectangle {
+    in property <bool> open;
+    in property <string> title;
+    in property <string> message;
+    in property <[string]> buttons;
+    in property <int> default-button: 0;
+    in property <int> destructive: -1;
+    callback button(int);
+
+    background: root.open ? #00000073 : #00000000;
+    animate background { duration: 200ms; easing: ease-out; }
+
+    // Swallow every pointer event while open.
+    TouchArea {
+        enabled: root.open;
+        scroll-event(event) => { accept }
+    }
+
+    sheet-keys := FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if (!root.open) {
+                return reject;
+            }
+            if (event.text == Key.Return) {
+                if (root.default-button >= 0 && root.default-button < root.buttons.length) {
+                    root.button(root.default-button);
+                }
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                if (root.buttons.length > 0) {
+                    root.button(root.buttons.length - 1);
+                }
+                return accept;
+            }
+            // Modal: nothing else gets through.
+            accept
+        }
+    }
+
+    changed open => {
+        if (root.open) {
+            sheet-keys.focus();
+        }
+    }
+
+    card := Rectangle {
+        property <length> drop: root.open ? 0px : -20px;
+        animate drop { duration: 260ms; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+        width: 420px;
+        height: card-layout.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 - 40px + self.drop;
+        opacity: root.open ? 1 : 0;
+        animate opacity { duration: 200ms; }
+        visible: self.opacity > 0;
+        background: #232428;
+        border-radius: Theme.radius-panel;
+        border-width: 1px;
+        border-color: Theme.panel-border;
+        drop-shadow-blur: 40px;
+        drop-shadow-offset-y: 16px;
+        drop-shadow-color: #000000A0;
+
+        card-layout := VerticalLayout {
+            padding: 20px;
+            spacing: 10px;
+            Text {
+                text: root.title;
+                color: Theme.text;
+                font-size: Theme.font-title;
+                font-weight: 650;
+                wrap: word-wrap;
+            }
+            if root.message != "": Text {
+                text: root.message;
+                color: Theme.text-secondary;
+                font-size: Theme.font-body;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                padding-top: 8px;
+                spacing: 8px;
+                alignment: end;
+                for label[i] in root.buttons: PillButton {
+                    label: label;
+                    primary: i == root.default-button;
+                    destructive: i == root.destructive;
+                    enabled: root.open;
+                    clicked => { root.button(i); }
+                }
+            }
+        }
+    }
+}
+
+// Paste a corner list. Enter inserts a newline (multi-line TextInput); Ctrl+Return applies
+// and Escape cancels through the capture handler of `paste-keys`.
+export component PasteSheet inherits Rectangle {
+    // "" closed, "platform" or "room" while open.
+    in property <string> target;
+    // Returns "" when applied, otherwise an error message (the sheet stays open).
+    callback apply(string /* target */, string /* text */) -> string;
+    callback cancel();
+
+    property <bool> open: root.target != "";
+    property <string> error;
+
+    background: root.open ? #00000073 : #00000000;
+    animate background { duration: 200ms; easing: ease-out; }
+
+    function do-apply() {
+        root.error = root.apply(root.target, area.text);
+    }
+
+    changed open => {
+        if (root.open) {
+            area.text = "";
+            root.error = "";
+            area.focus();
+        }
+    }
+
+    TouchArea {
+        enabled: root.open;
+        scroll-event(event) => { accept }
+    }
+
+    paste-keys := FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if (!root.open) {
+                return reject;
+            }
+            if (event.text == Key.Return && event.modifiers.control) {
+                root.do-apply();
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            reject
+        }
+
+        card := Rectangle {
+            property <length> drop: root.open ? 0px : -20px;
+            animate drop { duration: 260ms; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+            width: 440px;
+            height: card-layout.preferred-height;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2 - 40px + self.drop;
+            opacity: root.open ? 1 : 0;
+            animate opacity { duration: 200ms; }
+            visible: self.opacity > 0;
+            background: #232428;
+            border-radius: Theme.radius-panel;
+            border-width: 1px;
+            border-color: Theme.panel-border;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 16px;
+            drop-shadow-color: #000000A0;
+
+            card-layout := VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                Text {
+                    text: root.target == "room" ? "Paste room corners" : "Paste platform corners";
+                    color: Theme.text;
+                    font-size: Theme.font-title;
+                    font-weight: 650;
+                }
+                Text {
+                    text: "One corner per line: x, y[, r] — or tab-separated, in the current units";
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    height: 200px;
+                    border-radius: Theme.radius-field;
+                    background: Theme.field-bg;
+                    border-width: 1px;
+                    border-color: area.has-focus ? Theme.accent : root.error != "" ? Theme.danger : Theme.field-border;
+                    clip: true;
+                    area := TextInput {
+                        x: 10px;
+                        y: 8px;
+                        width: parent.width - 20px;
+                        height: parent.height - 16px;
+                        single-line: false;
+                        wrap: no-wrap;
+                        enabled: root.open;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        font-family: "Cascadia Mono";
+                        selection-background-color: Theme.accent.with-alpha(0.45);
+                        selection-foreground-color: Theme.text;
+                        edited => { root.error = ""; }
+                    }
+                }
+                if root.error != "": Text {
+                    text: root.error;
+                    color: Theme.danger;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    padding-top: 4px;
+                    spacing: 8px;
+                    alignment: end;
+                    PillButton {
+                        label: "Cancel";
+                        enabled: root.open;
+                        clicked => { root.cancel(); }
+                    }
+                    PillButton {
+                        label: "Apply";
+                        hint: "Ctrl+Enter";
+                        primary: true;
+                        enabled: root.open;
+                        clicked => { root.do-apply(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A chip at the bottom centre with a message and an optional action ("Undo").
+// The parent positions it; `lift` animates it into place.
+export component Toast inherits Rectangle {
+    in property <string> text;
+    in property <string> action-label;
+    callback action-clicked();
+
+    property <bool> shown: root.text != "";
+    // Keep the last message while fading out.
+    property <string> shown-text;
+    property <string> shown-action;
+    out property <length> lift: root.shown ? 0px : 12px;
+    animate lift { duration: 220ms; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+
+    init => {
+        root.shown-text = root.text;
+        root.shown-action = root.action-label;
+    }
+    changed text => {
+        if (root.text != "") {
+            root.shown-text = root.text;
+            root.shown-action = root.action-label;
+        }
+    }
+    changed action-label => {
+        if (root.text != "") {
+            root.shown-action = root.action-label;
+        }
+    }
+
+    height: 36px;
+    width: row.preferred-width;
+    border-radius: 18px;
+    background: #2C2D31F2;
+    border-width: 1px;
+    border-color: Theme.panel-border;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: Theme.shadow;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: 220ms; }
+    visible: self.opacity > 0;
+
+    row := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: root.shown-action != "" ? 6px : 16px;
+        spacing: 10px;
+        Text {
+            text: root.shown-text;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+        }
+        if root.shown-action != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: 26px;
+                width: action-text.preferred-width + 20px;
+                border-radius: 13px;
+                background: action-touch.has-hover ? Theme.accent.brighter(0.15) : Theme.accent-soft;
+                animate background { duration: Theme.quick; }
+                action-text := Text {
+                    text: root.shown-action;
+                    color: action-touch.has-hover ? white : Theme.accent.brighter(0.4);
+                    font-size: 12px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                action-touch := TouchArea {
+                    enabled: root.shown;
+                    clicked => { root.action-clicked(); }
+                }
+            }
+        }
+    }
+}
+
+// One row of a popup menu: label, optional detail and a right-aligned shortcut.
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    in property <string> shortcut;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: root.detail != "" ? 40px : 28px;
+    border-radius: 6px;
+    background: touch.has-hover && root.enabled ? Theme.accent : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.label;
+                color: !root.enabled ? Theme.text-tertiary : Theme.text;
+                font-size: Theme.font-body;
+                overflow: elide;
+            }
+            if root.detail != "": Text {
+                text: root.detail;
+                color: touch.has-hover && root.enabled ? #FFFFFFB3 : Theme.text-tertiary;
+                font-size: Theme.font-caption;
+                overflow: elide;
+            }
+        }
+        if root.shortcut != "": Text {
+            text: root.shortcut;
+            color: touch.has-hover && root.enabled ? #FFFFFFB3 : Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component MenuSeparator inherits Rectangle {
+    height: 9px;
+    Rectangle {
+        x: 8px;
+        width: parent.width - 16px;
+        height: 1px;
+        background: Theme.hairline;
+    }
+}
+
+// The project menu under the sidebar header. Items are disabled while file I/O runs.
+export component ProjectMenu inherits PopupWindow {
+    in property <bool> busy;
+    callback action(string /* id */);
+
+    width: 250px;
+
+    Rectangle {
+        background: #232428;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.panel-border;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow;
+
+        VerticalLayout {
+            padding: 5px;
+            spacing: 0px;
+            MenuRow {
+                label: "New";
+                shortcut: "Ctrl+N";
+                enabled: !root.busy;
+                clicked => { root.action("file.new"); }
+            }
+            MenuRow {
+                label: "Open…";
+                shortcut: "Ctrl+O";
+                enabled: !root.busy;
+                clicked => { root.action("file.open"); }
+            }
+            MenuRow {
+                label: "Open Demo";
+                enabled: !root.busy;
+                clicked => { root.action("file.open_demo"); }
+            }
+            MenuSeparator { }
+            MenuRow {
+                label: "Save";
+                shortcut: "Ctrl+S";
+                enabled: !root.busy;
+                clicked => { root.action("file.save"); }
+            }
+            MenuRow {
+                label: "Save As…";
+                shortcut: "Ctrl+Shift+S";
+                enabled: !root.busy;
+                clicked => { root.action("file.save_as"); }
+            }
+            MenuRow {
+                label: "Save as Folder…";
+                enabled: !root.busy;
+                clicked => { root.action("file.save_folder"); }
+            }
+        }
+    }
+}
+
+// Platform presets grouped by `group`. Emits the preset id; the owner adds the action prefix
+// (`platform.add.` or `platform.preset.`).
+export component PresetMenu inherits PopupWindow {
+    in property <[PresetRow]> presets;
+    in property <string> title;
+    callback chosen(string /* preset id */);
+
+    width: 280px;
+    height: min(440px, list.preferred-height + 2px);
+
+    Rectangle {
+        background: #232428;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.panel-border;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow;
+        clip: true;
+
+        Flickable {
+            mouse-drag-pan-enabled: false;
+            content-height: list.preferred-height;
+
+            list := VerticalLayout {
+                padding: 5px;
+                spacing: 0px;
+                if root.title != "": HorizontalLayout {
+                    padding-left: 10px;
+                    Text {
+                        height: 26px;
+                        text: root.title;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+                for preset[i] in root.presets: VerticalLayout {
+                    if i == 0 || root.presets[i - 1].group != preset.group: HorizontalLayout {
+                        padding-left: 10px;
+                        SectionHeader {
+                            text: preset.group;
+                        }
+                    }
+                    MenuRow {
+                        label: preset.label;
+                        detail: preset.hint;
+                        clicked => { root.chosen(preset.id); }
+                    }
+                }
+            }
+        }
+    }
+}

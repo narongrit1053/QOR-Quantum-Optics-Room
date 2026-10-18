@@ -1,0 +1,105 @@
+// Data structures shared by the UI files and the Rust side (spec §6.2).
+// This is a leaf file: it imports nothing, so every other .slint file can import it
+// without creating an import cycle. app.slint re-exports these structs.
+// No struct contains an array (D16: list models are updated in place).
+
+// kind: 0 node, 1 platform, 2 room.
+export struct SceneRow {
+    kind: int,
+    id: int,
+    label: string,
+    detail: string,
+    depth: int,
+    selected: bool,
+    is-beam: bool,
+}
+
+// M0
+export struct LibraryRow {
+    label: string,
+    letter: string,
+    tint: color,
+}
+
+// M0 node fields (read-only label/value pairs).
+export struct InspectorField {
+    label: string,
+    value: string,
+}
+
+// An editable numeric or text field. `id` is the field id of spec §6.3.
+export struct EditField {
+    id: string,
+    label: string,
+    value: string,
+    unit: string,
+    enabled: bool,
+    invalid: bool,
+}
+
+// One outline corner. `index` is the 0-based corner index k used in ids
+// ("platform.corner.{k}.x"); the table shows it 1-based.
+export struct CornerRow {
+    index: int,
+    x: string,
+    y: string,
+    r: string,
+    invalid: bool,
+}
+
+// One exclusion zone. kind: 0 rect, 1 circle. `index` is the 0-based zone index k.
+export struct ZoneRow {
+    index: int,
+    name: string,
+    kind: int,
+    x: string,
+    y: string,
+    w: string,
+    h: string,
+    r: string,
+}
+
+// One door or window. `wall` is 0-based; `wall-label` is the text of that wall's WallChoice.
+export struct DoorRow {
+    id: int,
+    name: string,
+    wall: int,
+    wall-label: string,
+    offset: string,
+    width: string,
+    height: string,
+    sill: string,
+}
+
+// One entry of the door wall dropdown, e.g. "Wall 2 · East · 5.00 m".
+export struct WallChoice {
+    index: int,
+    label: string,
+}
+
+// SVG path commands in viewbox units (y already negated) and the shared square viewbox.
+export struct OutlinePreview {
+    outline: string,
+    zones: string,
+    error-edges: string,
+    vb-x: float,
+    vb-y: float,
+    vb-size: float,
+}
+
+// A number drawn on the preview at viewbox coordinates (x, y). kind: 0 corner, 1 wall.
+export struct PreviewLabel {
+    index: int,
+    kind: int,
+    x: float,
+    y: float,
+    text: string,
+}
+
+// A platform preset in the preset menus, grouped by `group`.
+export struct PresetRow {
+    id: string,
+    group: string,
+    label: string,
+    hint: string,
+}

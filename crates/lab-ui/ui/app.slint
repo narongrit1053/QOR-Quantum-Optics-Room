@@ -1,323 +1,786 @@
+// The main window (spec §6.3, §6.4). This is the contract between lab-ui and lab-app.
+//
+// Import graph: types.slint is a leaf; fields, inspector and overlays import it; this file
+// imports all of them and re-exports the structs. Never define the structs here (that
+// would make fields.slint import app.slint: "Recursive import"), and never export a
+// non-Window component from here (warning "Exported component … doesn't inherit Window").
+
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, Field } from "components.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
+import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, Spinner } from "components.slint";
+import { EditState, TableFocus } from "fields.slint";
+import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
+import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu } from "overlays.slint";
 
 export { Theme }
-
-export struct SceneRow {
-    id: int,
-    label: string,
-    detail: string,
-    depth: int,
-    selected: bool,
-    is-beam: bool,
-}
-
-export struct LibraryRow {
-    label: string,
-    letter: string,
-    tint: color,
-}
-
-export struct InspectorField {
-    label: string,
-    value: string,
-}
+export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
+// Globals, so Rust can read the edit state and move focus to a field by id.
+export { EditState, TableFocus } from "fields.slint";
 
 export component AppWindow inherits Window {
-    // Viewport
+    // ── Viewport (M0) ─────────────────────────────────────────────────────────
     in property <image> viewport-texture;
     out property <length> viewport-width: viewport.width;
     out property <length> viewport-height: viewport.height;
 
-    // Sidebar
+    // ── Document and sidebar ─────────────────────────────────────────────────
+    in property <string> window-title;
     in property <string> project-name;
+    // "1 table · 37 parts · offline"
     in property <string> project-detail;
+    // Shows the "Edited" pill in the sidebar header.
+    in property <bool> dirty;
+    // "", "Recovered — not saved yet", "Converted from an older format", "Saving…", "Opening…"
+    in property <string> document-note;
     in property <[LibraryRow]> library;
     in property <[SceneRow]> scene;
+    in property <bool> can-undo;
+    in property <bool> can-redo;
+    // "Undo Change Width"
+    in property <string> undo-label;
+    in property <string> redo-label;
+    // Choice "units": 0 mm, 1 in (driven by Rust).
+    in property <int> display-unit;
+    // Choice "walls": 0 auto, 1 always, 2 hidden.
+    in property <int> wall-display;
+    // 0 none, 1 node, 2 platform, 3 room.
+    in property <int> selection-kind;
+    // Banner under the inspector title; "" hides it.
+    in property <string> inspector-error;
 
-    // Inspector
-    in property <bool> has-selection;
+    // ── Node inspector (M0) ──────────────────────────────────────────────────
     in property <string> selection-title;
     in property <string> selection-detail;
     in property <[InspectorField]> inspector;
 
-    // Status
+    // ── Platform inspector ───────────────────────────────────────────────────
+    in property <string> platform-name;
+    // "Optical table · 1200 × 900 mm"
+    in property <string> platform-subtitle;
+    // 0 table, 1 breadboard, 2 custom
+    in property <int> platform-kind;
+    // 0 stainless, 1 black anodized
+    in property <int> platform-surface;
+    // 0 rect, 1 rounded, 2 L, 3 custom
+    in property <int> platform-outline-kind;
+    // platform.outline.width|depth|radius|notch_width|notch_depth (only those that apply)
+    in property <[EditField]> platform-outline-fields;
+    // 0..3
+    in property <int> platform-notch-corner;
+    in property <[CornerRow]> platform-corners;
+    in property <int> platform-corner-invalid: -1;
+    in property <OutlinePreview> platform-preview;
+    in property <[PreviewLabel]> platform-preview-labels;
+    // platform.x, platform.y, platform.rotation, platform.top_height, platform.thickness
+    in property <[EditField]> platform-placement;
+    // 0 none, 1 metric, 2 imperial, 3 custom
+    in property <int> platform-grid-standard;
+    // 0 M4, 1 M6, 2 8-32, 3 1/4-20
+    in property <int> platform-thread;
+    // 0 auto, 1 fixed
+    in property <int> platform-origin-mode;
+    // platform.grid.pitch_x|pitch_y|margin|origin_x|origin_y (shown in the given order)
+    in property <[EditField]> platform-grid-fields;
+    // "1,716 holes · 48 × 36 grid"
+    in property <string> platform-hole-summary;
+    // "Grid fixed because parts are placed on this platform" or ""
+    in property <string> platform-grid-note;
+    in property <[ZoneRow]> platform-zones;
+    // 0 legs, 1 none
+    in property <int> platform-support;
+    // platform.support.leg_size|leg_inset
+    in property <[EditField]> platform-support-fields;
+    in property <int> platform-node-count;
+    // "3 parts lie outside the outline" or ""
+    in property <string> platform-warning;
+    // Current-unit groups first.
+    in property <[PresetRow]> presets;
+
+    // ── Room inspector ───────────────────────────────────────────────────────
+    // "6.00 × 5.00 m · 30.0 m² · 1 door"
+    in property <string> room-subtitle;
+    // room.height, room.thickness (+ room.width, room.depth when rectangular)
+    in property <[EditField]> room-fields;
+    in property <bool> room-is-rectangle;
+    in property <[CornerRow]> room-corners;
+    in property <int> room-corner-invalid: -1;
+    in property <OutlinePreview> room-preview;
+    // Corner numbers and wall numbers.
+    in property <[PreviewLabel]> room-preview-labels;
+    in property <[DoorRow]> room-doors;
+    in property <[WallChoice]> room-walls;
+
+    // ── Sheet, paste sheet, toast, busy ──────────────────────────────────────
+    in property <bool> sheet-open;
+    in property <string> sheet-title;
+    in property <string> sheet-message;
+    in property <[string]> sheet-buttons;
+    in property <int> sheet-default: 0;
+    // -1 none
+    in property <int> sheet-destructive: -1;
+    // "" closed, "platform" | "room" = PasteSheet open
+    in property <string> paste-target;
+    in property <string> toast;
+    // "" = no button
+    in property <string> toast-action;
+    // File I/O in flight: spinner chip, file actions disabled (editing still works).
+    in property <bool> busy;
+
+    // ── Status (M0) ──────────────────────────────────────────────────────────
     in property <bool> rendering;
     in property <string> status;
     in property <string> gpu;
 
+    // 0 3D, 1 Top. in-out: the T/P keys assign it (M0).
     in-out property <int> view-mode: 0;
 
-    // kind: 0 down, 1 up, 2 move, 3 cancel. button: 0 left, 1 right, 2 middle, 3 other.
+    // ── Callbacks ────────────────────────────────────────────────────────────
+    // Returns true when accepted or a no-op; false keeps the text and marks the field invalid.
+    callback field-committed(string /* id */, string /* text */) -> bool;
+    // Live corner/zone preview, no command.
+    callback field-edited(string /* id */, string /* text */);
+    callback choice-selected(string /* id */, int /* index */);
+    callback action(string /* id */);
+    // "" ok, else error text (the sheet stays open).
+    callback paste-corners(string /* target */, string /* text */) -> string;
+    callback sheet-button(int);
+    callback toast-action-clicked();
+    callback scene-row-clicked(int /* kind */, int /* id */);
+    // M0 viewport input. kind: 0 down, 1 up, 2 move, 3 cancel. button: 0 left, 1 right, 2 middle, 3 other.
     callback viewport-pointer(int, int, length, length, bool, bool, bool);
     callback viewport-scroll(length, length, length, length);
     callback viewport-left();
     callback view-mode-requested(int);
-    callback frame-all();
-    callback scene-row-clicked(int);
     callback clear-selection();
+    // Development hook for the gallery: an unmodified key press while no text field has
+    // focus and no sheet is open. Return true to consume it. The app leaves it unset.
+    callback gallery-key(string /* text */) -> bool;
 
-    title: "LabSetup — " + project-name;
+    title: root.window-title;
     preferred-width: 1440px;
     preferred-height: 900px;
     min-width: 960px;
     min-height: 620px;
     background: Theme.window-bg;
     default-font-family: Theme.font;
+    forward-focus: shortcuts;
 
-    // ── 3D viewport (full bleed) ───────────────────────────────────────────────
-    viewport := Rectangle {
-        background: Theme.viewport-bg;
+    property <bool> modal: root.sheet-open || root.paste-target != "";
+    property <string> unit-label: root.display-unit == 1 ? "in" : "mm";
 
-        Image {
-            width: 100%;
-            height: 100%;
-            source: root.viewport-texture;
-            image-fit: fill;
+    // EditState.focus-viewport is bumped by fields (Enter, Escape) to hand focus back.
+    property <int> focus-tick: EditState.focus-viewport;
+    changed focus-tick => {
+        keys.focus();
+    }
+    changed sheet-open => {
+        if (!root.sheet-open) {
+            EditState.focus-viewport += 1;
         }
-
-        keys := FocusScope {
-            key-pressed(event) => {
-                if (event.text == "f" || event.text == "F") {
-                    root.frame-all();
-                    return accept;
-                }
-                if (event.text == "t" || event.text == "T") {
-                    root.view-mode = 1;
-                    root.view-mode-requested(1);
-                    return accept;
-                }
-                if (event.text == "p" || event.text == "P" || event.text == "3") {
-                    root.view-mode = 0;
-                    root.view-mode-requested(0);
-                    return accept;
-                }
-                if (event.text == Key.Escape) {
-                    root.clear-selection();
-                    return accept;
-                }
-                reject
-            }
-
-            pointer := TouchArea {
-                mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.default;
-                pointer-event(event) => {
-                    if (event.kind == PointerEventKind.down) {
-                        keys.focus();
-                    }
-                    root.viewport-pointer(
-                        event.kind == PointerEventKind.down ? 0 : event.kind == PointerEventKind.up ? 1 : event.kind == PointerEventKind.move ? 2 : 3,
-                        event.button == PointerEventButton.left ? 0 : event.button == PointerEventButton.right ? 1 : event.button == PointerEventButton.middle ? 2 : 3,
-                        self.mouse-x,
-                        self.mouse-y,
-                        event.modifiers.shift,
-                        event.modifiers.control,
-                        event.modifiers.alt);
-                }
-                scroll-event(event) => {
-                    root.viewport-scroll(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y);
-                    accept
-                }
-                changed has-hover => {
-                    if (!self.has-hover) {
-                        root.viewport-left();
-                    }
-                }
-            }
+    }
+    changed paste-target => {
+        if (root.paste-target == "") {
+            EditState.focus-viewport += 1;
+        }
+    }
+    // A field in an inspector that is being swapped out must not keep focus (it would keep
+    // EditState claimed). Blurring commits it through the focus-lost path.
+    changed selection-kind => {
+        if (EditState.focused-id != "" && EditState.focused-id != "sidebar.search") {
+            EditState.focus-viewport += 1;
         }
     }
 
-    // ── Left sidebar: project, library, scene ─────────────────────────────────
-    sidebar := Panel {
-        x: Theme.inset;
-        y: Theme.inset;
-        width: 272px;
-        height: root.height - 2 * Theme.inset;
+    shortcuts := FocusScope {
+        forward-focus: keys;
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
 
-        VerticalLayout {
-            padding: 14px;
-            spacing: Theme.gap;
+        capture-key-pressed(event) => {
+            // A sheet owns the keyboard; its own focus scope handles the keys.
+            if (root.modal) {
+                return reject;
+            }
+            if (event.modifiers.control && !event.modifiers.alt) {
+                if ((event.text == "z" || event.text == "Z") && !event.modifiers.shift) {
+                    if (!EditState.field-dirty) {
+                        root.action("edit.undo");
+                        return accept;
+                    }
+                    // A dirty field: let the TextInput undo its own text.
+                    return reject;
+                }
+                if (((event.text == "z" || event.text == "Z") && event.modifiers.shift) || ((event.text == "y" || event.text == "Y") && !event.modifiers.shift)) {
+                    if (!EditState.field-dirty) {
+                        root.action("edit.redo");
+                        return accept;
+                    }
+                    return reject;
+                }
+                // File shortcuts: blur first (a dirty field commits through its focus-lost
+                // path); the app defers the file action by one event-loop turn.
+                if ((event.text == "n" || event.text == "N") && !event.modifiers.shift) {
+                    keys.focus();
+                    root.action("file.new");
+                    return accept;
+                }
+                if ((event.text == "o" || event.text == "O") && !event.modifiers.shift) {
+                    keys.focus();
+                    root.action("file.open");
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    keys.focus();
+                    root.action(event.modifiers.shift ? "file.save_as" : "file.save");
+                    return accept;
+                }
+                return reject;
+            }
+            if (event.text == Key.Delete || event.text == Key.Backspace) {
+                if (EditState.text-focused) {
+                    return reject;
+                }
+                root.action("selection.delete");
+                return accept;
+            }
+            if (!EditState.text-focused && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta) {
+                if (root.gallery-key(event.text)) {
+                    return accept;
+                }
+            }
+            reject
+        }
+
+        // ── 3D viewport (full bleed) ─────────────────────────────────────────
+        viewport := Rectangle {
+            background: Theme.viewport-bg;
+
+            Image {
+                width: 100%;
+                height: 100%;
+                source: root.viewport-texture;
+                image-fit: fill;
+            }
+
+            keys := FocusScope {
+                key-pressed(event) => {
+                    if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+                        return reject;
+                    }
+                    // Shift+F first: with Shift held the text is "F", which would otherwise
+                    // also match plain F.
+                    if (event.modifiers.shift && (event.text == "f" || event.text == "F")) {
+                        root.action("view.frame_selection");
+                        return accept;
+                    }
+                    if (event.text == "f" || event.text == "F") {
+                        root.action("view.frame_all");
+                        return accept;
+                    }
+                    if (event.text == "t" || event.text == "T") {
+                        root.view-mode = 1;
+                        root.view-mode-requested(1);
+                        return accept;
+                    }
+                    if (event.text == "p" || event.text == "P" || event.text == "3") {
+                        root.view-mode = 0;
+                        root.view-mode-requested(0);
+                        return accept;
+                    }
+                    if (event.text == Key.Escape) {
+                        root.clear-selection();
+                        return accept;
+                    }
+                    reject
+                }
+
+                pointer := TouchArea {
+                    mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.default;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            keys.focus();
+                        }
+                        root.viewport-pointer(
+                            event.kind == PointerEventKind.down ? 0 : event.kind == PointerEventKind.up ? 1 : event.kind == PointerEventKind.move ? 2 : 3,
+                            event.button == PointerEventButton.left ? 0 : event.button == PointerEventButton.right ? 1 : event.button == PointerEventButton.middle ? 2 : 3,
+                            self.mouse-x,
+                            self.mouse-y,
+                            event.modifiers.shift,
+                            event.modifiers.control,
+                            event.modifiers.alt);
+                    }
+                    scroll-event(event) => {
+                        root.viewport-scroll(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y);
+                        accept
+                    }
+                    changed has-hover => {
+                        if (!self.has-hover) {
+                            root.viewport-left();
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Left sidebar: project, library, scene ────────────────────────────
+        sidebar := Panel {
+            x: Theme.inset;
+            y: Theme.inset;
+            width: 272px;
+            height: root.height - 2 * Theme.inset;
 
             VerticalLayout {
+                padding: 14px;
+                spacing: Theme.gap;
+
+                // Header: project name, "Edited" pill, document note. Opens the project menu.
+                header := Rectangle {
+                    height: header-layout.preferred-height + 8px;
+                    border-radius: Theme.radius-control;
+                    background: header-touch.has-hover ? Theme.control-hover : transparent;
+                    animate background { duration: Theme.quick; }
+
+                    header-touch := TouchArea {
+                        clicked => { project-menu.show(); }
+                    }
+
+                    header-layout := VerticalLayout {
+                        x: 6px;
+                        y: 4px;
+                        width: parent.width - 12px;
+                        spacing: 2px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: root.project-name;
+                                color: Theme.text;
+                                font-size: Theme.font-title;
+                                font-weight: 650;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    height: 18px;
+                                    width: edited-text.preferred-width + 14px;
+                                    border-radius: 9px;
+                                    background: Theme.control-thumb;
+                                    opacity: root.dirty ? 1 : 0;
+                                    animate opacity { duration: Theme.quick; }
+                                    edited-text := Text {
+                                        text: "Edited";
+                                        color: Theme.text-secondary;
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text {
+                                text: "⌄";
+                                color: Theme.text-tertiary;
+                                font-family: Theme.font-symbol;
+                                font-size: Theme.font-body;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Text {
+                            text: root.project-detail;
+                            color: Theme.text-secondary;
+                            font-size: Theme.font-caption;
+                            overflow: elide;
+                        }
+                        if root.document-note != "": Text {
+                            text: root.document-note;
+                            color: Theme.warning;
+                            font-size: Theme.font-caption;
+                            overflow: elide;
+                        }
+                    }
+
+                    project-menu := ProjectMenu {
+                        x: 0;
+                        y: parent.height + 4px;
+                        busy: root.busy;
+                        action(id) => { root.action(id); }
+                    }
+                }
+
+                Rectangle {
+                    height: 30px;
+                    border-radius: Theme.radius-control;
+                    background: Theme.control-bg;
+                    search := TextInput {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                        single-line: true;
+                        changed has-focus => {
+                            if (self.has-focus) {
+                                EditState.focused-id = "sidebar.search";
+                                EditState.text-focused = true;
+                                EditState.field-dirty = false;
+                            } else if (EditState.focused-id == "sidebar.search") {
+                                EditState.focused-id = "";
+                                EditState.text-focused = false;
+                            }
+                        }
+                        key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                EditState.focus-viewport += 1;
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+                    if search.text == "": Text {
+                        x: 10px;
+                        text: "Search parts";
+                        color: Theme.text-tertiary;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                    }
+                }
+
+                SectionHeader { text: "LIBRARY"; }
+                for item in root.library: HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 4px;
+                    Glyph {
+                        letter: item.letter;
+                        tint: item.tint;
+                        y: 4px;
+                    }
+                    ListRow {
+                        label: item.label;
+                        detail: "M2";
+                        dimmed: true;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                HorizontalLayout {
+                    SectionHeader {
+                        text: "SCENE";
+                        horizontal-stretch: 1;
+                    }
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        add-button := IconButton {
+                            icon: "+";
+                            size: 24px;
+                            icon-size: 15px;
+                            clicked => { add-menu.show(); }
+                        }
+                        add-menu := PresetMenu {
+                            x: 0;
+                            y: parent.height + 4px;
+                            presets: root.presets;
+                            title: "Add a platform";
+                            chosen(id) => { root.action("platform.add." + id); }
+                        }
+                    }
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    for row in root.scene: ListRow {
+                        label: row.label;
+                        detail: row.detail;
+                        depth: row.depth;
+                        selected: row.selected;
+                        marker: row.is-beam ? Theme.beam : transparent;
+                        clicked => { root.scene-row-clicked(row.kind, row.id); }
+                    }
+                }
+            }
+        }
+
+        // ── Inspector (slides in when something is selected) ─────────────────
+        inspector-panel := Panel {
+            property <bool> shown: root.selection-kind != 0;
+            property <length> content-height: root.selection-kind == 1 ? node-inspector.preferred-height
+                : root.selection-kind == 2 ? platform-inspector.preferred-height
+                : root.selection-kind == 3 ? room-inspector.preferred-height : 0px;
+            width: Theme.inspector-width;
+            height: min(root.height - 2 * Theme.inset, max(self.content-height, 80px));
+            y: Theme.inset;
+            x: self.shown ? root.width - self.width - Theme.inset : root.width + 24px;
+            opacity: self.shown ? 1 : 0;
+            animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+            animate opacity { duration: Theme.smooth; }
+            animate height { duration: 180ms; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+
+            Flickable {
+                mouse-drag-pan-enabled: false;
+                content-height: inspector-panel.content-height;
+
+                // The three inspectors cross-fade (180 ms) when the selection kind changes.
+                node-inspector := NodeInspector {
+                    y: 0;
+                    height: self.preferred-height;
+                    opacity: root.selection-kind == 1 ? 1 : 0;
+                    visible: self.opacity > 0;
+                    animate opacity { duration: 180ms; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+                    title: root.selection-title;
+                    detail: root.selection-detail;
+                    fields: root.inspector;
+                    error: root.inspector-error;
+                    action(id) => { root.action(id); }
+                }
+
+                platform-inspector := PlatformInspector {
+                    y: 0;
+                    height: self.preferred-height;
+                    opacity: root.selection-kind == 2 ? 1 : 0;
+                    visible: self.opacity > 0;
+                    animate opacity { duration: 180ms; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+                    name: root.platform-name;
+                    subtitle: root.platform-subtitle;
+                    error: root.inspector-error;
+                    unit: root.unit-label;
+                    kind: root.platform-kind;
+                    surface: root.platform-surface;
+                    outline-kind: root.platform-outline-kind;
+                    outline-fields: root.platform-outline-fields;
+                    notch-corner: root.platform-notch-corner;
+                    corners: root.platform-corners;
+                    corner-invalid: root.platform-corner-invalid;
+                    preview: root.platform-preview;
+                    preview-labels: root.platform-preview-labels;
+                    placement: root.platform-placement;
+                    grid-standard: root.platform-grid-standard;
+                    thread: root.platform-thread;
+                    origin-mode: root.platform-origin-mode;
+                    grid-fields: root.platform-grid-fields;
+                    hole-summary: root.platform-hole-summary;
+                    grid-note: root.platform-grid-note;
+                    zones: root.platform-zones;
+                    support: root.platform-support;
+                    support-fields: root.platform-support-fields;
+                    node-count: root.platform-node-count;
+                    warning: root.platform-warning;
+                    presets: root.presets;
+                    field-committed(i, t) => { return root.field-committed(i, t); }
+                    field-edited(i, t) => { root.field-edited(i, t); }
+                    choice-selected(i, c) => { root.choice-selected(i, c); }
+                    action(id) => { root.action(id); }
+                }
+
+                room-inspector := RoomInspector {
+                    y: 0;
+                    height: self.preferred-height;
+                    opacity: root.selection-kind == 3 ? 1 : 0;
+                    visible: self.opacity > 0;
+                    animate opacity { duration: 180ms; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+                    subtitle: root.room-subtitle;
+                    error: root.inspector-error;
+                    unit: root.unit-label;
+                    fields: root.room-fields;
+                    is-rectangle: root.room-is-rectangle;
+                    corners: root.room-corners;
+                    corner-invalid: root.room-corner-invalid;
+                    preview: root.room-preview;
+                    preview-labels: root.room-preview-labels;
+                    doors: root.room-doors;
+                    walls: root.room-walls;
+                    wall-display: root.wall-display;
+                    field-committed(i, t) => { return root.field-committed(i, t); }
+                    field-edited(i, t) => { root.field-edited(i, t); }
+                    choice-selected(i, c) => { root.choice-selected(i, c); }
+                    action(id) => { root.action(id); }
+                }
+            }
+        }
+
+        // ── View switcher and units (top centre) ─────────────────────────────
+        HorizontalLayout {
+            x: min(
+                sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - self.preferred-width) / 2,
+                (inspector-panel.shown ? inspector-panel.x : root.width) - self.preferred-width - Theme.inset);
+            y: Theme.inset;
+            width: self.preferred-width;
+            height: self.preferred-height;
+            spacing: Theme.gap;
+            SegmentedControl {
+                items: ["3D", "Top"];
+                current: root.view-mode;
+                selected(i) => {
+                    root.view-mode = i;
+                    root.view-mode-requested(i);
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                SegmentedControl {
+                    items: ["mm", "in"];
+                    compact: true;
+                    segment-width: 38px;
+                    current: root.display-unit;
+                    selected(i) => { root.choice-selected("units", i); }
+                }
+            }
+        }
+
+        // ── Floating pill toolbar (bottom centre of the free viewport span) ──
+        toolbar := Rectangle {
+            property <length> free-span: (inspector-panel.shown ? inspector-panel.x : root.width) - (sidebar.x + sidebar.width);
+            property <bool> compact: self.free-span < 550px;
+
+            x: (sidebar.x + sidebar.width) + (self.free-span - self.width) / 2;
+            y: root.height - self.height - 18px;
+            width: tools.preferred-width;
+            height: 42px;
+            border-radius: 21px;
+            background: Theme.panel-bg;
+            border-width: 1px;
+            border-color: Theme.panel-border;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.shadow;
+            animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+
+            tools := HorizontalLayout {
+                padding: 6px;
                 spacing: 2px;
-                Text {
-                    text: root.project-name;
-                    color: Theme.text;
-                    font-size: Theme.font-title;
-                    font-weight: 650;
-                    overflow: elide;
+                IconButton {
+                    icon: "↶";
+                    enabled: root.can-undo;
+                    clicked => { root.action("edit.undo"); }
+                    Tooltip {
+                        text: @markdown("\{root.undo-label}");
+                    }
+                }
+                IconButton {
+                    icon: "↷";
+                    enabled: root.can-redo;
+                    clicked => { root.action("edit.redo"); }
+                    Tooltip {
+                        text: @markdown("\{root.redo-label}");
+                    }
+                }
+                Rectangle {
+                    width: 9px;
+                    Rectangle {
+                        width: 1px;
+                        height: 18px;
+                        background: Theme.hairline;
+                    }
+                }
+                ToolButton {
+                    label: "Select";
+                    active: true;
+                }
+                if !toolbar.compact: ToolButton {
+                    label: "Move";
+                    available: false;
+                }
+                if !toolbar.compact: ToolButton {
+                    label: "Rotate";
+                    available: false;
+                }
+                if !toolbar.compact: ToolButton {
+                    label: "Measure";
+                    available: false;
+                }
+                Rectangle {
+                    width: 9px;
+                    Rectangle {
+                        width: 1px;
+                        height: 18px;
+                        background: Theme.hairline;
+                    }
+                }
+                ToolButton {
+                    label: "Frame all";
+                    clicked => { root.action("view.frame_all"); }
+                }
+            }
+        }
+
+        // ── Status chip (bottom left of the viewport, stacks above toolbar if narrow) ──
+        status-chip := Rectangle {
+            property <bool> stack: (self.x + status-row.preferred-width + 12px) > toolbar.x;
+
+            x: sidebar.x + sidebar.width + Theme.inset;
+            y: self.stack
+                ? toolbar.y - (root.toast != "" ? 48px : 0px) - self.height - 8px
+                : root.height - self.height - 18px;
+            height: 26px;
+            width: status-row.preferred-width;
+            border-radius: 13px;
+            background: Theme.panel-bg;
+            border-width: 1px;
+            border-color: Theme.panel-border;
+            animate y { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+
+            status-row := HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 12px;
+                spacing: 8px;
+                if root.busy: VerticalLayout {
+                    alignment: center;
+                    Spinner { }
+                }
+                if !root.busy: Rectangle {
+                    width: 7px;
+                    Rectangle {
+                        width: 7px;
+                        height: 7px;
+                        border-radius: 3.5px;
+                        background: root.rendering ? Theme.accent : Theme.ok;
+                        animate background { duration: Theme.quick; }
+                    }
                 }
                 Text {
-                    text: root.project-detail;
+                    text: root.status;
                     color: Theme.text-secondary;
                     font-size: Theme.font-caption;
-                }
-            }
-
-            Rectangle {
-                height: 30px;
-                border-radius: Theme.radius-control;
-                background: Theme.control-bg;
-                search := TextInput {
-                    x: 10px;
-                    width: parent.width - 20px;
-                    color: Theme.text;
-                    font-size: Theme.font-body;
                     vertical-alignment: center;
                 }
-                if search.text == "": Text {
-                    x: 10px;
-                    text: "Search parts";
+                Text {
+                    text: root.gpu;
                     color: Theme.text-tertiary;
-                    font-size: Theme.font-body;
+                    font-size: Theme.font-caption;
                     vertical-alignment: center;
                 }
             }
-
-            SectionHeader { text: "LIBRARY"; }
-            for item in root.library: HorizontalLayout {
-                spacing: 8px;
-                padding-left: 4px;
-                Glyph {
-                    letter: item.letter;
-                    tint: item.tint;
-                    y: 4px;
-                }
-                ListRow {
-                    label: item.label;
-                    detail: "M2";
-                    dimmed: true;
-                    horizontal-stretch: 1;
-                }
-            }
-
-            SectionHeader { text: "SCENE"; }
-            ListView {
-                vertical-stretch: 1;
-                for row in root.scene: ListRow {
-                    label: row.label;
-                    detail: row.detail;
-                    depth: row.depth;
-                    selected: row.selected;
-                    marker: row.is-beam ? Theme.beam : transparent;
-                    clicked => { root.scene-row-clicked(row.id); }
-                }
-            }
         }
-    }
 
-    // ── Inspector (slides in when something is selected) ─────────────────────
-    Panel {
-        width: 280px;
-        height: min(root.height - 2 * Theme.inset, inspector-layout.preferred-height);
-        y: Theme.inset;
-        x: root.has-selection ? root.width - self.width - Theme.inset : root.width + 24px;
-        opacity: root.has-selection ? 1 : 0;
-        animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
-        animate opacity { duration: Theme.smooth; }
-
-        inspector-layout := VerticalLayout {
-            padding: 16px;
-            spacing: 4px;
-            Text {
-                text: root.selection-title;
-                color: Theme.text;
-                font-size: Theme.font-title;
-                font-weight: 650;
-                overflow: elide;
-            }
-            Text {
-                text: root.selection-detail;
-                color: Theme.text-secondary;
-                font-size: Theme.font-caption;
-                overflow: elide;
-            }
-            Rectangle { height: 8px; }
-            Rectangle { height: 1px; background: Theme.hairline; }
-            Rectangle { height: 6px; }
-            for field in root.inspector: Field {
-                label: field.label;
-                value: field.value;
-            }
+        // ── Toast (bottom centre, above the toolbar) ─────────────────────────
+        toast-chip := Toast {
+            x: toolbar.x + (toolbar.width - self.width) / 2;
+            y: toolbar.y - self.height - 12px + self.lift;
+            text: root.toast;
+            action-label: root.toast-action;
+            action-clicked => { root.toast-action-clicked(); }
         }
-    }
 
-    // ── View switcher (top centre) ─────────────────────────────────────────────
-    HorizontalLayout {
-        x: sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - self.preferred-width) / 2;
-        y: Theme.inset;
-        spacing: Theme.gap;
-        SegmentedControl {
-            items: ["3D", "Top"];
-            current <=> root.view-mode;
-            selected(index) => { root.view-mode-requested(index); }
+        // ── Modal sheets (last, on top, with their own focus scopes) ─────────
+        Sheet {
+            width: root.width;
+            height: root.height;
+            open: root.sheet-open;
+            title: root.sheet-title;
+            message: root.sheet-message;
+            buttons: root.sheet-buttons;
+            default-button: root.sheet-default;
+            destructive: root.sheet-destructive;
+            button(i) => { root.sheet-button(i); }
         }
-    }
 
-    // ── Floating pill toolbar (bottom centre) ─────────────────────────────────
-    toolbar := Rectangle {
-        x: sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - self.width) / 2;
-        y: root.height - self.height - 18px;
-        width: tools.preferred-width;
-        height: 42px;
-        border-radius: 21px;
-        background: Theme.panel-bg;
-        border-width: 1px;
-        border-color: Theme.panel-border;
-        drop-shadow-blur: 24px;
-        drop-shadow-offset-y: 8px;
-        drop-shadow-color: Theme.shadow;
-
-        tools := HorizontalLayout {
-            padding: 6px;
-            spacing: 2px;
-            ToolButton { label: "Select"; active: true; }
-            ToolButton { label: "Move"; available: false; }
-            ToolButton { label: "Rotate"; available: false; }
-            ToolButton { label: "Measure"; available: false; }
-            Rectangle { width: 9px; Rectangle { width: 1px; height: 18px; background: Theme.hairline; } }
-            ToolButton { label: "Frame all"; clicked => { root.frame-all(); } }
-        }
-    }
-
-    // ── Status chip (bottom left of the viewport) ─────────────────────────────
-    Rectangle {
-        x: sidebar.x + sidebar.width + Theme.inset;
-        y: root.height - self.height - 18px;
-        height: 26px;
-        width: status-row.preferred-width;
-        border-radius: 13px;
-        background: Theme.panel-bg;
-        border-width: 1px;
-        border-color: Theme.panel-border;
-
-        status-row := HorizontalLayout {
-            padding-left: 10px;
-            padding-right: 12px;
-            spacing: 8px;
-            Rectangle {
-                width: 7px;
-                Rectangle {
-                    width: 7px;
-                    height: 7px;
-                    border-radius: 3.5px;
-                    background: root.rendering ? Theme.accent : Theme.ok;
-                    animate background { duration: Theme.quick; }
-                }
-            }
-            Text {
-                text: root.status;
-                color: Theme.text-secondary;
-                font-size: Theme.font-caption;
-                vertical-alignment: center;
-            }
-            Text {
-                text: root.gpu;
-                color: Theme.text-tertiary;
-                font-size: Theme.font-caption;
-                vertical-alignment: center;
-            }
+        PasteSheet {
+            width: root.width;
+            height: root.height;
+            target: root.paste-target;
+            apply(target, text) => { return root.paste-corners(target, text); }
+            cancel => { root.action("paste.cancel"); }
         }
     }
 }
