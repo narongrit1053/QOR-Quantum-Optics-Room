@@ -1,0 +1,13 @@
+[package]
+name = "lab-viewport"
+description = "Bevy 3D viewport for LabSetup, rendered on demand into textures shared with the UI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-core.workspace = true
+bevy.workspace = true
+wgpu.workspace = true
+async-channel.workspace = true

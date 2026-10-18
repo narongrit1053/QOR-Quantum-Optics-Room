@@ -1,0 +1,323 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, Field } from "components.slint";
+
+export { Theme }
+
+export struct SceneRow {
+    id: int,
+    label: string,
+    detail: string,
+    depth: int,
+    selected: bool,
+    is-beam: bool,
+}
+
+export struct LibraryRow {
+    label: string,
+    letter: string,
+    tint: color,
+}
+
+export struct InspectorField {
+    label: string,
+    value: string,
+}
+
+export component AppWindow inherits Window {
+    // Viewport
+    in property <image> viewport-texture;
+    out property <length> viewport-width: viewport.width;
+    out property <length> viewport-height: viewport.height;
+
+    // Sidebar
+    in property <string> project-name;
+    in property <string> project-detail;
+    in property <[LibraryRow]> library;
+    in property <[SceneRow]> scene;
+
+    // Inspector
+    in property <bool> has-selection;
+    in property <string> selection-title;
+    in property <string> selection-detail;
+    in property <[InspectorField]> inspector;
+
+    // Status
+    in property <bool> rendering;
+    in property <string> status;
+    in property <string> gpu;
+
+    in-out property <int> view-mode: 0;
+
+    // kind: 0 down, 1 up, 2 move, 3 cancel. button: 0 left, 1 right, 2 middle, 3 other.
+    callback viewport-pointer(int, int, length, length, bool, bool, bool);
+    callback viewport-scroll(length, length, length, length);
+    callback viewport-left();
+    callback view-mode-requested(int);
+    callback frame-all();
+    callback scene-row-clicked(int);
+    callback clear-selection();
+
+    title: "LabSetup — " + project-name;
+    preferred-width: 1440px;
+    preferred-height: 900px;
+    min-width: 960px;
+    min-height: 620px;
+    background: Theme.window-bg;
+    default-font-family: Theme.font;
+
+    // ── 3D viewport (full bleed) ───────────────────────────────────────────────
+    viewport := Rectangle {
+        background: Theme.viewport-bg;
+
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.viewport-texture;
+            image-fit: fill;
+        }
+
+        keys := FocusScope {
+            key-pressed(event) => {
+                if (event.text == "f" || event.text == "F") {
+                    root.frame-all();
+                    return accept;
+                }
+                if (event.text == "t" || event.text == "T") {
+                    root.view-mode = 1;
+                    root.view-mode-requested(1);
+                    return accept;
+                }
+                if (event.text == "p" || event.text == "P" || event.text == "3") {
+                    root.view-mode = 0;
+                    root.view-mode-requested(0);
+                    return accept;
+                }
+                if (event.text == Key.Escape) {
+                    root.clear-selection();
+                    return accept;
+                }
+                reject
+            }
+
+            pointer := TouchArea {
+                mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.default;
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.down) {
+                        keys.focus();
+                    }
+                    root.viewport-pointer(
+                        event.kind == PointerEventKind.down ? 0 : event.kind == PointerEventKind.up ? 1 : event.kind == PointerEventKind.move ? 2 : 3,
+                        event.button == PointerEventButton.left ? 0 : event.button == PointerEventButton.right ? 1 : event.button == PointerEventButton.middle ? 2 : 3,
+                        self.mouse-x,
+                        self.mouse-y,
+                        event.modifiers.shift,
+                        event.modifiers.control,
+                        event.modifiers.alt);
+                }
+                scroll-event(event) => {
+                    root.viewport-scroll(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y);
+                    accept
+                }
+                changed has-hover => {
+                    if (!self.has-hover) {
+                        root.viewport-left();
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Left sidebar: project, library, scene ─────────────────────────────────
+    sidebar := Panel {
+        x: Theme.inset;
+        y: Theme.inset;
+        width: 272px;
+        height: root.height - 2 * Theme.inset;
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: Theme.gap;
+
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: root.project-name;
+                    color: Theme.text;
+                    font-size: Theme.font-title;
+                    font-weight: 650;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.project-detail;
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-caption;
+                }
+            }
+
+            Rectangle {
+                height: 30px;
+                border-radius: Theme.radius-control;
+                background: Theme.control-bg;
+                search := TextInput {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    color: Theme.text;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                }
+                if search.text == "": Text {
+                    x: 10px;
+                    text: "Search parts";
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                }
+            }
+
+            SectionHeader { text: "LIBRARY"; }
+            for item in root.library: HorizontalLayout {
+                spacing: 8px;
+                padding-left: 4px;
+                Glyph {
+                    letter: item.letter;
+                    tint: item.tint;
+                    y: 4px;
+                }
+                ListRow {
+                    label: item.label;
+                    detail: "M2";
+                    dimmed: true;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            SectionHeader { text: "SCENE"; }
+            ListView {
+                vertical-stretch: 1;
+                for row in root.scene: ListRow {
+                    label: row.label;
+                    detail: row.detail;
+                    depth: row.depth;
+                    selected: row.selected;
+                    marker: row.is-beam ? Theme.beam : transparent;
+                    clicked => { root.scene-row-clicked(row.id); }
+                }
+            }
+        }
+    }
+
+    // ── Inspector (slides in when something is selected) ─────────────────────
+    Panel {
+        width: 280px;
+        height: min(root.height - 2 * Theme.inset, inspector-layout.preferred-height);
+        y: Theme.inset;
+        x: root.has-selection ? root.width - self.width - Theme.inset : root.width + 24px;
+        opacity: root.has-selection ? 1 : 0;
+        animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+        animate opacity { duration: Theme.smooth; }
+
+        inspector-layout := VerticalLayout {
+            padding: 16px;
+            spacing: 4px;
+            Text {
+                text: root.selection-title;
+                color: Theme.text;
+                font-size: Theme.font-title;
+                font-weight: 650;
+                overflow: elide;
+            }
+            Text {
+                text: root.selection-detail;
+                color: Theme.text-secondary;
+                font-size: Theme.font-caption;
+                overflow: elide;
+            }
+            Rectangle { height: 8px; }
+            Rectangle { height: 1px; background: Theme.hairline; }
+            Rectangle { height: 6px; }
+            for field in root.inspector: Field {
+                label: field.label;
+                value: field.value;
+            }
+        }
+    }
+
+    // ── View switcher (top centre) ─────────────────────────────────────────────
+    HorizontalLayout {
+        x: sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - self.preferred-width) / 2;
+        y: Theme.inset;
+        spacing: Theme.gap;
+        SegmentedControl {
+            items: ["3D", "Top"];
+            current <=> root.view-mode;
+            selected(index) => { root.view-mode-requested(index); }
+        }
+    }
+
+    // ── Floating pill toolbar (bottom centre) ─────────────────────────────────
+    toolbar := Rectangle {
+        x: sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - self.width) / 2;
+        y: root.height - self.height - 18px;
+        width: tools.preferred-width;
+        height: 42px;
+        border-radius: 21px;
+        background: Theme.panel-bg;
+        border-width: 1px;
+        border-color: Theme.panel-border;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow;
+
+        tools := HorizontalLayout {
+            padding: 6px;
+            spacing: 2px;
+            ToolButton { label: "Select"; active: true; }
+            ToolButton { label: "Move"; available: false; }
+            ToolButton { label: "Rotate"; available: false; }
+            ToolButton { label: "Measure"; available: false; }
+            Rectangle { width: 9px; Rectangle { width: 1px; height: 18px; background: Theme.hairline; } }
+            ToolButton { label: "Frame all"; clicked => { root.frame-all(); } }
+        }
+    }
+
+    // ── Status chip (bottom left of the viewport) ─────────────────────────────
+    Rectangle {
+        x: sidebar.x + sidebar.width + Theme.inset;
+        y: root.height - self.height - 18px;
+        height: 26px;
+        width: status-row.preferred-width;
+        border-radius: 13px;
+        background: Theme.panel-bg;
+        border-width: 1px;
+        border-color: Theme.panel-border;
+
+        status-row := HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 12px;
+            spacing: 8px;
+            Rectangle {
+                width: 7px;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.rendering ? Theme.accent : Theme.ok;
+                    animate background { duration: Theme.quick; }
+                }
+            }
+            Text {
+                text: root.status;
+                color: Theme.text-secondary;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.gpu;
+                color: Theme.text-tertiary;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

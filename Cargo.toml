@@ -1,0 +1,54 @@
+[workspace]
+resolver = "3"
+members = ["crates/lab-core", "crates/lab-viewport", "crates/lab-ui", "crates/lab-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+lab-core = { path = "crates/lab-core" }
+lab-viewport = { path = "crates/lab-viewport" }
+lab-ui = { path = "crates/lab-ui" }
+
+# Slint and Bevy must share one wgpu major version (Slint's `unstable-wgpu-30` <-> Bevy 0.20).
+# Upgrade them together; see docs/DESIGN.md §9.
+slint = { version = "=1.18.1", features = ["renderer-skia", "unstable-wgpu-30", "raw-window-handle-06"] }
+slint-build = "=1.18.1"
+bevy = { version = "=0.20.0", default-features = false, features = [
+    "std",
+    "multi_threaded",
+    "bevy_log",
+    "bevy_window",
+    "bevy_asset",
+    "bevy_core_pipeline",
+    "bevy_render",
+    "bevy_camera",
+    "bevy_light",
+    "bevy_mesh",
+    "bevy_pbr",
+    "bevy_picking",
+    "mesh_picking",
+    "tonemapping_luts",
+    "zstd_rust",
+] }
+wgpu = "30"
+async-channel = "2"
+glam = { version = "0.33", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+
+[profile.dev]
+opt-level = 1
+
+# Bevy and Skia are unusably slow without optimisation, even in debug builds.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

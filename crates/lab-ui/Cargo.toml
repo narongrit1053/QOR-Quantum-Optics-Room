@@ -1,0 +1,13 @@
+[package]
+name = "lab-ui"
+description = "Slint UI (design tokens, components, main window) for LabSetup."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slint.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true

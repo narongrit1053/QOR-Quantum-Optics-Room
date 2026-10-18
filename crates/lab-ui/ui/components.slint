@@ -1,0 +1,195 @@
+import { Theme } from "theme.slint";
+
+// A floating, translucent panel over the 3D viewport.
+export component Panel inherits Rectangle {
+    background: Theme.panel-bg;
+    border-radius: Theme.radius-panel;
+    border-width: 1px;
+    border-color: Theme.panel-border;
+    drop-shadow-blur: 28px;
+    drop-shadow-offset-y: 10px;
+    drop-shadow-color: Theme.shadow;
+    clip: true;
+}
+
+// Small uppercase section label.
+export component SectionHeader inherits Text {
+    color: Theme.text-tertiary;
+    font-size: Theme.font-caption;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    height: 24px;
+    vertical-alignment: center;
+}
+
+// A rounded square holding a one-letter monogram, like a macOS sidebar icon.
+export component Glyph inherits Rectangle {
+    in property <string> letter;
+    in property <color> tint: Theme.accent;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: tint.with-alpha(0.22);
+    Text {
+        text: letter;
+        color: tint.brighter(0.4);
+        font-size: 11px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// A sidebar row with hover and selected states.
+export component ListRow inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    in property <bool> selected;
+    in property <bool> dimmed;
+    in property <int> depth;
+    in property <color> marker: transparent;
+    callback clicked();
+
+    height: 28px;
+    border-radius: 7px;
+    background: selected ? Theme.accent-soft : touch.has-hover && !dimmed ? Theme.control-hover : transparent;
+    animate background { duration: Theme.quick; }
+
+    HorizontalLayout {
+        padding-left: 8px + depth * 16px;
+        padding-right: 8px;
+        spacing: 8px;
+        if marker != transparent: Rectangle {
+            width: 10px;
+            Rectangle {
+                width: 10px;
+                height: 2px;
+                border-radius: 1px;
+                background: marker;
+            }
+        }
+        Text {
+            text: label;
+            color: dimmed ? Theme.text-tertiary : depth > 0 ? Theme.text-secondary : Theme.text;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if detail != "": Text {
+            text: detail;
+            color: Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: !dimmed;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Two or more mutually exclusive options with a sliding thumb.
+export component SegmentedControl inherits Rectangle {
+    in property <[string]> items;
+    in-out property <int> current;
+    in property <length> segment-width: 64px;
+    callback selected(int);
+
+    width: items.length * segment-width + 4px;
+    height: 30px;
+    border-radius: 9px;
+    background: Theme.panel-bg;
+    border-width: 1px;
+    border-color: Theme.panel-border;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: Theme.shadow;
+
+    Rectangle {
+        x: 2px + root.current * root.segment-width;
+        y: 2px;
+        width: root.segment-width;
+        height: parent.height - 4px;
+        border-radius: 7px;
+        background: Theme.control-thumb;
+        animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+    }
+
+    for item[i] in root.items: Rectangle {
+        x: 2px + i * root.segment-width;
+        y: 2px;
+        width: root.segment-width;
+        height: parent.height - 4px;
+        Text {
+            text: item;
+            color: i == root.current ? Theme.text : Theme.text-secondary;
+            font-size: 12px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            animate color { duration: Theme.quick; }
+        }
+        TouchArea {
+            clicked => {
+                if (root.current != i) {
+                    root.current = i;
+                    root.selected(i);
+                }
+            }
+        }
+    }
+}
+
+// A button in the floating pill toolbar.
+export component ToolButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    in property <bool> available: true;
+    callback clicked();
+
+    height: 30px;
+    width: text.preferred-width + 24px;
+    border-radius: 15px;
+    background: active ? Theme.accent : touch.has-hover && available ? Theme.control-hover : transparent;
+    animate background { duration: Theme.quick; }
+
+    text := Text {
+        text: label;
+        color: active ? white : available ? Theme.text : Theme.text-tertiary;
+        font-size: 12px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: available;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Label/value pair in the inspector.
+export component Field inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    height: 26px;
+    spacing: 8px;
+    Text {
+        text: label;
+        color: Theme.text-secondary;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+        width: 88px;
+    }
+    Text {
+        text: value;
+        color: Theme.text;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+        horizontal-alignment: right;
+        overflow: elide;
+        horizontal-stretch: 1;
+    }
+}

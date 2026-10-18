@@ -1,0 +1,5 @@
+/target
+*.pdb
+
+# Personal Claude Code settings
+.claude/settings.local.json

@@ -1,0 +1,84 @@
+# step2glb spike: the throwaway change that loaded GLBs into the LabSetup viewport (2026-10-18).
+# Not merged; apply in M4 with 'git apply' from the repo root. See docs/DESIGN.md §13.
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -33,6 +33,8 @@
+     "mesh_picking",
+     "tonemapping_luts",
+     "zstd_rust",
++    "bevy_gltf",
++    "reflect_auto_register",
+ ] }
+ wgpu = "30"
+ async-channel = "2"
+--- a/crates/lab-viewport/src/scene.rs
++++ b/crates/lab-viewport/src/scene.rs
+@@ -8,6 +8,8 @@
+ 
+ use bevy::{
+     asset::RenderAssetUsages,
++    gltf::GltfAssetLabel,
++    world_serialization::WorldAssetRoot,
+     image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
+     light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap, GlobalAmbientLight, NotShadowCaster},
+     math::{Affine2, DQuat, DVec3},
+@@ -68,8 +70,9 @@
+             .insert_resource(ClearColor(Color::NONE))
+             .insert_resource(GlobalAmbientLight { color: Color::srgb(0.85, 0.9, 1.0), brightness: 160.0, ..default() })
+             .insert_resource(DirectionalLightShadowMap { size: 1024 })
+-            .add_systems(Startup, (spawn_lighting, spawn_initial_document))
+-            .add_systems(PreUpdate, load_requested_document);
++            .add_systems(Startup, (spawn_lighting, spawn_glb_parts.before(spawn_initial_document), spawn_initial_document))
++            .add_systems(PreUpdate, load_requested_document)
++            .add_systems(Update, keep_alive_while_parts_load);
+     }
+ }
+ 
+@@ -87,6 +90,47 @@
+     ));
+ }
+ 
++/// step2glb spike: a GLB converted from a vendor STEP file, in document space (mm, +Z up).
++#[derive(Component)]
++struct GlbPart;
++
++/// step2glb spike: puts three converted Thorlabs parts on the first platform.
++fn spawn_glb_parts(mut commands: Commands, initial: Res<InitialDocument>, assets: Res<AssetServer>) {
++    let Some(platform) = initial.0.platforms.first() else { return };
++    let (origin, rotation) = platform_transform(platform);
++    for (i, file) in ["FMMP1_M.glb", "RS99_M.glb", "FMMP1A3_M.glb"].into_iter().enumerate() {
++        let local = DVec3::new(-250.0 + 120.0 * i as f64, 300.0, 0.0);
++        commands.spawn((
++            SceneEntity,
++            GlbPart,
++            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
++            Transform {
++                translation: to_render(origin + rotation * local),
++                // GLB vertices are in document space: the same Z-up -> Y-up change as
++                // `to_render`, applied after the document rotation, and mm -> m.
++                rotation: rotation_to_render(rotation) * Quat::from_rotation_x(-FRAC_PI_2),
++                scale: Vec3::splat(MM),
++            },
++        ));
++    }
++}
++
++/// glTF scenes load asynchronously, and nothing else wakes the on-demand host loop when they
++/// arrive. Keep rendering until every part has spawned, plus two frames for mesh bounds.
++fn keep_alive_while_parts_load(
++    loading: Query<(), (With<GlbPart>, Without<Children>)>,
++    mut frames_after: Local<u8>,
++    mut redraw: ResMut<RedrawState>,
++) {
++    if !loading.is_empty() {
++        *frames_after = 0;
++        redraw.keep_alive = true;
++    } else if *frames_after < 2 {
++        *frames_after += 1;
++        redraw.keep_alive = true;
++    }
++}
++
+ fn spawn_initial_document(
+     mut commands: Commands,
+     initial: Res<InitialDocument>,
