@@ -86,7 +86,26 @@ You own the parent issue "M1". Multica wakes you when every sub-issue in the ear
 2. **A review stage finished:** merge the wave (below), then set the next wave's implementation sub-issues to `todo`. After the last wave, set "T7" to `todo` (it is yours).
 3. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
 
-**Argon rate limits.** Gemini 4 Argon and Gemini 3.8 Flash have separate quotas. If an issue assigned to an Argon agent (Gemini Engineer, Gemini Engineer Medium, QA Reviewer, QA Reviewer Medium) fails because of a rate or usage limit, reassign it to its Flash fallback: engineers to **Gemini Engineer Flash**, reviewers to **QA Reviewer Flash** (`multica issue update <KEY> --assignee "<name>"`). Comment why, so the Flash agent continues from the worktree and the comments instead of starting over. Move it back to the Argon agent when that agent's limit resets, if the task is not finished yet. Never use Flash for T2 or T4b reviews if Argon is available within a few hours; wait instead.
+## Failed runs and usage limits
+
+Quotas: all Claude agents share one Claude plan; all Argon agents share one Argon quota; Flash has its own. Every M1 issue has a `task.failed` wakeup that wakes a **triager on the other provider**, because the failed agent's own quota may be gone:
+
+- Issues assigned to Antigravity agents (Gemini Engineer\*, QA Reviewer\*): **Lead Engineer** triages.
+- Issues assigned to Claude agents (Lead Engineer, Rust Engineer\*) and the M1 parent: **Limit Dispatcher** (Flash) triages.
+
+When woken by a failure, the triager does only this (no code, no worktree changes, no other issues):
+
+1. Read the error: `multica issue runs <KEY>`, then `multica issue run-messages <run-id>` for the failed run.
+2. **Usage or rate limit** (429, "quota", "usage limit", "rate limit", "resource exhausted", "try again at ..."):
+   - Failed agent is **Argon**: reassign to its Flash fallback (engineers to **Gemini Engineer Flash**, reviewers to **QA Reviewer Flash**) with `multica issue update <KEY> --assignee "<name>"`. Exception: the T2 and T4b reviews (POLA-12, POLA-16) never go to Flash; schedule a rerun instead (below).
+   - Otherwise (Claude, Flash, or the exception): **schedule a rerun after the reset** for the same assignee: `multica issue wakeup create <KEY> --kind at --after <wait> --agent-id <assignee id> --instruction "Usage limit has reset. Continue this issue from its worktree and comments; do not start over."` Use the reset time from the error plus 10 minutes; if there is none, `5h`.
+   - If a reassignment does not start a run within a few minutes, `multica issue rerun <KEY>`.
+3. **Any other failure:** if the previous run on this issue did not fail the same way, `multica issue rerun <KEY>`. If it did, set the issue `blocked` and @-mention the Lead Engineer (or, if the Lead is the assignee, leave it for the board).
+4. Comment once on the issue: the error (one line) and what you did.
+
+Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Rust Engineer `a2d64798-7e14-42f4-9de6-b369a1633278`, Rust Engineer XHigh `c864e3c5-8f38-466b-b01e-c54254dbd753`, Gemini Engineer `407bed7a-4d2b-4130-a012-a39da2d7d933`, Gemini Engineer Medium `7d8b7572-25aa-41f0-b243-16c986d4f43f`, QA Reviewer `ac9b1599-4d1d-43b7-b7ac-29c94ee1220d`, QA Reviewer Medium `64a587cf-66a5-4a64-a08d-e4b866964ccd`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, QA Reviewer Flash `fffab64a-dab3-4135-bc74-82fe0a5bfcbe`.
+
+The platform pauses a wakeup rule after it fires three times in a chain with no person in between, so an issue that keeps failing ends up waiting for the board.
 
 ## Merges (Lead Engineer only)
 
