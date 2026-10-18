@@ -74,7 +74,7 @@ Then set the issue to `done` (or `blocked`, with the reason).
 Review issues are **adversarial**: assume the work is incomplete or wrong until proven otherwise. Re-run the gates yourself in the task's worktree. Check every acceptance criterion against real evidence, file ownership (`git diff m1...m1-<ID>`), interfaces exactly as the spec defines them (later tasks code against them), and correctness: logic bugs, unhandled edge cases the spec calls out, panics on user data, `unwrap`/`expect` on file contents, missing tests. Do not edit the task's files.
 
 - **Pass:** no blocker or major issues. Comment the verdict on the review issue and set it `done`.
-- **Fail:** comment each blocker or major issue (with `file:line` and evidence) on the **implementation** issue, @-mentioning its engineer, and set that issue back to `todo`. Set your review issue to `in_review` (not done).
+- **Fail:** comment each blocker or major issue (with `file:line` and evidence) on the **implementation** issue, @-mentioning its engineer, and set that issue back to `todo`. If that engineer is an Argon agent (Gemini Engineer, Gemini Engineer Medium), first reassign the issue to **Gemini Engineer Flash** and @-mention that agent instead (Argon is kept for reviews). Reopening a `done` issue also needs its failure wakeup again; see the end of 'Failed runs and usage limits'. Set your review issue to `in_review` (not done).
 - **Engineer, after fixing:** commit, set the implementation issue `done`, and comment there @-mentioning the reviewer: "Fixed in `<commit>`, please re-review <review issue key>". The reviewer reviews again from the top and updates the review issue.
 - After three failed rounds, the reviewer sets the review issue `blocked` and @-mentions the Lead Engineer with a summary.
 
@@ -87,6 +87,8 @@ You own the parent issue "M1". Multica wakes you when every sub-issue in the ear
 3. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
 
 ## Failed runs and usage limits
+
+**Model budget.** Argon has a weekly limit, so it is used for **reviews only**. Implementation work, including review fix rounds, runs on Claude Opus, Claude Sonnet (**Rust Engineer Sonnet**) and Gemini Flash (**Gemini Engineer Flash**). Gemini Engineer and Gemini Engineer Medium take no new work.
 
 Quotas: all Claude agents share one Claude plan; all Argon agents share one Argon quota; Flash has its own. Every M1 issue has a `task.failed` wakeup that wakes a **triager on the other provider**, because the failed agent's own quota may be gone:
 
@@ -104,6 +106,8 @@ When woken by a failure, the triager does only this (no code, no worktree change
 4. Comment once on the issue: the error (one line) and what you did.
 
 Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Rust Engineer `a2d64798-7e14-42f4-9de6-b369a1633278`, Rust Engineer XHigh `c864e3c5-8f38-466b-b01e-c54254dbd753`, Gemini Engineer `407bed7a-4d2b-4130-a012-a39da2d7d933`, Gemini Engineer Medium `7d8b7572-25aa-41f0-b243-16c986d4f43f`, QA Reviewer `ac9b1599-4d1d-43b7-b7ac-29c94ee1220d`, QA Reviewer Medium `64a587cf-66a5-4a64-a08d-e4b866964ccd`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, QA Reviewer Flash `fffab64a-dab3-4135-bc74-82fe0a5bfcbe`.
+
+Closed (`done`/`cancelled`) issues cannot hold wakeups. Whoever moves an issue from `done` back to `todo` registers one: `multica issue wakeup create <KEY> --kind event --event task.failed --mode continuous --agent-id <triager id> --instruction "A run on this issue failed. Triage it as the guide's 'Failed runs and usage limits' section says."` (triager: Lead Engineer for Antigravity assignees, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688` for Claude assignees).
 
 The platform pauses a wakeup rule after it fires three times in a chain with no person in between, so an issue that keeps failing ends up waiting for the board.
 
