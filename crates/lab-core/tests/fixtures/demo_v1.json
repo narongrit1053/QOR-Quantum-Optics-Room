@@ -1,0 +1,1103 @@
+{
+  "schema_version": 1,
+  "name": "Demo — Rb-87 beam path",
+  "room": {
+    "size": [
+      6000.0,
+      5000.0
+    ],
+    "height": 3000.0
+  },
+  "platforms": [
+    {
+      "id": 1,
+      "name": "Table A",
+      "size": [
+        1200.0,
+        900.0
+      ],
+      "thickness": 210.0,
+      "top_height": 800.0,
+      "position": [
+        0.0,
+        0.0
+      ],
+      "rotation_z": 0.0,
+      "hole_grid": {
+        "pitch": 25.0,
+        "margin": 12.5,
+        "thread": "M6"
+      },
+      "support": {
+        "Legs": {
+          "size": 120.0,
+          "inset": 120.0
+        }
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": 2,
+      "name": "Laser (ECDL, 780 nm)",
+      "part": "generic:laser-head",
+      "platform": 1,
+      "position": [
+        -437.5,
+        -237.5,
+        45.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            300.0,
+            120.0,
+            90.0
+          ]
+        }
+      },
+      "finish": {
+        "Painted": {
+          "rgb": [
+            58,
+            64,
+            74
+          ]
+        }
+      },
+      "pickable": true
+    },
+    {
+      "id": 3,
+      "name": "M1 · base",
+      "part": "generic:base-25x75",
+      "platform": 1,
+      "position": [
+        -137.5,
+        -237.5,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.9238795325112867,
+        0.38268343236508984
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.0,
+            75.0,
+            10.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 4,
+      "name": "M1 · post holder",
+      "part": "generic:post-holder-40",
+      "platform": 1,
+      "position": [
+        -137.5,
+        -237.5,
+        30.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 40.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 5,
+      "name": "M1 · post",
+      "part": "generic:post-12.7-36",
+      "platform": 1,
+      "position": [
+        -137.5,
+        -237.5,
+        38.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 6.35,
+          "length": 36.0
+        }
+      },
+      "finish": "Stainless",
+      "pickable": true
+    },
+    {
+      "id": 6,
+      "name": "M1 · mount",
+      "part": "generic:kinematic-mount-1in",
+      "platform": 1,
+      "position": [
+        -130.7824855787278,
+        -244.2175144212722,
+        75.0
+      ],
+      "rotation": [
+        -0.6532814824381883,
+        0.27059805007309856,
+        0.6532814824381883,
+        0.27059805007309856
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            38.0,
+            38.0,
+            13.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 7,
+      "name": "M1",
+      "part": "generic:mirror-1in",
+      "platform": 1,
+      "position": [
+        -137.5,
+        -237.5,
+        75.0
+      ],
+      "rotation": [
+        -0.6532814824381883,
+        0.27059805007309856,
+        0.6532814824381883,
+        0.27059805007309856
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 6.0
+        }
+      },
+      "finish": "Mirror",
+      "pickable": true
+    },
+    {
+      "id": 8,
+      "name": "M2 · base",
+      "part": "generic:base-25x75",
+      "platform": 1,
+      "position": [
+        -137.5,
+        162.5,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        -0.3826834323650898,
+        0.9238795325112867
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.0,
+            75.0,
+            10.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 9,
+      "name": "M2 · post holder",
+      "part": "generic:post-holder-40",
+      "platform": 1,
+      "position": [
+        -137.5,
+        162.5,
+        30.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 40.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 10,
+      "name": "M2 · post",
+      "part": "generic:post-12.7-36",
+      "platform": 1,
+      "position": [
+        -137.5,
+        162.5,
+        38.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 6.35,
+          "length": 36.0
+        }
+      },
+      "finish": "Stainless",
+      "pickable": true
+    },
+    {
+      "id": 11,
+      "name": "M2 · mount",
+      "part": "generic:kinematic-mount-1in",
+      "platform": 1,
+      "position": [
+        -144.2175144212722,
+        169.2175144212722,
+        75.0
+      ],
+      "rotation": [
+        0.2705980500730985,
+        0.6532814824381883,
+        -0.2705980500730985,
+        0.6532814824381883
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            38.0,
+            38.0,
+            13.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 12,
+      "name": "M2",
+      "part": "generic:mirror-1in",
+      "platform": 1,
+      "position": [
+        -137.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.2705980500730985,
+        0.6532814824381883,
+        -0.2705980500730985,
+        0.6532814824381883
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 6.0
+        }
+      },
+      "finish": "Mirror",
+      "pickable": true
+    },
+    {
+      "id": 13,
+      "name": "L1 (f = 100 mm) · base",
+      "part": "generic:base-25x75",
+      "platform": 1,
+      "position": [
+        62.5,
+        162.5,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.7071067811865476,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.0,
+            75.0,
+            10.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 14,
+      "name": "L1 (f = 100 mm) · post holder",
+      "part": "generic:post-holder-40",
+      "platform": 1,
+      "position": [
+        62.5,
+        162.5,
+        30.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 40.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 15,
+      "name": "L1 (f = 100 mm) · post",
+      "part": "generic:post-12.7-36",
+      "platform": 1,
+      "position": [
+        62.5,
+        162.5,
+        38.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 6.35,
+          "length": 36.0
+        }
+      },
+      "finish": "Stainless",
+      "pickable": true
+    },
+    {
+      "id": 16,
+      "name": "L1 (f = 100 mm) · mount",
+      "part": "generic:ring-mount-1in",
+      "platform": 1,
+      "position": [
+        62.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 19.0,
+          "length": 8.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 17,
+      "name": "L1 (f = 100 mm)",
+      "part": "generic:lens-1in-f100",
+      "platform": 1,
+      "position": [
+        62.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 9.0
+        }
+      },
+      "finish": "Glass",
+      "pickable": true
+    },
+    {
+      "id": 18,
+      "name": "HWP · base",
+      "part": "generic:base-25x75",
+      "platform": 1,
+      "position": [
+        162.5,
+        162.5,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.7071067811865476,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.0,
+            75.0,
+            10.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 19,
+      "name": "HWP · post holder",
+      "part": "generic:post-holder-40",
+      "platform": 1,
+      "position": [
+        162.5,
+        162.5,
+        30.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 40.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 20,
+      "name": "HWP · post",
+      "part": "generic:post-12.7-33",
+      "platform": 1,
+      "position": [
+        162.5,
+        162.5,
+        36.5
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 6.35,
+          "length": 33.0
+        }
+      },
+      "finish": "Stainless",
+      "pickable": true
+    },
+    {
+      "id": 21,
+      "name": "HWP · mount",
+      "part": "generic:ring-mount-1in",
+      "platform": 1,
+      "position": [
+        162.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 22.0,
+          "length": 14.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 22,
+      "name": "HWP",
+      "part": "generic:half-wave-plate-1in",
+      "platform": 1,
+      "position": [
+        162.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 15.0
+        }
+      },
+      "finish": "Glass",
+      "pickable": true
+    },
+    {
+      "id": 23,
+      "name": "PBS · base",
+      "part": "generic:base-25x75",
+      "platform": 1,
+      "position": [
+        262.5,
+        162.5,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.0,
+            75.0,
+            10.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 24,
+      "name": "PBS · post holder",
+      "part": "generic:post-holder-40",
+      "platform": 1,
+      "position": [
+        262.5,
+        162.5,
+        30.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 40.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 25,
+      "name": "PBS · post",
+      "part": "generic:post-12.7-37",
+      "platform": 1,
+      "position": [
+        262.5,
+        162.5,
+        38.65
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 6.35,
+          "length": 37.3
+        }
+      },
+      "finish": "Stainless",
+      "pickable": true
+    },
+    {
+      "id": 26,
+      "name": "PBS · platform",
+      "part": "generic:prism-platform",
+      "platform": 1,
+      "position": [
+        262.5,
+        162.5,
+        59.8
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            30.0,
+            30.0,
+            5.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 27,
+      "name": "PBS",
+      "part": "generic:pbs-cube-1in",
+      "platform": 1,
+      "position": [
+        262.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.4,
+            25.4,
+            25.4
+          ]
+        }
+      },
+      "finish": "Glass",
+      "pickable": true
+    },
+    {
+      "id": 28,
+      "name": "D1 (transmitted) · base",
+      "part": "generic:base-25x75",
+      "platform": 1,
+      "position": [
+        462.5,
+        162.5,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        -1.0,
+        6.123233995736766e-17
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.0,
+            75.0,
+            10.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 29,
+      "name": "D1 (transmitted) · post holder",
+      "part": "generic:post-holder-40",
+      "platform": 1,
+      "position": [
+        462.5,
+        162.5,
+        30.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 40.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 30,
+      "name": "D1 (transmitted) · post",
+      "part": "generic:post-12.7-35",
+      "platform": 1,
+      "position": [
+        462.5,
+        162.5,
+        37.5
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 6.35,
+          "length": 35.0
+        }
+      },
+      "finish": "Stainless",
+      "pickable": true
+    },
+    {
+      "id": 31,
+      "name": "D1 (transmitted)",
+      "part": "generic:photodiode",
+      "platform": 1,
+      "position": [
+        462.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.7071067811865476,
+        4.329780281177467e-17,
+        -0.7071067811865476,
+        4.329780281177467e-17
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            40.0,
+            40.0,
+            25.0
+          ]
+        }
+      },
+      "finish": {
+        "Painted": {
+          "rgb": [
+            44,
+            48,
+            56
+          ]
+        }
+      },
+      "pickable": true
+    },
+    {
+      "id": 32,
+      "name": "D2 (reflected) · base",
+      "part": "generic:base-25x75",
+      "platform": 1,
+      "position": [
+        262.5,
+        -137.5,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.7071067811865476,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            25.0,
+            75.0,
+            10.0
+          ]
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 33,
+      "name": "D2 (reflected) · post holder",
+      "part": "generic:post-holder-40",
+      "platform": 1,
+      "position": [
+        262.5,
+        -137.5,
+        30.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 12.7,
+          "length": 40.0
+        }
+      },
+      "finish": "AnodizedBlack",
+      "pickable": true
+    },
+    {
+      "id": 34,
+      "name": "D2 (reflected) · post",
+      "part": "generic:post-12.7-35",
+      "platform": 1,
+      "position": [
+        262.5,
+        -137.5,
+        37.5
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 6.35,
+          "length": 35.0
+        }
+      },
+      "finish": "Stainless",
+      "pickable": true
+    },
+    {
+      "id": 35,
+      "name": "D2 (reflected)",
+      "part": "generic:photodiode",
+      "platform": 1,
+      "position": [
+        262.5,
+        -137.5,
+        75.0
+      ],
+      "rotation": [
+        -0.5000000000000001,
+        0.5000000000000001,
+        0.5000000000000001,
+        0.5000000000000001
+      ],
+      "shape": {
+        "Box": {
+          "size": [
+            40.0,
+            40.0,
+            25.0
+          ]
+        }
+      },
+      "finish": {
+        "Painted": {
+          "rgb": [
+            44,
+            48,
+            56
+          ]
+        }
+      },
+      "pickable": true
+    },
+    {
+      "id": 36,
+      "name": "Beam · laser → M1",
+      "part": "beam",
+      "platform": 1,
+      "position": [
+        -212.5,
+        -237.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 0.75,
+          "length": 150.0
+        }
+      },
+      "finish": {
+        "Beam": {
+          "wavelength_nm": 780.0
+        }
+      },
+      "pickable": false
+    },
+    {
+      "id": 37,
+      "name": "Beam · M1 → M2",
+      "part": "beam",
+      "platform": 1,
+      "position": [
+        -137.5,
+        -37.5,
+        75.0
+      ],
+      "rotation": [
+        -0.5000000000000001,
+        0.5000000000000001,
+        0.5000000000000001,
+        0.5000000000000001
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 0.75,
+          "length": 400.0
+        }
+      },
+      "finish": {
+        "Beam": {
+          "wavelength_nm": 780.0
+        }
+      },
+      "pickable": false
+    },
+    {
+      "id": 38,
+      "name": "Beam · M2 → PBS",
+      "part": "beam",
+      "platform": 1,
+      "position": [
+        62.5,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 0.75,
+          "length": 400.0
+        }
+      },
+      "finish": {
+        "Beam": {
+          "wavelength_nm": 780.0
+        }
+      },
+      "pickable": false
+    },
+    {
+      "id": 39,
+      "name": "Beam · PBS → D1",
+      "part": "beam",
+      "platform": 1,
+      "position": [
+        356.25,
+        162.5,
+        75.0
+      ],
+      "rotation": [
+        0.0,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 0.75,
+          "length": 187.5
+        }
+      },
+      "finish": {
+        "Beam": {
+          "wavelength_nm": 780.0
+        }
+      },
+      "pickable": false
+    },
+    {
+      "id": 40,
+      "name": "Beam · PBS → D2",
+      "part": "beam",
+      "platform": 1,
+      "position": [
+        262.5,
+        18.75,
+        75.0
+      ],
+      "rotation": [
+        0.5000000000000001,
+        0.5000000000000001,
+        -0.5000000000000001,
+        0.5000000000000001
+      ],
+      "shape": {
+        "Cylinder": {
+          "radius": 0.75,
+          "length": 287.5
+        }
+      },
+      "finish": {
+        "Beam": {
+          "wavelength_nm": 780.0
+        }
+      },
+      "pickable": false
+    }
+  ],
+  "next_id": 41
+}

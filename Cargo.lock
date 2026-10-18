@@ -3812,9 +3812,12 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "lab-core",
+ "lab-file",
+ "lab-geom",
  "lab-ui",
  "lab-viewport",
  "raw-window-handle",
+ "serde_json",
  "slint",
  "windows-sys 0.60.2",
 ]
@@ -3824,8 +3827,29 @@ name = "lab-core"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "lab-geom",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lab-file"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "lab-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lab-geom"
+version = "0.1.0"
+dependencies = [
+ "glam",
  "thiserror 2.0.21",
 ]
 
@@ -3844,6 +3868,7 @@ dependencies = [
  "async-channel",
  "bevy",
  "lab-core",
+ "lab-geom",
  "wgpu",
 ]
 

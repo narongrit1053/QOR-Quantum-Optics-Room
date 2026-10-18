@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/lab-core", "crates/lab-viewport", "crates/lab-ui", "crates/lab-app"]
+members = [
+    "crates/lab-core",
+    "crates/lab-geom",
+    "crates/lab-file",
+    "crates/lab-viewport",
+    "crates/lab-ui",
+    "crates/lab-app",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +19,8 @@ publish = false
 lab-core = { path = "crates/lab-core" }
 lab-viewport = { path = "crates/lab-viewport" }
 lab-ui = { path = "crates/lab-ui" }
+lab-geom = { path = "crates/lab-geom" }
+lab-file = { path = "crates/lab-file" }
 
 # Slint and Bevy must share one wgpu major version (Slint's `unstable-wgpu-30` <-> Bevy 0.20).
 # Upgrade them together; see docs/DESIGN.md §9.
@@ -40,6 +49,9 @@ glam = { version = "0.33", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
+# Deflate + CRC for the project container. 1.1.10 with default features is already in the
+# runtime tree (via png/usvg), so this adds no new crate and no feature change.
+flate2 = "1.1"
 
 [profile.dev]
 opt-level = 1
@@ -47,6 +59,13 @@ opt-level = 1
 # Bevy and Skia are unusably slow without optimisation, even in debug builds.
 [profile.dev.package."*"]
 opt-level = 3
+
+# Hole and mesh computation must stay fast in debug builds (M1-SPEC D21).
+[profile.dev.package.lab-core]
+opt-level = 2
+
+[profile.dev.package.lab-geom]
+opt-level = 2
 
 [profile.release]
 lto = "thin"
