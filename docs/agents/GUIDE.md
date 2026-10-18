@@ -97,7 +97,7 @@ Quotas: all Claude agents share one Claude plan; all Argon agents share one Argo
 
 When woken by a failure, the triager does only this (no code, no worktree changes, no other issues):
 
-1. Read the error: `multica issue runs <KEY>`, then `multica issue run-messages <run-id>` for the failed run.
+1. Read the error: `multica issue runs <KEY>`, then `multica issue run-messages <run-id>` for the failed run. If the latest run did not fail (it completed, or a later run is queued or running), comment that and stop.
 2. **Usage or rate limit** (429, "quota", "usage limit", "rate limit", "resource exhausted", "try again at ..."):
    - Failed agent is **Argon**: reassign to its Flash fallback (engineers to **Gemini Engineer Flash**, reviewers to **QA Reviewer Flash**) with `multica issue update <KEY> --assignee "<name>"`. Exception: the T2 and T4b reviews (POLA-12, POLA-16) never go to Flash; schedule a rerun instead (below).
    - Otherwise (Claude, Flash, or the exception): **schedule a rerun after the reset** for the same assignee: `multica issue wakeup create <KEY> --kind at --after <wait> --agent-id <assignee id> --instruction "Usage limit has reset. Continue this issue from its worktree and comments; do not start over."` Use the reset time from the error plus 10 minutes; if there is none, `5h`.
