@@ -1,0 +1,582 @@
+// Inspector content for nodes, platforms and the room, and the outline preview card
+// (spec §6.1, §6.4). No std-widgets here (D20): their style clashes with the dark theme.
+
+import { Theme } from "theme.slint";
+import { InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
+import { SectionHeader, SegmentedControl, PillButton, IconButton, Field } from "components.slint";
+import { TextField, LabeledField, CornerTable, ZoneList, DoorList } from "fields.slint";
+import { PresetMenu } from "overlays.slint";
+
+// A 268 × 150 card that draws an outline with its zones and error edges, plus corner or
+// wall numbers. Every Path fills the card, shares the square viewbox of `preview` and uses
+// the same 1.5 px stroke, so all of them are fitted identically (contain, centred).
+export component PreviewCard inherits Rectangle {
+    in property <OutlinePreview> preview;
+    in property <[PreviewLabel]> labels;
+    in property <int> focused-corner: -1;
+
+    // Label maths (spec §6.1): the fit box is the card inset by the stroke width; `contain`
+    // maps the square viewbox onto a square of side S = 150px - s, centred horizontally.
+    property <length> stroke: 1.5px;
+    property <length> card-width: 268px;
+    property <length> card-height: 150px;
+    property <length> side: root.card-height - root.stroke;
+    property <length> ox: root.stroke / 2 + ((root.card-width - root.stroke) - root.side) / 2;
+    property <length> oy: root.stroke / 2;
+    property <bool> has-viewbox: root.preview.vb-size > 0;
+
+    width: root.card-width;
+    height: root.card-height;
+    border-radius: 10px;
+    background: #FFFFFF08;
+
+    if root.has-viewbox: Path {
+        x: 0;
+        y: 0;
+        width: root.card-width;
+        height: root.card-height;
+        commands: root.preview.outline;
+        viewbox-x: root.preview.vb-x;
+        viewbox-y: root.preview.vb-y;
+        viewbox-width: root.preview.vb-size;
+        viewbox-height: root.preview.vb-size;
+        fill: #FFFFFF0A;
+        stroke: Theme.text-secondary;
+        stroke-width: root.stroke;
+    }
+    if root.has-viewbox && root.preview.zones != "": Path {
+        x: 0;
+        y: 0;
+        width: root.card-width;
+        height: root.card-height;
+        commands: root.preview.zones;
+        viewbox-x: root.preview.vb-x;
+        viewbox-y: root.preview.vb-y;
+        viewbox-width: root.preview.vb-size;
+        viewbox-height: root.preview.vb-size;
+        fill: Theme.accent.with-alpha(0.10);
+        stroke: Theme.accent;
+        stroke-width: root.stroke;
+    }
+    if root.has-viewbox && root.preview.error-edges != "": Path {
+        x: 0;
+        y: 0;
+        width: root.card-width;
+        height: root.card-height;
+        commands: root.preview.error-edges;
+        viewbox-x: root.preview.vb-x;
+        viewbox-y: root.preview.vb-y;
+        viewbox-width: root.preview.vb-size;
+        viewbox-height: root.preview.vb-size;
+        fill: transparent;
+        stroke: Theme.danger;
+        stroke-width: root.stroke;
+    }
+
+    for label in root.labels: Rectangle {
+        property <bool> hot: label.kind == 0 && label.index == root.focused-corner;
+        visible: root.has-viewbox;
+        width: max(16px, label-text.preferred-width + 8px);
+        height: 16px;
+        // Centred on the label point (viewbox units → card pixels).
+        x: root.ox + (label.x - root.preview.vb-x) / max(root.preview.vb-size, 0.000001) * root.side - self.width / 2;
+        y: root.oy + (label.y - root.preview.vb-y) / max(root.preview.vb-size, 0.000001) * root.side - self.height / 2;
+        border-radius: 8px;
+        background: self.hot ? Theme.accent : label.kind == 0 ? #2C2D31 : transparent;
+        border-width: label.kind == 0 ? 1px : 0px;
+        border-color: self.hot ? Theme.accent : Theme.panel-border;
+        transform-scale-x: self.hot ? 120% : 100%;
+        transform-scale-y: self.hot ? 120% : 100%;
+        animate background, transform-scale-x, transform-scale-y { duration: 140ms; easing: ease-out; }
+        label-text := Text {
+            text: label.text;
+            color: hot ? white : label.kind == 0 ? Theme.text-secondary : Theme.text-tertiary;
+            font-size: 10px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// The red error banner under the inspector title. ✕ dismisses it.
+export component ErrorBanner inherits Rectangle {
+    in property <string> text;
+    callback dismiss();
+
+    border-radius: 8px;
+    background: Theme.danger-soft;
+    border-width: 1px;
+    border-color: Theme.danger.with-alpha(0.35);
+
+    HorizontalLayout {
+        padding: 8px;
+        padding-left: 10px;
+        spacing: 6px;
+        Text {
+            text: root.text;
+            color: Theme.danger.brighter(0.35);
+            font-size: Theme.font-caption;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: start;
+            IconButton {
+                icon: "✕";
+                size: 20px;
+                icon-size: 10px;
+                clicked => { root.dismiss(); }
+            }
+        }
+    }
+}
+
+// A thin rule between inspector sections.
+component Divider inherits Rectangle {
+    height: 13px;
+    Rectangle {
+        y: 6px;
+        height: 1px;
+        background: Theme.hairline;
+    }
+}
+
+// A caption + control row ("Notch", "Thread").
+component ControlRow inherits HorizontalLayout {
+    in property <string> label;
+    height: 34px;
+    spacing: 8px;
+    Text {
+        text: root.label;
+        color: Theme.text-secondary;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+        width: 64px;
+    }
+    @children
+}
+
+component Note inherits Text {
+    color: Theme.text-tertiary;
+    font-size: Theme.font-caption;
+    wrap: word-wrap;
+}
+
+// M0 read-only node fields.
+export component NodeInspector inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <[InspectorField]> fields;
+    in property <string> error;
+    callback action(string /* id */);
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 4px;
+        Text {
+            text: root.title;
+            color: Theme.text;
+            font-size: Theme.font-title;
+            font-weight: 650;
+            overflow: elide;
+        }
+        Text {
+            text: root.detail;
+            color: Theme.text-secondary;
+            font-size: Theme.font-caption;
+            overflow: elide;
+        }
+        if root.error != "": ErrorBanner {
+            text: root.error;
+            dismiss => { root.action("inspector.dismiss_error"); }
+        }
+        Divider { }
+        for field in root.fields: Field {
+            label: field.label;
+            value: field.value;
+        }
+    }
+}
+
+export component PlatformInspector inherits Rectangle {
+    in property <string> name;
+    in property <string> subtitle;
+    in property <string> error;
+    in property <string> unit;
+    in property <int> kind;
+    in property <int> surface;
+    in property <int> outline-kind;
+    in property <[EditField]> outline-fields;
+    in property <int> notch-corner;
+    in property <[CornerRow]> corners;
+    in property <int> corner-invalid: -1;
+    in property <OutlinePreview> preview;
+    in property <[PreviewLabel]> preview-labels;
+    in property <[EditField]> placement;
+    in property <int> grid-standard;
+    in property <int> thread;
+    in property <int> origin-mode;
+    in property <[EditField]> grid-fields;
+    in property <string> hole-summary;
+    in property <string> grid-note;
+    in property <[ZoneRow]> zones;
+    in property <int> support;
+    in property <[EditField]> support-fields;
+    in property <int> node-count;
+    in property <string> warning;
+    in property <[PresetRow]> presets;
+
+    callback field-committed(string /* id */, string /* text */) -> bool;
+    callback field-edited(string /* id */, string /* text */);
+    callback choice-selected(string /* id */, int /* index */);
+    callback action(string /* id */);
+
+    property <int> custom-focused-corner: -1;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 6px;
+
+        // Title and subtitle
+        VerticalLayout {
+            spacing: 0px;
+            TextField {
+                id: "platform.name";
+                value: root.name;
+                plain: true;
+                stretch: true;
+                font-size: Theme.font-title;
+                font-weight: 650;
+                committed(i, t) => { return root.field-committed(i, t); }
+            }
+            HorizontalLayout {
+                padding-left: 9px;
+                Text {
+                    text: root.subtitle;
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-caption;
+                    overflow: elide;
+                }
+            }
+        }
+        if root.error != "": ErrorBanner {
+            text: root.error;
+            dismiss => { root.action("inspector.dismiss_error"); }
+        }
+        SegmentedControl {
+            items: ["Table", "Breadboard", "Custom"];
+            current: root.kind;
+            floating: false;
+            selected(i) => { root.choice-selected("platform.kind", i); }
+        }
+        HorizontalLayout {
+            alignment: start;
+            Rectangle {
+                width: preset-button.preferred-width;
+                height: 28px;
+                preset-button := PillButton {
+                    label: "Preset…";
+                    clicked => { preset-menu.show(); }
+                }
+                preset-menu := PresetMenu {
+                    x: 0;
+                    y: parent.height + 4px;
+                    presets: root.presets;
+                    title: "Apply a preset size";
+                    chosen(id) => { root.action("platform.preset." + id); }
+                }
+            }
+        }
+
+        Divider { }
+        SectionHeader { text: "SHAPE"; }
+        SegmentedControl {
+            items: ["Rect", "Rounded", "L", "Custom"];
+            current: root.outline-kind;
+            floating: false;
+            selected(i) => { root.choice-selected("platform.outline.kind", i); }
+        }
+        for f in root.outline-fields: LabeledField {
+            label: f.label;
+            id: f.id;
+            value: f.value;
+            unit: f.unit;
+            enabled: f.enabled;
+            invalid: f.invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+        }
+        if root.outline-kind == 2: ControlRow {
+            label: "Notch";
+            SegmentedControl {
+                items: ["↙", "↘", "↗", "↖"];
+                current: root.notch-corner;
+                floating: false;
+                item-font-family: Theme.font-symbol;
+                horizontal-stretch: 1;
+                selected(i) => { root.choice-selected("platform.outline.notch_corner", i); }
+            }
+        }
+        if root.outline-kind == 3: Note {
+            text: "Corners are in the platform frame. Switching back to Rect, Rounded or L re-centres the shape.";
+        }
+        if root.outline-kind == 3: CornerTable {
+            focused-corner <=> root.custom-focused-corner;
+            rows: root.corners;
+            show-radius: true;
+            prefix: "platform";
+            unit: root.unit;
+            invalid-row: root.corner-invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+            action(id) => { root.action(id); }
+        }
+        HorizontalLayout {
+            padding-top: 4px;
+            alignment: center;
+            PreviewCard {
+                preview: root.preview;
+                labels: root.preview-labels;
+                focused-corner: root.outline-kind == 3 ? root.custom-focused-corner : -1;
+            }
+        }
+
+        Divider { }
+        SectionHeader { text: "PLACEMENT"; }
+        for f in root.placement: LabeledField {
+            label: f.label;
+            id: f.id;
+            value: f.value;
+            unit: f.unit;
+            enabled: f.enabled;
+            invalid: f.invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+        }
+
+        Divider { }
+        SectionHeader { text: "HOLES"; }
+        SegmentedControl {
+            items: ["None", "Metric", "Imperial", "Custom"];
+            details: ["", "M6 · 25", "¼-20 · 1\"", ""];
+            current: root.grid-standard;
+            floating: false;
+            selected(i) => { root.choice-selected("platform.grid.standard", i); }
+        }
+        if root.grid-standard == 3: ControlRow {
+            label: "Thread";
+            SegmentedControl {
+                items: ["M4", "M6", "8-32", "¼-20"];
+                current: root.thread;
+                floating: false;
+                compact: true;
+                horizontal-stretch: 1;
+                selected(i) => { root.choice-selected("platform.grid.thread", i); }
+            }
+        }
+        if root.grid-standard != 0: ControlRow {
+            label: "Origin";
+            SegmentedControl {
+                items: ["Auto", "Fixed"];
+                current: root.origin-mode;
+                floating: false;
+                compact: true;
+                horizontal-stretch: 1;
+                selected(i) => { root.choice-selected("platform.grid.origin", i); }
+            }
+        }
+        for f in root.grid-fields: LabeledField {
+            label: f.label;
+            id: f.id;
+            value: f.value;
+            unit: f.unit;
+            enabled: f.enabled;
+            invalid: f.invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+        }
+        if root.hole-summary != "": Text {
+            text: root.hole-summary;
+            color: Theme.text-secondary;
+            font-size: Theme.font-caption;
+        }
+        if root.grid-note != "": Note {
+            text: root.grid-note;
+        }
+        Rectangle { height: 4px; }
+        SectionHeader { text: "EXCLUSION ZONES"; }
+        ZoneList {
+            rows: root.zones;
+            unit: root.unit;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+            action(id) => { root.action(id); }
+        }
+
+        Divider { }
+        SectionHeader { text: "SUPPORT"; }
+        SegmentedControl {
+            items: ["Legs", "None"];
+            current: root.support;
+            floating: false;
+            selected(i) => { root.choice-selected("platform.support", i); }
+        }
+        for f in root.support-fields: LabeledField {
+            label: f.label;
+            id: f.id;
+            value: f.value;
+            unit: f.unit;
+            enabled: f.enabled;
+            invalid: f.invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+        }
+        ControlRow {
+            label: "Surface";
+            SegmentedControl {
+                items: ["Stainless", "Black"];
+                current: root.surface;
+                floating: false;
+                compact: true;
+                horizontal-stretch: 1;
+                selected(i) => { root.choice-selected("platform.surface", i); }
+            }
+        }
+
+        if root.warning != "": Text {
+            text: "⚠ " + root.warning;
+            color: Theme.warning;
+            font-family: Theme.font-symbol;
+            font-size: Theme.font-caption;
+            wrap: word-wrap;
+        }
+
+        Divider { }
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            PillButton {
+                label: "Delete platform";
+                destructive: true;
+                clicked => { root.action("platform.delete"); }
+            }
+            if root.node-count > 0: Text {
+                text: root.node-count == 1 ? "Also removes 1 part" : "Also removes \{root.node-count} parts";
+                color: Theme.text-tertiary;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+export component RoomInspector inherits Rectangle {
+    in property <string> subtitle;
+    in property <string> error;
+    in property <string> unit;
+    in property <[EditField]> fields;
+    in property <bool> is-rectangle;
+    in property <[CornerRow]> corners;
+    in property <int> corner-invalid: -1;
+    in property <OutlinePreview> preview;
+    in property <[PreviewLabel]> preview-labels;
+    in property <[DoorRow]> doors;
+    in property <[WallChoice]> walls;
+    in property <int> wall-display;
+
+    callback field-committed(string /* id */, string /* text */) -> bool;
+    callback field-edited(string /* id */, string /* text */);
+    callback choice-selected(string /* id */, int /* index */);
+    callback action(string /* id */);
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 6px;
+
+        Text {
+            text: "Room";
+            color: Theme.text;
+            font-size: Theme.font-title;
+            font-weight: 650;
+        }
+        Text {
+            text: root.subtitle;
+            color: Theme.text-secondary;
+            font-size: Theme.font-caption;
+            overflow: elide;
+        }
+        if root.error != "": ErrorBanner {
+            text: root.error;
+            dismiss => { root.action("inspector.dismiss_error"); }
+        }
+
+        Divider { }
+        SectionHeader { text: "SIZE"; }
+        for f in root.fields: LabeledField {
+            label: f.label;
+            id: f.id;
+            value: f.value;
+            unit: f.unit;
+            enabled: f.enabled;
+            invalid: f.invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+        }
+        HorizontalLayout {
+            alignment: start;
+            PillButton {
+                label: root.is-rectangle ? "Make L-shape" : "Make rectangle";
+                clicked => { root.action(root.is-rectangle ? "room.make_l" : "room.make_rect"); }
+            }
+        }
+
+        Divider { }
+        SectionHeader { text: "OUTLINE"; }
+        HorizontalLayout {
+            alignment: center;
+            PreviewCard {
+                preview: root.preview;
+                labels: root.preview-labels;
+                focused-corner: table.focused-corner;
+            }
+        }
+        table := CornerTable {
+            rows: root.corners;
+            show-radius: false;
+            prefix: "room";
+            unit: root.unit;
+            invalid-row: root.corner-invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+            action(id) => { root.action(id); }
+        }
+
+        Divider { }
+        SectionHeader { text: "DOORS & WINDOWS"; }
+        DoorList {
+            rows: root.doors;
+            walls: root.walls;
+            unit: root.unit;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+            choice(id, i) => { root.choice-selected(id, i); }
+            action(id) => { root.action(id); }
+        }
+
+        Divider { }
+        SectionHeader { text: "VIEW"; }
+        ControlRow {
+            label: "Show walls";
+            SegmentedControl {
+                items: ["Auto", "Always", "Hidden"];
+                current: root.wall-display;
+                floating: false;
+                compact: true;
+                horizontal-stretch: 1;
+                selected(i) => { root.choice-selected("walls", i); }
+            }
+        }
+    }
+}
