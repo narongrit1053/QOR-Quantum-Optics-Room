@@ -86,6 +86,8 @@ You own the parent issue "M1". Multica wakes you when every sub-issue in the ear
 2. **A review stage finished:** merge the wave (below), then set the next wave's implementation sub-issues to `todo`. After the last wave, set "T7" to `todo` (it is yours).
 3. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
 
+**Argon rate limits.** Gemini 4 Argon and Gemini 3.8 Flash have separate quotas. If an issue assigned to an Argon agent (Gemini Engineer, Gemini Engineer Medium, QA Reviewer, QA Reviewer Medium) fails because of a rate or usage limit, reassign it to its Flash fallback: engineers to **Gemini Engineer Flash**, reviewers to **QA Reviewer Flash** (`multica issue update <KEY> --assignee "<name>"`). Comment why, so the Flash agent continues from the worktree and the comments instead of starting over. Move it back to the Argon agent when that agent's limit resets, if the task is not finished yet. Never use Flash for T2 or T4b reviews if Argon is available within a few hours; wait instead.
+
 ## Merges (Lead Engineer only)
 
 In `D:\Try\LabSetup` on `m1` (check it is clean): `git merge --no-ff m1-<ID>` for each reviewed task of the wave, with message `Merge <ID>: <title>` plus the trailer. Do not merge `m1-T6-spike`; T6b takes `dialogs.rs` from it. Run the gates spec §8.2 requires at that point, and `scripts/check-offline.ps1` whenever `lab-app` compiles. Fix only mechanical integration mismatches (commit `Integration fix: ...`). Then `git worktree remove D:/Try/LabSetup-wt/<ID>` (keep the branch).
