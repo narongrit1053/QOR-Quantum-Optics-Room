@@ -132,7 +132,7 @@ pub const PRESETS: &[Preset] = &[
     board("bb-m-600x600", "600 × 600 mm", "Thorlabs MB6060/M", 600.0, 600.0, false),
     board("bb-m-900x600", "900 × 600 mm", "Thorlabs MB6090/M", 900.0, 600.0, false),
     board("bb-i-6x6", "6 × 6 in", "Thorlabs MB6", 6.0, 6.0, true),
-    board("bb-i-12x6", "12 × 6 in", "Thorlabs MB612", 12.0, 6.0, true),
+    board("bb-i-12x6", "12 × 6 in", "", 12.0, 6.0, true), // MB612 is double-density (T7)
     board("bb-i-12x12", "12 × 12 in", "Thorlabs MB12", 12.0, 12.0, true),
     board("bb-i-18x12", "18 × 12 in", "Thorlabs MB1218", 18.0, 12.0, true),
     board("bb-i-24x18", "24 × 18 in", "Thorlabs MB1824", 24.0, 18.0, true),
