@@ -42,10 +42,13 @@ pub struct ViewportHandle {
 pub(crate) struct PendingRequests(pub Vec<FrameRequest>);
 
 /// Systems set `keep_alive` when they need another frame right away (e.g. an animation that
-/// has not settled). The host resets it before every update.
+/// has not settled). Camera motion also sets `moving`, which renders the next frame at reduced
+/// resolution with a sharp frame once motion stops; other frames (settle frames, fades) render
+/// at full resolution, so nothing follows them. The host resets both after every update.
 #[derive(Resource, Default)]
 pub(crate) struct RedrawState {
     pub keep_alive: bool,
+    pub moving: bool,
 }
 
 /// Extra frames still to render after a spawn, so assets created this frame (meshes, materials,
@@ -344,9 +347,10 @@ fn run_on_demand(
         world.resource_mut::<PendingRequests>().0.clear();
         let mut redraw = world.resource_mut::<RedrawState>();
         frames_rendered += 1;
-        animating = std::mem::take(&mut redraw.keep_alive);
+        let keep_alive = std::mem::take(&mut redraw.keep_alive);
+        animating = std::mem::take(&mut redraw.moving);
         // A few warm-up frames let GPU resources created at startup settle.
-        dirty = animating || frames_rendered < WARMUP_FRAMES;
+        dirty = keep_alive || animating || frames_rendered < WARMUP_FRAMES;
         if scale < 1.0 {
             reduced_since = Some(Instant::now());
         }

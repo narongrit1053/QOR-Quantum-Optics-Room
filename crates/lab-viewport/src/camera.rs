@@ -376,6 +376,7 @@ pub(crate) fn animate_camera(
         c.pitch += (t.pitch - c.pitch) * k;
         c.distance = (c.distance.ln() + (t.distance.ln() - c.distance.ln()) * k).exp();
         redraw.keep_alive = true;
+        redraw.moving = true;
     }
 
     let next = orbit.current.transform();
