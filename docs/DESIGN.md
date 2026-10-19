@@ -168,6 +168,22 @@ Assembly  { id, name, template nodes (relative), parameters (e.g. beam_height) }
 - Positions are stored **relative to the parent** (hole index + offset, or mate). Moving a table carries everything on it, and the file stays meaningful to a human ("row C, col 14").
 - Documents use f64 in mm; geometry is converted to f32 per platform for rendering (µm precision at room scale).
 
+**As built in M1 (schema 2, `lab-core`; M1-SPEC §3).** The sketch above is the long-term target; M1 implements this subset:
+```
+Document  { schema_version: 2, name, room, platforms[], nodes[], next_id }
+Room      { outline: [corner], wall_height, wall_thickness, openings[] }      // one room, mitred walls
+Opening   { id, name, wall, offset, width, height, sill }                     // doors and windows
+Platform  { id, name, kind: OpticalTable|Breadboard|Custom, surface: Stainless|BlackAnodized,
+            outline: Rectangle|RoundedRectangle|LShape{notch, notch_corner}|Polygon{corners[{point, radius}]},
+            thickness, top_height, position, rotation_z,
+            hole_grid{pitch, thread: M4|M6|8-32|¼-20, margin, origin: Auto|Fixed, exclusions: [Rect|Circle]},
+            support: Legs{size, inset} | Fixed }
+Node      { id, name, part, platform, position, rotation, shape, finish, pickable }   // M0 parts, unchanged
+```
+- Every edit is a `Command` that returns a `ChangeSet`; `History` keeps undo/redo (labels shown in the toolbar tooltips). Room edits refit doors and windows inside the same command and report each move or removal (toast with Undo).
+- **Display units are a user preference**, not document data: `settings.json` holds `display_unit` (mm | in) and the wall display (Auto | Always | Hidden). The document is always millimetres; fields parse `mm`, `cm`, `m`, `in`, `"`, `ft` and `'`, and an unchanged field committed in inches does not mark the document edited.
+- v1 (M0) files are migrated on load ("Converted from an older format"); the first save keeps a one-time `<file>.v1.bak`.
+
 ### 4.3 Commands & undo
 `enum Command { AddNode, RemoveNodes, SetAttach, SetTransform, Mate, Unmate, SetParam, AddPlatform, EditPlatform, Group, Ungroup, PlaceAssembly, … }`. Each command applies and returns its inverse. A continuous drag is one transaction (coalesced). History depth 500. Autosave every 60 s to `%LOCALAPPDATA%\LabSetup\autosave\`, with a recovery prompt on the next start.
 
@@ -177,6 +193,13 @@ Solve: pick holder + post such that `holder_seat + post_insertion_range ∋ H �
 
 ### 4.5 Project file
 `*.labsetup` = zip containing `project.json` (serde, schema-versioned), `parts/` (embedded copies of every non-built-in part definition and mesh used, so a file opens on any machine), and `thumbnail.png`. Trade-off: zip is not diff-friendly, so offer **"Save as folder"** (same layout, unzipped) for git users.
+
+**As built in M1 (`lab-file`; M1-SPEC §4).**
+- **Archive.** A zip with one entry, `project.json`, written by a small deterministic writer (no external zip crate): stored or deflated (`flate2`), fixed timestamps, no zip64, so saving the same document twice gives identical bytes. `parts/` and `thumbnail.png` come with M4/M5.
+- **Reader.** Strict and bounded: sizes are checked before allocating, CRCs are verified, encrypted, multi-disk and zip64 archives are rejected. Sizes come from the central directory, so archives with **data descriptors** (as Explorer and 7-Zip write them) open; T7's Z8 check round-tripped a project through `Expand-Archive` and `Compress-Archive`. A `.labsetup` that holds plain JSON also opens.
+- **Save as Folder.** Writes `<name>/project.json` (pretty JSON) into a new or empty folder; opening the folder or its `project.json` opens the project, and later saves go back to the folder.
+- **Atomic saves.** Write a temp file next to the target, sync, then rename (retried while OneDrive or an antivirus holds the file). The original is untouched unless the rename succeeds. Every save is decoded again and compared with the document before it is written.
+- **Autosave and recovery.** Each running instance has a locked session folder under `%LOCALAPPDATA%\LabSetup\autosave` (`LABSETUP_AUTOSAVE_DIR` overrides it). A dirty document is written there 60 s after the first unsaved edit; this is the app's only timer, and it is stopped when the document is clean. On start, sessions whose lock is free are offered as Restore / Discard / Later. A UI-thread panic exits the process (code 101), so its autosave is offered on the next start.
 
 ---
 
@@ -285,8 +308,8 @@ OpenCascade is LGPL-2.1 with an exception. It is dynamically linked inside the s
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| **M0 Spikes** | Workspace skeleton; Slint window hosting a Bevy texture (from `slint-hosts-bevy`); orbit camera; pick a cube; on-demand ticking; Mica test; `step2glb` converts 3 real Thorlabs STEP files | Idle GPU ≈ 0% in Task Manager; picking works; GLB opens in the viewport |
-| **M1 Core + platforms** | `lab-core` Document/Commands/undo/save-load; platforms with hole-grid shader (metric/imperial/custom); room box | Round-trip save/load tests pass; a custom polygon table renders with correct holes |
+| **M0 Spikes** (done 2026-10-18, §13) | Workspace skeleton; Slint window hosting a Bevy texture (from `slint-hosts-bevy`); orbit camera; pick a cube; on-demand ticking; Mica test; `step2glb` converts 3 real Thorlabs STEP files | Idle GPU ≈ 0% in Task Manager; picking works; GLB opens in the viewport |
+| **M1 Core + platforms** (done 2026-10-19, §14) | `lab-core` Document/Commands/undo/save-load; platforms with hole-grid shader (metric/imperial/custom); room box. As built: `lab-geom` and `lab-file` crates, custom polygon / L / rounded outlines with fillets and exclusion zones, an editable room with mitred walls, doors and windows and an occlusion fade, inspector editing in mm or inches, archive and folder save, autosave and crash recovery | Round-trip save/load tests pass; a custom polygon table renders with correct holes |
 | **M2 Library + placement** | `lab-catalog` (TOML + SQLite FTS), `lab-parts` generators, drag-drop, hole snap, mating, beam-height stack builder | Build a 20-component table at 75 mm beam height without typing coordinates |
 | **M3 Views** | Top view, split, isolate plate, measure, animated transitions, selection outline, inspector editing | Switch 3D↔Top smoothly; isolate one plate |
 | **M4 Vendor import** | Import flow, LODs, connector wizard, laser-head template (MOGLabs/Toptica) | Import a KM100 + one laser head and mount them correctly |
@@ -339,8 +362,36 @@ Not done in M0: a release build (binary size, memory) and a GPU profile of the s
 3. Wake the on-demand loop when a load finishes. Asset loads complete asynchronously and nothing else triggers a frame; the spike sets `RedrawState::keep_alive` until the scene has spawned, plus two frames for mesh bounds. M4 should wake the loop from asset events instead of rendering throughout the load.
 4. Still open for M4: the spawned meshes have no `PickTarget`/`SceneNode`, so GLB parts cannot be picked or highlighted yet (tag them on `WorldInstanceReady`). Working set with the three parts: 652 MB (debug build; 515 MB in M0 without them).
 
+## 14. M1 results (2026-10-19)
+
+Verified by T7 against M1-SPEC §9 on `m1` (`adc7979` plus the T7 commits), on the development laptop: RTX 4050 Laptop GPU (the default adapter since POLA-26, High quality, MSAA 4×) and Intel UHD Graphics (`WGPU_POWER_PREF=low`, Balanced quality, as in M0). 1440 × 900 viewport, debug build with optimised dependencies. Evidence and scripts: `D:/Try/LabSetup-wt/evidence/T7/` and `scripts/dev/` (`idle-series.ps1`, `e2e.ps1`, `frames.py`).
+
+| Check | Result |
+|---|---|
+| Tests (`cargo test --workspace --offline`) | 247 passed, 0 failed, 2 ignored (Z8, run by hand, and the S1 helper). lab-geom 57; lab-core 85 + 6 migration + 1 property; lab-file 10 + 25; lab-viewport 31; lab-app 25 lib + 7 bin; lab-ui 0 (the gallery is a compile check) |
+| M0 tests | 21 of 22 kept or ported with the same expected values; `hole_tile_has_full_mip_chain` is retired with `hole_tile_image` and replaced by the mask tests |
+| Round trip (P1–P7, M1–M5, S1, Z8) | Pass. Z8: our archive opens with `Expand-Archive`, and a `Compress-Archive` zip (data descriptors) opens in LabSetup |
+| Offline check | 421 runtime crates (M0's 419 + `lab-geom` + `lab-file`), none network-capable |
+| `cargo clippy --workspace -- -D warnings` | Clean. With `--all-targets`, one test-only lint remains (`manual_is_multiple_of`, `lab-viewport/src/hole_material.rs:382`) |
+| Custom polygon holes | Oracle (`compute_holes`): 7-corner polygon with fillets of 30–80 mm, a concave corner, a rectangle and a circle zone: 947 holes; 1800 × 1200 L table: 2,896; 150 × 150 mm board: 36. Top view at 40 m, frame-all, about 1 m, 0.2 m and 0.05 m: holes keep the margin along fillets, chamfers and the concave corner, none appear in the zones, and edges stay crisp at 0.05 m. On the small board 6 × 6 = 36 holes are visible, matching `HoleSet::len()` (and Thorlabs MB1515/M). In 3D, holes fade to an average tone beyond about 3 m, so a hole-free zone shows as a lighter patch |
+| Idle after startup, edit, undo, wall fade and save | Intel UHD: **0.00% CPU, 0.00% GPU** in every 12 s window. RTX 4050: GPU 0.00% throughout; CPU 0.00–0.03% (one or two 15.6 ms scheduler ticks in 10 s, which the Intel adapter never shows, so probably NVIDIA driver threads) |
+| Dirty document (autosave armed) | 76 s window on Intel UHD: one autosave write about 60 s after the edit (CPU 0.05%, GPU avg 0.56%); nothing else wakes |
+| `FrameReady` after an edit or undo | 1 frame, then idle |
+| `FrameReady` after a wall fade | **Not met (≤ 300 ms).** RTX 4050: 359–471 ms (15–18 frames). Intel UHD: 1.25–1.6 s (12–14 frames). The fade step clamps `dt` to 1/30 s (`room.rs:263`), so a fade always takes about 12 frames or more; the §5.6 rate alone needs about 384 ms. Board decision pending |
+| Full-resolution frame time (LABSETUP_TRACE / frame log) | M0, Intel UHD, full resolution with shadows: 3.9 fps (about 256 ms). M1, full-resolution fade frames: Intel UHD about 128 ms median (115–165 ms); RTX 4050 about 21 ms median (16–40 ms) |
+| First-fade hitch (R3) | None: the first fade's frames are 16–163 ms on Intel UHD, the same as later fades, and below 60 ms on the RTX 4050. No pre-warm needed |
+| End-to-end (`scripts/dev/e2e.ps1`) | 13 of 13 checks pass, in a folder named ทดสอบ: New → MB6060/M on Table A → Custom, corner 2 moved, a corner added, a circle zone → a door near corner 3, room made an L ("Moved Door 2 to fit Wall 5", Undo) → Undo ×3, Redo ×2 → Save As → close → reopen (identical, clean title) → Save as Folder → open `project.json` → edits, autosave, kill → restart → Restore (identical to the autosave) → inch display, Enter on unchanged fields leaves the title clean. Save, Undo and Redo were driven through the project menu and toolbar, because posted Ctrl keys are unreliable; posted Ctrl+S did open Save As in one run |
+| Thorlabs hints | 13 of 14 MB part numbers confirmed on thorlabs.com (size, 12.7 mm thickness, M6 on 25 mm or ¼-20 on 1"). MB612 is the double-density 6 × 12 in board (the standard grid one is MB612F), so its hint is blanked (follow-up commit to `presets.rs`) |
+
+**Open findings (not fixed in T7; T7 owns no code):**
+1. **Blank viewport after startup.** Frame 1 renders before the scene is ready and frame 2 waits for the next window message: 9 s and 15.6 s in two runs, until a mouse move or a repaint. A user sees an empty viewport until the pointer moves over the window. After File > New the viewport also stayed blank until a hover.
+2. **Wall fade stop time**, see the table.
+3. **3D zoom near a surface.** Zooming toward the cursor in 3D stops about 1 m from the table top, so 0.05 m close-ups are only reachable in the Top view.
+4. **Header count.** The project header counts every platform as a table ("3 tables" for a table, a breadboard and a custom platform).
+
 ## Next steps
-M0 is complete, including the step2glb spike above.
-1. M1: platform editing (custom outlines, imperial/metric grids, SDF hole shader), save/load, and the room.
-2. Release build: measure binary size, memory and startup against §1.
-3. For M4, apply the step2glb findings above: the `reflect_auto_register` Bevy feature, mandatory mesh simplification, default angular deflection 0.5 rad, `--source-up y` for Thorlabs parts, and picking for GLB parts.
+M1 is built and verified (§14); the board signs it off.
+1. Fix the open M1 findings in §14: the blank viewport at startup and the wall-fade stop time (after the board decides on 300 ms against the §5.6 rate).
+2. M2: library and placement (§11).
+3. Release build: measure binary size, memory and startup against §1.
+4. For M4, apply the step2glb findings above: the `reflect_auto_register` Bevy feature, mandatory mesh simplification, default angular deflection 0.5 rad, `--source-up y` for Thorlabs parts, and picking for GLB parts.

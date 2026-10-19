@@ -14,7 +14,7 @@ public static class P {
 }
 "@
 [P]::SetProcessDPIAware() | Out-Null
-$h = (Get-Process -Id $ProcessId).MainWindowHandle
+. "$PSScriptRoot\lab.ps1"; $h = Find-AppWindow $ProcessId   # MainWindowHandle may be winit's hidden window
 $r = New-Object P+RECT; [P]::GetWindowRect($h, [ref]$r) | Out-Null
 $o = New-Object P+POINT; [P]::ClientToScreen($h, [ref]$o) | Out-Null
 $dx = $o.X - $r.L; $dy = $o.Y - $r.T
