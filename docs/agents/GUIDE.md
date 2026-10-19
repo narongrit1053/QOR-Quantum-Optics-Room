@@ -2,6 +2,8 @@
 
 Every LabSetup issue in Multica links here. Read it fully before starting.
 
+**First Draft (M2–M5, from 2026-10-20):** issues in the *LabSetup First Draft* project follow [FIRST-DRAFT.md](FIRST-DRAFT.md), which overrides this guide where they disagree: build every feature once, fix only blockers, log everything else, test at the end.
+
 The work moved from Paperclip to Multica on 2026-10-19. Each Multica issue carries the history of its Paperclip predecessor (LAB-n) in its first comment.
 
 ## The work
