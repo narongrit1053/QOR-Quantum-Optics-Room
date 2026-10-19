@@ -65,6 +65,10 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 ViewportEvent::FrameReady { frames_rendered } => {
                     trace(&format!("ui: frame {frames_rendered} ready"));
                     show_newest_frame(&ui, &app, &handle.textures);
+                    // Host's WARMUP_FRAMES: pipelines are compiled once the scene has rendered this many.
+                    if frames_rendered >= 3 && ui.get_viewport_preparing() {
+                        ui.set_viewport_preparing(false);
+                    }
                     // Constant text while rendering: a changing label would cost a UI redraw per frame.
                     ui.set_rendering(true);
                     ui.set_status("Rendering".into());
