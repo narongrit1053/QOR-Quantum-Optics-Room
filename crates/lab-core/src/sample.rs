@@ -46,7 +46,10 @@ impl Builder<'_> {
             id,
             name: name.into(),
             part: part.into(),
-            platform: self.platform,
+            parent: Parent::Platform(self.platform),
+            attach: Attach::Free,
+            params: Default::default(),
+            locked: false,
             position,
             rotation,
             shape,
@@ -262,7 +265,7 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), doc.nodes.len(), "node ids are unique");
-        assert!(doc.nodes.iter().all(|n| doc.platform(n.platform).is_some()));
+        assert!(doc.nodes.iter().all(|n| doc.root_platform(n.id).is_some()));
     }
 
     #[test]
@@ -299,7 +302,7 @@ mod tests {
         let json = doc.to_json().unwrap();
         assert!(matches!(
             Document::from_json(&json),
-            Err(crate::migrate::LoadError::NewerSchema { found: 3, supported: 2 })
+            Err(crate::migrate::LoadError::NewerSchema { found: 4, supported: 3 })
         ));
     }
 

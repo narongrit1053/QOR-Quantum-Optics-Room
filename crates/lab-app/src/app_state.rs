@@ -142,7 +142,7 @@ impl AppState {
         self.hole_cache.retain(|id, _| doc.platform(*id).is_some());
         let shown = match self.session.selection {
             Some(SelectionTarget::Platform(id)) => Some(id),
-            Some(SelectionTarget::Node(id)) => doc.node(id).map(|n| n.platform),
+            Some(SelectionTarget::Node(id)) => doc.root_platform(id),
             _ => None,
         };
         let Some(platform) = shown.and_then(|id| doc.platform(id)) else { return };

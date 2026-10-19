@@ -148,7 +148,7 @@ fn refresh_inspector(ui: &AppWindow, app: &AppState, models: &UiModels) {
     let kind = match app.session.selection {
         Some(SelectionTarget::Node(id)) => match doc.node(id) {
             Some(node) => {
-                let holes = doc.platform(node.platform).map(|p| app.holes_for(p));
+                let holes = doc.root_platform(id).and_then(|p| doc.platform(p)).map(|p| app.holes_for(p));
                 ui_models::fill_node(ui, models, node_view(doc, node, holes.as_deref(), units));
                 1
             }

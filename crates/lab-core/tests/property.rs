@@ -38,7 +38,10 @@ fn new_node(doc: &Document, platform: PlatformId, rng: &mut Rng) -> Node {
         id: NodeId(id),
         name: format!("Part {id}"),
         part: "generic:post-12.7-50".into(),
-        platform,
+        parent: Parent::Platform(platform),
+        attach: Attach::Free,
+        params: Default::default(),
+        locked: false,
         position: DVec3::new(rng.range(-300.0, 300.0), rng.range(-200.0, 200.0), 25.0),
         rotation: DQuat::from_rotation_z(rng.range(-3.0, 3.0)),
         shape: Shape::Cylinder { radius: 6.35, length: 50.0 },
@@ -194,7 +197,7 @@ fn p1_random_edits() {
                 6 => {
                     if !doc.nodes.is_empty() && rng.chance(40) {
                         kind = "remove node";
-                        Some(Command::RemoveNode(doc.nodes[rng.below(doc.nodes.len())].id))
+                        Some(Command::RemoveNodes(vec![doc.nodes[rng.below(doc.nodes.len())].id]))
                     } else if !doc.platforms.is_empty() {
                         kind = "add node";
                         let platform = doc.platforms[rng.below(doc.platforms.len())].id;

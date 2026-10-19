@@ -26,7 +26,7 @@ pub(crate) enum SyncOp {
 pub(crate) fn plan_full(doc: &Document) -> Vec<SyncOp> {
     let mut ops = vec![SyncOp::SpawnRoom];
     ops.extend(doc.platforms.iter().map(|p| SyncOp::BuildPlatform(p.id)));
-    ops.extend(doc.nodes.iter().filter(|n| doc.platform(n.platform).is_some()).map(|n| SyncOp::SpawnNode(n.id)));
+    ops.extend(doc.nodes.iter().filter(|n| doc.root_platform(n.id).is_some()).map(|n| SyncOp::SpawnNode(n.id)));
     ops
 }
 
@@ -36,13 +36,19 @@ pub(crate) fn plan_changes(old: &Document, new: &Document, changes: &ChangeSet) 
     let mut ops = Vec::new();
     let respawn_node = |ops: &mut Vec<SyncOp>, id: NodeId| {
         ops.push(SyncOp::DespawnNode(id));
-        if new.node(id).is_some_and(|n| new.platform(n.platform).is_some()) {
+        if new.root_platform(id).is_some_and(|p| new.platform(p).is_some()) {
             ops.push(SyncOp::SpawnNode(id));
         }
     };
 
     for &id in changes.nodes_added.iter().chain(&changes.nodes_removed).chain(&changes.nodes_updated) {
         respawn_node(&mut ops, id);
+    }
+    // Children are drawn at their composed pose, so an updated node re-places its descendants.
+    for &id in &changes.nodes_updated {
+        for d in new.descendants(id) {
+            respawn_node(&mut ops, d);
+        }
     }
 
     for &id in &changes.platforms_removed {
@@ -176,7 +182,7 @@ mod tests {
                     SyncOp::DespawnPlatform(id) => {
                         self.platforms.remove(&id);
                         // Node children despawn with their root.
-                        self.nodes.retain(|_, n| n.platform != id);
+                        self.nodes.retain(|_, n| n.parent != lab_core::Parent::Platform(id));
                     }
                     SyncOp::DespawnRoom => self.room = None,
                     SyncOp::SpawnRoom => {
@@ -194,7 +200,7 @@ mod tests {
                     }
                     SyncOp::SpawnNode(id) => {
                         let n = doc.node(id).expect("SpawnNode of a node that does not exist");
-                        assert!(self.platforms.contains_key(&n.platform), "SpawnNode without its platform root");
+                        assert!(doc.root_platform(id).is_some_and(|p| self.platforms.contains_key(&p)), "SpawnNode without its platform root");
                         assert!(!self.nodes.contains_key(&id), "node {id:?} spawned twice");
                         self.nodes.insert(id, n.clone());
                     }
@@ -219,7 +225,10 @@ mod tests {
             id: NodeId(id),
             name: format!("Part {id}"),
             part: "generic:post-12.7-50".into(),
-            platform,
+            parent: lab_core::Parent::Platform(platform),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             position: DVec3::new(rng.range(-300.0, 300.0), rng.range(-200.0, 200.0), 25.0),
             rotation: DQuat::from_rotation_z(rng.range(-3.0, 3.0)),
             shape: Shape::Cylinder { radius: 6.35, length: 50.0 },
@@ -327,7 +336,7 @@ mod tests {
             4 => room_edit(doc, rng).map(|room| Command::SetRoom(Box::new(room))),
             5 => {
                 if !doc.nodes.is_empty() && rng.chance(40) {
-                    Some(Command::RemoveNode(any_node(rng)))
+                    Some(Command::RemoveNodes(vec![any_node(rng)]))
                 } else if !doc.platforms.is_empty() {
                     let node = new_node(doc, any_platform(rng), rng);
                     Some(Command::AddNode { node, index: Some(rng.below(doc.nodes.len() + 1)) })

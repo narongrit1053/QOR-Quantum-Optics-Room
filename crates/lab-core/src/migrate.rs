@@ -32,7 +32,7 @@ pub enum LoadError {
 /// Converts a project value from schema `from` to `from + 1`, adding notes for changed values.
 type Step = fn(&mut Value, &mut Vec<String>) -> Result<(), String>;
 
-const MIGRATIONS: &[(u32, Step)] = &[(1, v1_to_v2)];
+const MIGRATIONS: &[(u32, Step)] = &[(1, v1_to_v2), (2, v2_to_v3)];
 
 /// The file's schema version: an integer from 1 to SCHEMA_VERSION.
 fn schema_version(value: &Value) -> Result<u32, LoadError> {
@@ -167,6 +167,24 @@ fn v1_to_v2(doc: &mut Value, notes: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// M1 (schema 2) to M2 (schema 3): `platform: p` becomes `parent: Platform(p)`, attached
+/// freely, with no param overrides and unlocked.
+fn v2_to_v3(doc: &mut Value, notes: &mut Vec<String>) -> Result<(), String> {
+    let nodes = doc.get_mut("nodes").and_then(Value::as_array_mut).ok_or("the node list is missing")?;
+    for (k, node) in nodes.iter_mut().enumerate() {
+        let n = node.as_object_mut().ok_or_else(|| format!("part {} is not an object", k + 1))?;
+        let platform = n.remove("platform").ok_or_else(|| format!("the platform of part {} is missing", k + 1))?;
+        n.insert("parent".into(), json!({ "Platform": platform }));
+        n.insert("attach".into(), json!("Free"));
+        n.insert("params".into(), json!({}));
+        n.insert("locked".into(), json!(false));
+    }
+    if !nodes.is_empty() {
+        notes.push("Converted from an older format.".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,9 +260,11 @@ mod tests {
         assert!(matches!(check(r#"{"schema_version": 1.5}"#), LoadError::NotAProject(_)));
         assert!(matches!(
             check(r#"{"schema_version": 99999999999}"#),
-            LoadError::NewerSchema { found: u32::MAX, supported: 2 }
+            LoadError::NewerSchema { found: u32::MAX, supported: 3 }
         ));
         // Current schema, wrong shape: a damaged file.
-        assert!(matches!(check(r#"{"schema_version": 2}"#), LoadError::Json(_)));
+        assert!(matches!(check(r#"{"schema_version": 3}"#), LoadError::Json(_)));
+        // An older schema with the wrong shape fails its conversion.
+        assert!(matches!(check(r#"{"schema_version": 2}"#), LoadError::Migration { from: 2, .. }));
     }
 }

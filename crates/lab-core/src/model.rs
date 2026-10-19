@@ -4,15 +4,16 @@ use glam::{DQuat, DVec2, DVec3};
 use lab_geom::FlatPath;
 use serde::{Deserialize, Serialize};
 
-use crate::holes::HoleGrid;
+use crate::holes::{HoleGrid, LatticeIndex};
 use crate::limits::{LEG_MAX_SPAN, MAX_LEGS};
 use crate::migrate::{LoadError, LoadReport};
 use crate::outline::{Outline, OutlineError};
+use crate::part::Params;
 use crate::room::Room;
 use crate::units::Mm;
 
 /// Bumped whenever the serialized layout changes; older files are migrated on load.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
@@ -90,9 +91,85 @@ impl Document {
         self.platforms.iter().position(|p| p.id == id)
     }
 
-    /// The nodes placed on platform `id`, in document order.
+    /// The nodes whose root platform is `id`, in document order.
     pub fn nodes_on(&self, id: PlatformId) -> impl Iterator<Item = &Node> {
-        self.nodes.iter().filter(move |n| n.platform == id)
+        self.nodes.iter().filter(move |n| self.root_platform(n.id) == Some(id))
+    }
+
+    /// The platform at the root of the node's parent chain; `None` for room-rooted chains,
+    /// unknown nodes and broken chains.
+    pub fn root_platform(&self, id: NodeId) -> Option<PlatformId> {
+        let mut node = self.node(id)?;
+        // A valid chain has at most `nodes.len()` links; the bound stops cycles in unvalidated data.
+        for _ in 0..=self.nodes.len() {
+            match node.parent {
+                Parent::Room => return None,
+                Parent::Platform(p) => return Some(p),
+                Parent::Node(n) => node = self.node(n)?,
+            }
+        }
+        None
+    }
+
+    /// Pose in the root frame (root platform frame, or room frame for `Parent::Room` chains).
+    pub fn node_pose(&self, id: NodeId) -> Option<(DVec3, DQuat)> {
+        let mut node = self.node(id)?;
+        let (mut position, mut rotation) = (node.position, node.rotation);
+        for _ in 0..=self.nodes.len() {
+            match node.parent {
+                Parent::Room | Parent::Platform(_) => return Some((position, rotation)),
+                Parent::Node(n) => {
+                    node = self.node(n)?;
+                    position = node.position + node.rotation * position;
+                    rotation = node.rotation * rotation;
+                }
+            }
+        }
+        None
+    }
+
+    /// The direct children of `parent`, in document order.
+    pub fn children(&self, parent: Parent) -> impl Iterator<Item = &Node> {
+        self.nodes.iter().filter(move |n| n.parent == parent)
+    }
+
+    /// Every node below `id` (not `id` itself), depth-first in document order.
+    pub fn descendants(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        self.collect_descendants(id, id, &mut out);
+        out
+    }
+
+    fn collect_descendants(&self, at: NodeId, root: NodeId, out: &mut Vec<NodeId>) {
+        for c in self.children(Parent::Node(at)) {
+            // Skipping seen ids stops cycles in unvalidated data.
+            if c.id == root || out.contains(&c.id) {
+                continue;
+            }
+            out.push(c.id);
+            self.collect_descendants(c.id, root, out);
+        }
+    }
+
+    /// Room-frame origin of the platform frame (on its top surface) and its rotation about Z,
+    /// composing `OnPlatform` chains. `None` for unknown platforms and broken chains.
+    pub fn platform_pose(&self, id: PlatformId) -> Option<(DVec3, f64)> {
+        let mut chain = vec![self.platform(id)?];
+        while let Support::OnPlatform { parent, .. } = chain[chain.len() - 1].support {
+            if chain.len() > self.platforms.len() {
+                return None;
+            }
+            chain.push(self.platform(parent)?);
+        }
+        let root = chain.pop()?;
+        let mut origin = root.position.extend(root.top_height);
+        let mut rotation = root.rotation_z;
+        for p in chain.into_iter().rev() {
+            let Support::OnPlatform { standoff, .. } = p.support else { return None };
+            origin += DVec2::from_angle(rotation).rotate(p.position).extend(standoff + p.thickness);
+            rotation += p.rotation_z;
+        }
+        Some((origin, rotation))
     }
 
     /// Whether any node, platform or opening uses `raw` as its id.
@@ -169,6 +246,11 @@ pub enum Support {
     Legs { size: Mm, inset: Mm },
     /// Sits directly on whatever is below it (e.g. a breadboard on a table).
     Fixed,
+    /// Pneumatic isolators under the corners.
+    Isolators { size: Mm, inset: Mm },
+    /// Sits on `parent` on standoffs: `position`/`rotation_z` are in the parent's platform frame
+    /// and the platform's top is `standoff + thickness` above the parent's top (`top_height` unused).
+    OnPlatform { parent: PlatformId, standoff: Mm },
 }
 
 impl Platform {
@@ -277,28 +359,54 @@ impl Platform {
         let points: Vec<DVec2> = self.outline.corners().iter().map(|c| self.local_to_room(c.point)).collect();
         let (lo, hi) = lab_geom::bounds(&points);
         let bottom = match self.support {
-            Support::Legs { .. } => 0.0,
-            Support::Fixed => self.top_height - self.thickness,
+            Support::Legs { .. } | Support::Isolators { .. } => 0.0,
+            // shortcut: an OnPlatform box uses its own fields, not the composed pose; switch to
+            // Document::platform_pose when stacked platforms need exact bounds.
+            Support::Fixed | Support::OnPlatform { .. } => self.top_height - self.thickness,
         };
         (lo.extend(bottom), hi.extend(self.top_height))
     }
 }
 
-/// A placed object. In M0/M1 every node carries a primitive shape; catalog parts with meshes and
-/// connectors replace this in M2.
+/// What a node is placed on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Parent {
+    Room,
+    Platform(PlatformId),
+    Node(NodeId),
+}
+
+/// How a node is held by its parent.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Attach {
+    Free,
+    /// Bolted to a platform hole.
+    Hole { hole: LatticeIndex },
+    /// Connector to connector (docs/M2-PLAN.md, "Mate pose").
+    Mate { self_conn: String, parent_conn: String, slide: Mm, twist: f64 },
+}
+
+/// A placed object: a catalog part, or (M0/M1) a primitive shape.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
     pub name: String,
     /// Catalog part id, e.g. `generic:post-12.7`.
     pub part: String,
-    pub platform: PlatformId,
-    /// Centre of the shape in the platform frame (origin on the top surface).
+    pub parent: Parent,
+    pub attach: Attach,
+    /// Relative to the parent frame: room, platform frame (origin on the top surface), or the
+    /// parent node's frame. Box/Cylinder: centre of the shape. Part: the part origin.
     pub position: DVec3,
     pub rotation: DQuat,
     pub shape: Shape,
     pub finish: Finish,
+    /// Overrides of the catalog def's generator params.
+    #[serde(default)]
+    pub params: Params,
     pub pickable: bool,
+    #[serde(default)]
+    pub locked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -311,6 +419,8 @@ pub enum Shape {
         radius: Mm,
         length: Mm,
     },
+    /// Mesh from the catalog def of `Node::part` with `Node::params`; position is the part origin.
+    Part,
 }
 
 impl Shape {
@@ -319,6 +429,7 @@ impl Shape {
         match self {
             Shape::Box { size } => size.z / 2.0,
             Shape::Cylinder { length, .. } => length / 2.0,
+            Shape::Part => 0.0,
         }
     }
 }

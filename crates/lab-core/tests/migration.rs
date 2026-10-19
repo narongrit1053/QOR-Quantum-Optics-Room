@@ -15,7 +15,7 @@ fn load_fixture() -> (Document, LoadReport) {
 fn m1_fixture_loads_and_validates() {
     let (doc, report) = load_fixture();
     assert_eq!(report.migrated_from, Some(1));
-    assert!(report.repairs.is_empty(), "{:?}", report.repairs);
+    assert_eq!(report.repairs, vec!["Converted from an older format.".to_string()]);
     assert_eq!(doc.schema_version, SCHEMA_VERSION);
     assert_eq!(doc.validate(), Ok(()));
     assert_eq!(doc.room, Room::default());
@@ -76,9 +76,9 @@ fn m3_holes_and_labels_match_the_m0_grid() {
 #[test]
 fn m4_load_errors() {
     let mut newer: Value = serde_json::from_str(FIXTURE).unwrap();
-    newer["schema_version"] = Value::from(3);
+    newer["schema_version"] = Value::from(4);
     match Document::from_json(&newer.to_string()) {
-        Err(LoadError::NewerSchema { found: 3, supported: 2 }) => {}
+        Err(LoadError::NewerSchema { found: 4, supported: 3 }) => {}
         other => panic!("{other:?}"),
     }
 
@@ -123,4 +123,22 @@ fn repairs_are_reported() {
     assert_eq!(report.migrated_from, None);
     assert_eq!(report.repairs.len(), 1);
     assert_eq!(doc.next_free_id(), 41);
+}
+
+#[test]
+fn v2_nodes_migrate_to_parents() {
+    let mut value: Value = serde_json::from_str(&demo_document().to_json().unwrap()).unwrap();
+    value["schema_version"] = Value::from(2);
+    let table = demo_document().platforms[0].id.0;
+    for node in value["nodes"].as_array_mut().unwrap() {
+        let n = node.as_object_mut().unwrap();
+        for key in ["parent", "attach", "params", "locked"] {
+            n.remove(key);
+        }
+        n.insert("platform".into(), Value::from(table));
+    }
+    let (doc, report) = Document::from_json(&value.to_string()).unwrap();
+    assert_eq!(report.migrated_from, Some(2));
+    assert_eq!(report.repairs, vec!["Converted from an older format.".to_string()]);
+    assert_eq!(doc, demo_document());
 }

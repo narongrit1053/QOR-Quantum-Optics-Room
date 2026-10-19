@@ -261,30 +261,34 @@ fn apply_op(
         }
         SyncOp::SpawnNode(id) => {
             let Some(node) = doc.node(id) else { return };
-            let Some(root) = index.platforms.get(&node.platform).map(|p| p.root) else {
+            // shortcut: room-rooted nodes (Parent::Room) are not drawn yet; POLA-43 adds them.
+            let Some(root) = doc.root_platform(id).and_then(|p| index.platforms.get(&p)).map(|p| p.root) else {
                 events.send(ViewportEvent::SceneError(format!("“{}” could not be drawn: its platform is missing.", node.name)));
                 return;
             };
             if let Some(old) = index.nodes.remove(&id) {
                 commands.entity(old).try_despawn();
             }
-            let entity = spawn_node(commands, root, node, &mut assets.meshes, &mut assets.materials);
+            let (position, rotation) = doc.node_pose(id).unwrap_or((node.position, node.rotation));
+            let entity = spawn_node(commands, root, node, position, rotation, &mut assets.meshes, &mut assets.materials);
             index.nodes.insert(id, entity);
         }
     }
 }
 
-/// A node as a child of its platform's root, in platform-local coordinates.
+/// A node as a child of its root platform's root, at its pose in that platform's frame.
 fn spawn_node(
     commands: &mut Commands,
     root: Entity,
     node: &Node,
+    position: DVec3,
+    rotation: DQuat,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Entity {
     let transform = Transform {
-        translation: to_render(node.position),
-        rotation: rotation_to_render(node.rotation),
+        translation: to_render(position),
+        rotation: rotation_to_render(rotation),
         ..default()
     };
     let mesh = match &node.shape {
@@ -292,6 +296,8 @@ fn spawn_node(
         Shape::Box { size } => meshes.add(Cuboid::new(size.x as f32 * MM, size.z as f32 * MM, size.y as f32 * MM)),
         // Bevy cylinders run along local Y, which is the document's local Z after conversion.
         Shape::Cylinder { radius, length } => meshes.add(Cylinder::new(*radius as f32 * MM, *length as f32 * MM)),
+        // shortcut: a 10 mm placeholder cube until POLA-43 draws catalog meshes.
+        Shape::Part => meshes.add(Cuboid::new(10.0 * MM, 10.0 * MM, 10.0 * MM)),
     };
     let material = finish_material(&node.finish);
     let base_color = material.base_color;
