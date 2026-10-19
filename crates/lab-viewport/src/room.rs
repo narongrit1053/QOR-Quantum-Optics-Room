@@ -242,7 +242,8 @@ fn step_alpha(alpha: f32, target: f32, dt: f32) -> f32 {
 
 #[allow(clippy::too_many_arguments)]
 fn update_wall_fade(
-    time: Res<Time>,
+    // Bevy's Time::delta stays inflated for two updates after idle; measure the gap ourselves.
+    mut last_run: Local<Option<std::time::Instant>>,
     pending: Res<PendingRequests>,
     mut fade: ResMut<WallFade>,
     mut redraw: ResMut<RedrawState>,
@@ -264,7 +265,8 @@ fn update_wall_fade(
     if let Some(doc) = &index.snapshot {
         targets.extend(doc.platforms.iter().map(|p| p.position.extend(p.top_height)));
     }
-    let dt = time.delta_secs().min(MAX_FADE_DT);
+    let now = std::time::Instant::now();
+    let dt = last_run.replace(now).map_or(FIRST_FADE_DT, |t| (now - t).as_secs_f32()).min(MAX_FADE_DT);
     let first_run = !fade.initialized;
     fade.initialized = true;
 
@@ -439,7 +441,7 @@ mod tests {
 
     #[test]
     fn fade_after_idle_is_not_a_pop() {
-        // Bevy frame deltas as update_wall_fade sees them: the first is the idle gap.
+        // Real frame gaps as update_wall_fade measures them: the first is the idle gap.
         for (frame_dt, min_steps) in [(0.016f32, 3), (0.13, 2)] {
             for (start, target) in [(1.0, 0.0), (0.0, 1.0)] {
                 let (mut alpha, mut elapsed, mut steps) = (start, 0.0f32, 0);
@@ -448,7 +450,7 @@ mod tests {
                     let dt = if steps == 0 { real.min(FIRST_FADE_DT) } else { real.min(MAX_FADE_DT) };
                     let next = step_alpha(alpha, target, dt);
                     // At 130 ms frames a 300 ms fade has only ~2 frames, so big steps are unavoidable.
-                    assert!(frame_dt > 0.1 || (next - alpha).abs() <= 0.6, "jump {alpha} -> {next}");
+                    assert!(frame_dt > 0.1 || (next - alpha).abs() <= 0.5, "jump {alpha} -> {next}");
                     alpha = next;
                     if steps > 0 {
                         elapsed += real;
