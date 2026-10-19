@@ -2,6 +2,7 @@
 
 use lab_core::glam::DVec2;
 use lab_core::holes::{GridOrigin, HoleGrid, Thread, ZoneShape, lattice_origin};
+use lab_core::limits::OPENING_MIN_JAMB;
 use lab_core::model::{Document, OpeningId, Platform, PlatformId, PlatformKind, Support, Surface};
 use lab_core::outline::{Outline, OutlineCorner, RectCorner};
 use lab_core::prefs::WallDisplay;
@@ -251,17 +252,47 @@ pub fn field_value(doc: &Document, field: &str, units: LengthUnit) -> Option<Str
     }
 }
 
+fn target_platform<'a>(cx: &'a EditContext) -> Result<&'a Platform, EditError> {
+    match cx.selection {
+        Some(SelectionTarget::Platform(pid)) => cx.doc.platform(pid).ok_or(EditError::Stale),
+        Some(SelectionTarget::Node(_)) | Some(SelectionTarget::Room) => Err(EditError::Stale),
+        None => cx.doc.platforms.first().ok_or(EditError::Stale),
+    }
+}
+
 fn target_field_value(cx: &EditContext, field: &str) -> Option<String> {
     if field.starts_with("platform.") {
-        let p = match cx.selection {
-            Some(SelectionTarget::Platform(pid)) => cx.doc.platform(pid),
-            _ => cx.doc.platforms.first(),
-        }?;
+        let p = target_platform(cx).ok()?;
         platform_field_val(p, field, cx.units)
     } else if field.starts_with("room.") {
         room_field_val(&cx.doc.room, field, cx.units)
     } else {
         None
+    }
+}
+
+fn is_length_field(field: &str) -> bool {
+    !field.ends_with(".name") && field != "platform.rotation"
+}
+
+fn pin_grid_if_needed(
+    doc: &Document,
+    p: &mut Platform,
+    old_grid: &Option<HoleGrid>,
+    old_bounds: (DVec2, DVec2),
+) {
+    if doc.nodes_on(p.id).count() == 0 {
+        return;
+    }
+    let Some(og) = old_grid.as_ref() else {
+        return;
+    };
+    let pinned_origin = match og.origin {
+        GridOrigin::Auto => lattice_origin(og, old_bounds),
+        GridOrigin::At(pt) => pt,
+    };
+    if let Some(g) = p.hole_grid.as_mut() {
+        g.origin = GridOrigin::At(pinned_origin);
     }
 }
 
@@ -273,24 +304,14 @@ pub fn field_edit(cx: &EditContext, field: &str, text: &str) -> Result<EditOutco
         if trimmed == cur || trimmed == format!("{cur} {}", cx.units.suffix()) {
             return Ok(EditOutcome::Nothing);
         }
-        // Also check if numeric parse equals the same formatted value
-        if parse_length(trimmed, cx.units).is_ok_and(|len| format_length(len, cx.units) == cur) {
+        // Also check if numeric parse equals the same formatted value (length fields only)
+        if is_length_field(field) && parse_length(trimmed, cx.units).is_ok_and(|len| format_length(len, cx.units) == cur) {
             return Ok(EditOutcome::Nothing);
         }
     }
 
     if field.starts_with("platform.") {
-        let pid = match cx.selection {
-            Some(SelectionTarget::Platform(pid)) => pid,
-            _ => {
-                if let Some(first) = cx.doc.platforms.first() {
-                    first.id
-                } else {
-                    return Err(EditError::Stale);
-                }
-            }
-        };
-        let orig = cx.doc.platform(pid).ok_or(EditError::Stale)?;
+        let orig = target_platform(cx)?;
         let old_grid = orig.hole_grid.clone();
         let old_bounds = orig.outline.bounds();
         let mut p = orig.clone();
@@ -374,12 +395,20 @@ pub fn field_edit(cx: &EditContext, field: &str, text: &str) -> Result<EditOutco
                 _ => return Err(EditError::UnknownField(field.into())),
             }
         } else if let Some(rest) = field.strip_prefix("platform.grid.") {
-            outline_or_grid_changed = true;
             let g = p.hole_grid.as_mut().ok_or(EditError::Stale)?;
             match rest {
-                "pitch_x" => g.pitch.x = parse_length(trimmed, cx.units)?,
-                "pitch_y" => g.pitch.y = parse_length(trimmed, cx.units)?,
-                "margin" => g.margin = parse_length(trimmed, cx.units)?,
+                "pitch_x" => {
+                    g.pitch.x = parse_length(trimmed, cx.units)?;
+                    outline_or_grid_changed = true;
+                }
+                "pitch_y" => {
+                    g.pitch.y = parse_length(trimmed, cx.units)?;
+                    outline_or_grid_changed = true;
+                }
+                "margin" => {
+                    g.margin = parse_length(trimmed, cx.units)?;
+                    outline_or_grid_changed = true;
+                }
                 "origin_x" => {
                     let ox = parse_length(trimmed, cx.units)?;
                     let cur_y = match g.origin {
@@ -467,16 +496,8 @@ pub fn field_edit(cx: &EditContext, field: &str, text: &str) -> Result<EditOutco
         }
 
         // 4. Pinning (D13)
-        let auto_grid = if outline_or_grid_changed && cx.doc.nodes_on(pid).count() > 0 {
-            old_grid.as_ref().filter(|g| g.origin == GridOrigin::Auto)
-        } else {
-            None
-        };
-        if let Some(og) = auto_grid {
-            let pinned_origin = lattice_origin(og, old_bounds);
-            if let Some(g) = p.hole_grid.as_mut() {
-                g.origin = GridOrigin::At(pinned_origin);
-            }
+        if outline_or_grid_changed {
+            pin_grid_if_needed(cx.doc, &mut p, &old_grid, old_bounds);
         }
 
         // 3. Validate
@@ -599,17 +620,7 @@ pub fn choice_edit(cx: &EditContext, choice: &str, index: i32) -> Result<EditOut
     }
 
     if choice.starts_with("platform.") {
-        let pid = match cx.selection {
-            Some(SelectionTarget::Platform(pid)) => pid,
-            _ => {
-                if let Some(first) = cx.doc.platforms.first() {
-                    first.id
-                } else {
-                    return Err(EditError::Stale);
-                }
-            }
-        };
-        let orig = cx.doc.platform(pid).ok_or(EditError::Stale)?;
+        let orig = target_platform(cx)?;
         let old_grid = orig.hole_grid.clone();
         let old_bounds = orig.outline.bounds();
         let mut p = orig.clone();
@@ -720,16 +731,8 @@ pub fn choice_edit(cx: &EditContext, choice: &str, index: i32) -> Result<EditOut
         }
 
         // Pinning rule
-        let auto_grid = if outline_or_grid_changed && cx.doc.nodes_on(pid).count() > 0 {
-            old_grid.as_ref().filter(|g| g.origin == GridOrigin::Auto)
-        } else {
-            None
-        };
-        if let Some(og) = auto_grid {
-            let pinned_origin = lattice_origin(og, old_bounds);
-            if let Some(g) = p.hole_grid.as_mut() {
-                g.origin = GridOrigin::At(pinned_origin);
-            }
+        if outline_or_grid_changed {
+            pin_grid_if_needed(cx.doc, &mut p, &old_grid, old_bounds);
         }
 
         p.validate().map_err(|e| EditError::Invalid(e.to_string()))?;
@@ -777,6 +780,87 @@ pub fn choice_edit(cx: &EditContext, choice: &str, index: i32) -> Result<EditOut
     } else {
         Err(EditError::UnknownField(choice.into()))
     }
+}
+
+struct WallGap {
+    wall: usize,
+    wall_len: f64,
+    start: f64,
+    #[allow(dead_code)]
+    end: f64,
+    len: f64,
+}
+
+fn find_best_wall_gap(doc: &Document, req_width: f64) -> Option<(usize, f64)> {
+    let n = doc.room.outline.len();
+    let mut candidate_gaps: Vec<WallGap> = Vec::new();
+
+    for w in 0..n {
+        let wall_len = doc.room.wall_length(w);
+        let (min_lim, max_lim) = doc.room.opening_limits(w);
+        if max_lim.is_nan() || max_lim <= min_lim {
+            continue;
+        }
+
+        let mut wall_openings: Vec<&Opening> = doc.room.openings.iter().filter(|o| o.wall == w as u32).collect();
+        wall_openings.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+
+        let mut gaps = Vec::new();
+        if wall_openings.is_empty() {
+            let gap_len = max_lim - min_lim;
+            if gap_len >= req_width - 1e-6 {
+                gaps.push((min_lim, max_lim, gap_len));
+            }
+        } else {
+            // Gap before first opening
+            let first_start = min_lim;
+            let first_end = wall_openings[0].offset - OPENING_MIN_JAMB;
+            if first_end - first_start >= req_width - 1e-6 {
+                gaps.push((first_start, first_end, first_end - first_start));
+            }
+
+            // Gaps between openings
+            for pair in wall_openings.windows(2) {
+                let mid_start = pair[0].offset + pair[0].width + OPENING_MIN_JAMB;
+                let mid_end = pair[1].offset - OPENING_MIN_JAMB;
+                if mid_end - mid_start >= req_width - 1e-6 {
+                    gaps.push((mid_start, mid_end, mid_end - mid_start));
+                }
+            }
+
+            // Gap after last opening
+            let last_o = wall_openings.last().unwrap();
+            let last_start = last_o.offset + last_o.width + OPENING_MIN_JAMB;
+            let last_end = max_lim;
+            if last_end - last_start >= req_width - 1e-6 {
+                gaps.push((last_start, last_end, last_end - last_start));
+            }
+        }
+
+        // Pick largest gap on this wall
+        if let Some(&(start, end, len)) = gaps.iter().max_by(|a, b| a.2.total_cmp(&b.2)) {
+            candidate_gaps.push(WallGap {
+                wall: w,
+                wall_len,
+                start,
+                end,
+                len,
+            });
+        }
+    }
+
+    // Pick candidate with longest wall_len, break ties by largest gap len, then smaller wall index
+    candidate_gaps.sort_by(|a, b| {
+        b.wall_len
+            .total_cmp(&a.wall_len)
+            .then_with(|| b.len.total_cmp(&a.len))
+            .then_with(|| a.wall.cmp(&b.wall))
+    });
+
+    candidate_gaps.first().map(|g| {
+        let offset = g.start + (g.len - req_width) / 2.0;
+        (g.wall, offset)
+    })
 }
 
 pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditError> {
@@ -841,18 +925,9 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
 
     if let Some(preset_id) = action.strip_prefix("platform.preset.") {
         let preset = PRESETS.iter().find(|p| p.id == preset_id).ok_or_else(|| EditError::Invalid(format!("Unknown preset {preset_id}")))?;
-        let pid = match cx.selection {
-            Some(SelectionTarget::Platform(pid)) => pid,
-            _ => {
-                if let Some(first) = cx.doc.platforms.first() {
-                    first.id
-                } else {
-                    return Err(EditError::Stale);
-                }
-            }
-        };
-        let orig = cx.doc.platform(pid).ok_or(EditError::Stale)?;
-        let p = apply_preset(orig, preset);
+        let orig = target_platform(cx)?;
+        let mut p = apply_preset(orig, preset);
+        pin_grid_if_needed(cx.doc, &mut p, &orig.hole_grid, orig.outline.bounds());
         p.validate().map_err(|e| EditError::Invalid(e.to_string()))?;
         return Ok(EditOutcome::Command {
             command: Command::UpdatePlatform { platform: Box::new(p) },
@@ -863,20 +938,14 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
     }
 
     if action.starts_with("platform.") {
-        let pid = match cx.selection {
-            Some(SelectionTarget::Platform(pid)) => pid,
-            _ => {
-                if let Some(first) = cx.doc.platforms.first() {
-                    first.id
-                } else {
-                    return Err(EditError::Stale);
-                }
-            }
-        };
-        let orig = cx.doc.platform(pid).ok_or(EditError::Stale)?;
+        let orig = target_platform(cx)?;
+        let old_grid = orig.hole_grid.clone();
+        let old_bounds = orig.outline.bounds();
         let mut p = orig.clone();
+        let mut outline_or_grid_changed = false;
 
         if let Some(rest) = action.strip_prefix("platform.corner.") {
+            outline_or_grid_changed = true;
             if rest == "append" {
                 let n = match &p.outline {
                     Outline::Polygon { corners } => corners.len(),
@@ -932,6 +1001,10 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
             }
         } else {
             return Err(EditError::UnknownField(action.into()));
+        }
+
+        if outline_or_grid_changed {
+            pin_grid_if_needed(cx.doc, &mut p, &old_grid, old_bounds);
         }
 
         p.validate().map_err(|e| EditError::Invalid(e.to_string()))?;
@@ -992,29 +1065,20 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
             }
         }
         if action == "room.door.add" {
-            let n = cx.doc.room.outline.len();
-            let mut longest_wall = 0;
-            let mut max_len = 0.0;
-            for i in 0..n {
-                let len = cx.doc.room.wall_length(i);
-                if len > max_len {
-                    max_len = len;
-                    longest_wall = i;
-                }
-            }
-            let (min_lim, max_lim) = cx.doc.room.opening_limits(longest_wall);
-            let available = max_lim - min_lim;
-            if available < 1000.0 || max_lim.is_nan() {
+            let Some((wall, offset)) = find_best_wall_gap(cx.doc, 1000.0) else {
                 return Err(EditError::Invalid("No wall is long enough for a 1 m door".into()));
+            };
+            let mut n = 1;
+            while cx.doc.room.openings.iter().any(|o| o.name == format!("Door {n}")) {
+                n += 1;
             }
-            let offset = min_lim + (available - 1000.0) / 2.0;
-            let door_count = cx.doc.room.openings.iter().filter(|o| o.name.starts_with("Door")).count();
-            let name = format!("Door {}", door_count + 1);
+            let name = format!("Door {n}");
             let height = 2100.0f64.min(cx.doc.room.wall_height - 100.0);
+            let next_id = cx.doc.next_free_id().max(cx.doc.room.openings.iter().map(|o| o.id.0 + 1).max().unwrap_or(1));
             let opening = Opening {
-                id: OpeningId(cx.doc.next_free_id()),
+                id: OpeningId(next_id),
                 name,
-                wall: longest_wall as u32,
+                wall: wall as u32,
                 offset,
                 width: 1000.0,
                 height,
@@ -1031,28 +1095,19 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
             });
         }
         if action == "room.window.add" {
-            let n = cx.doc.room.outline.len();
-            let mut longest_wall = 0;
-            let mut max_len = 0.0;
-            for i in 0..n {
-                let len = cx.doc.room.wall_length(i);
-                if len > max_len {
-                    max_len = len;
-                    longest_wall = i;
-                }
-            }
-            let (min_lim, max_lim) = cx.doc.room.opening_limits(longest_wall);
-            let available = max_lim - min_lim;
-            if available < 1200.0 || max_lim.is_nan() {
+            let Some((wall, offset)) = find_best_wall_gap(cx.doc, 1200.0) else {
                 return Err(EditError::Invalid("No wall is long enough for a 1.2 m window".into()));
+            };
+            let mut n = 1;
+            while cx.doc.room.openings.iter().any(|o| o.name == format!("Window {n}")) {
+                n += 1;
             }
-            let offset = min_lim + (available - 1200.0) / 2.0;
-            let win_count = cx.doc.room.openings.iter().filter(|o| o.name.starts_with("Window")).count();
-            let name = format!("Window {}", win_count + 1);
+            let name = format!("Window {n}");
+            let next_id = cx.doc.next_free_id().max(cx.doc.room.openings.iter().map(|o| o.id.0 + 1).max().unwrap_or(1));
             let opening = Opening {
-                id: OpeningId(cx.doc.next_free_id()),
+                id: OpeningId(next_id),
                 name,
-                wall: longest_wall as u32,
+                wall: wall as u32,
                 offset,
                 width: 1200.0,
                 height: 1200.0,
@@ -1075,10 +1130,12 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
             if op == "delete" {
                 let mut new_room = cx.doc.room.clone();
                 let idx = new_room.openings.iter().position(|o| o.id.0 == id).ok_or(EditError::Stale)?;
+                let is_window = new_room.openings[idx].sill > 1e-6 || new_room.openings[idx].name.starts_with("Window");
+                let label = if is_window { "Remove Window" } else { "Remove Door" };
                 new_room.openings.remove(idx);
                 return Ok(EditOutcome::Command {
                     command: Command::SetRoom(Box::new(new_room)),
-                    label: "Remove Door".into(),
+                    label: label.into(),
                     select: cx.selection,
                     fixes: Vec::new(),
                 });
@@ -1097,7 +1154,8 @@ pub fn preview_edit(cx: &EditContext, field: &str, text: &str) -> Result<Preview
         let axis = parts.next().ok_or((EditError::UnknownField(field.into()), Some(k)))?;
         let pid = match cx.selection {
             Some(SelectionTarget::Platform(pid)) => pid,
-            _ => cx.doc.platforms.first().map(|p| p.id).ok_or((EditError::Stale, Some(k)))?,
+            Some(SelectionTarget::Node(_)) | Some(SelectionTarget::Room) => return Err((EditError::Stale, Some(k))),
+            None => cx.doc.platforms.first().map(|p| p.id).ok_or((EditError::Stale, Some(k)))?,
         };
         let orig = cx.doc.platform(pid).ok_or((EditError::Stale, Some(k)))?;
         let mut p = orig.clone();
@@ -1144,7 +1202,8 @@ pub fn preview_edit(cx: &EditContext, field: &str, text: &str) -> Result<Preview
         let prop = parts.next().ok_or((EditError::UnknownField(field.into()), Some(k)))?;
         let pid = match cx.selection {
             Some(SelectionTarget::Platform(pid)) => pid,
-            _ => cx.doc.platforms.first().map(|p| p.id).ok_or((EditError::Stale, Some(k)))?,
+            Some(SelectionTarget::Node(_)) | Some(SelectionTarget::Room) => return Err((EditError::Stale, Some(k))),
+            None => cx.doc.platforms.first().map(|p| p.id).ok_or((EditError::Stale, Some(k)))?,
         };
         let orig = cx.doc.platform(pid).ok_or((EditError::Stale, Some(k)))?;
         let mut p = orig.clone();
@@ -1342,7 +1401,7 @@ mod tests {
     use super::*;
     use crate::views::invalid_row;
     use lab_core::glam::{DQuat, DVec2, DVec3};
-    use lab_core::holes::{ExclusionZone, GridOrigin, HoleGrid, ZoneShape};
+    use lab_core::holes::{compute_holes, ExclusionZone, GridOrigin, HoleGrid, ZoneShape};
     use lab_core::model::{Node, NodeId, Platform, PlatformId, PlatformKind, Support, Surface};
     use lab_core::outline::{Outline, OutlineCorner, RectCorner};
     use lab_core::room::OpeningFix;
@@ -1372,7 +1431,27 @@ mod tests {
     // In inches, re-committing '47.244' on a 1200 mm width gives Nothing. Inch input works on mm display.
     #[test]
     fn e1_field_edit_all_fields() {
-        let doc = test_doc();
+        let mut doc = test_doc();
+        let g = doc.platforms[0].hole_grid.as_mut().unwrap();
+        g.exclusions.push(ExclusionZone {
+            name: "Zone 1".into(),
+            shape: ZoneShape::Rect { center: DVec2::ZERO, size: DVec2::splat(100.0) },
+        });
+        g.exclusions.push(ExclusionZone {
+            name: "Zone 2".into(),
+            shape: ZoneShape::Circle { center: DVec2::ZERO, radius: 50.0 },
+        });
+
+        doc.room.openings.push(Opening {
+            id: OpeningId(10),
+            name: "Door 1".into(),
+            wall: 0,
+            offset: 500.0,
+            width: 1000.0,
+            height: 2100.0,
+            sill: 0.0,
+        });
+
         let cx = EditContext {
             doc: &doc,
             selection: Some(SelectionTarget::Platform(PlatformId(1))),
@@ -1380,19 +1459,155 @@ mod tests {
         };
 
         // Platform fields
-        let res = field_edit(&cx, "platform.name", "Table X").unwrap();
-        assert!(matches!(res, EditOutcome::Command { .. }));
+        assert!(matches!(field_edit(&cx, "platform.name", "Table X").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.name", "Table 1").unwrap(), EditOutcome::Nothing);
 
-        let res = field_edit(&cx, "platform.outline.width", "1500").unwrap();
-        assert!(matches!(res, EditOutcome::Command { .. }));
+        assert!(matches!(field_edit(&cx, "platform.x", "100").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.x", "0").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.x", "abc"), Err(EditError::Parse(_))));
 
-        // Unchanged text gives Nothing
-        let res = field_edit(&cx, "platform.outline.width", "1200").unwrap();
-        assert_eq!(res, EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.y", "50").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.y", "0").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.y", "abc"), Err(EditError::Parse(_))));
 
-        // "abc" gives Parse
-        let res = field_edit(&cx, "platform.outline.width", "abc");
-        assert!(matches!(res, Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.rotation", "45").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.rotation", "0").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.rotation", "abc"), Err(EditError::Parse(_))));
+
+        assert!(matches!(field_edit(&cx, "platform.top_height", "850").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.top_height", "800").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.top_height", "abc"), Err(EditError::Parse(_))));
+
+        assert!(matches!(field_edit(&cx, "platform.thickness", "150").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.thickness", "100").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.thickness", "abc"), Err(EditError::Parse(_))));
+
+        assert!(matches!(field_edit(&cx, "platform.outline.width", "1500").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.outline.width", "1200").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.outline.width", "abc"), Err(EditError::Parse(_))));
+
+        assert!(matches!(field_edit(&cx, "platform.outline.depth", "1000").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.outline.depth", "900").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.outline.depth", "abc"), Err(EditError::Parse(_))));
+
+        // Outline-specific: rounded
+        let mut doc_rounded = doc.clone();
+        doc_rounded.platforms[0].outline = Outline::RoundedRectangle { size: DVec2::new(1200.0, 900.0), radius: 25.0 };
+        let cx_rounded = EditContext { doc: &doc_rounded, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        assert!(matches!(field_edit(&cx_rounded, "platform.outline.radius", "30").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_rounded, "platform.outline.radius", "25").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_rounded, "platform.outline.radius", "abc"), Err(EditError::Parse(_))));
+
+        // Outline-specific: LShape
+        let mut doc_l = doc.clone();
+        doc_l.platforms[0].outline = Outline::LShape { size: DVec2::new(1200.0, 900.0), notch: DVec2::new(400.0, 300.0), notch_corner: RectCorner::XPosYPos };
+        let cx_l = EditContext { doc: &doc_l, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        assert!(matches!(field_edit(&cx_l, "platform.outline.notch_width", "450").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_l, "platform.outline.notch_width", "400").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_l, "platform.outline.notch_width", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_l, "platform.outline.notch_depth", "350").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_l, "platform.outline.notch_depth", "300").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_l, "platform.outline.notch_depth", "abc"), Err(EditError::Parse(_))));
+
+        // Outline-specific: Polygon corners
+        let mut doc_poly = doc.clone();
+        doc_poly.platforms[0].outline = Outline::Polygon {
+            corners: vec![
+                OutlineCorner::sharp(DVec2::new(-600.0, -450.0)),
+                OutlineCorner::sharp(DVec2::new(600.0, -450.0)),
+                OutlineCorner::sharp(DVec2::new(600.0, 450.0)),
+                OutlineCorner::sharp(DVec2::new(-600.0, 450.0)),
+            ],
+        };
+        let cx_poly = EditContext { doc: &doc_poly, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        assert!(matches!(field_edit(&cx_poly, "platform.corner.0.x", "-550").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_poly, "platform.corner.0.x", "-600").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_poly, "platform.corner.0.x", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_poly, "platform.corner.0.y", "-400").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_poly, "platform.corner.0.y", "-450").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_poly, "platform.corner.0.y", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_poly, "platform.corner.0.r", "10").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_poly, "platform.corner.0.r", "0").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_poly, "platform.corner.0.r", "abc"), Err(EditError::Parse(_))));
+
+        // Grid fields
+        assert!(matches!(field_edit(&cx, "platform.grid.pitch_x", "50").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.grid.pitch_x", "25").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.grid.pitch_x", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.grid.pitch_y", "50").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.grid.pitch_y", "25").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.grid.pitch_y", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.grid.margin", "50").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.grid.margin", "12.5").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.grid.margin", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.grid.origin_x", "-500").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.grid.origin_x", "-587.5").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.grid.origin_x", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.grid.origin_y", "-400").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.grid.origin_y", "-437.5").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.grid.origin_y", "abc"), Err(EditError::Parse(_))));
+
+        // Zone fields
+        assert!(matches!(field_edit(&cx, "platform.zone.0.name", "ZNew").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.zone.0.name", "Zone 1").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.zone.0.x", "10").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.zone.0.x", "0").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.zone.0.x", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.zone.0.y", "10").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.zone.0.y", "0").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.zone.0.y", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.zone.0.w", "120").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.zone.0.w", "100").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.zone.0.w", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.zone.0.h", "120").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.zone.0.h", "100").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.zone.0.h", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.zone.1.r", "60").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.zone.1.r", "50").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.zone.1.r", "abc"), Err(EditError::Parse(_))));
+
+        // Support fields
+        assert!(matches!(field_edit(&cx, "platform.support.leg_size", "140").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.support.leg_size", "120").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.support.leg_size", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx, "platform.support.leg_inset", "160").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx, "platform.support.leg_inset", "150").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx, "platform.support.leg_inset", "abc"), Err(EditError::Parse(_))));
+
+        // Room fields
+        let cx_room = EditContext { doc: &doc, selection: Some(SelectionTarget::Room), units: LengthUnit::Millimetre };
+        assert!(matches!(field_edit(&cx_room, "room.width", "7000").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.width", "6000").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.width", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.depth", "5500").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.depth", "5000").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.depth", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.height", "3500").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.height", "3000").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.height", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.thickness", "250").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.thickness", "150").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.thickness", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.corner.0.x", "-3200").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.corner.0.x", "-3000").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.corner.0.x", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.corner.0.y", "-2700").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.corner.0.y", "-2500").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.corner.0.y", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.door.10.name", "Side Door").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.door.10.name", "Door 1").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.door.10.offset", "600").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.door.10.offset", "500").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.door.10.offset", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.door.10.width", "950").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.door.10.width", "1000").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.door.10.width", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.door.10.height", "2200").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.door.10.height", "2100").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.door.10.height", "abc"), Err(EditError::Parse(_))));
+        assert!(matches!(field_edit(&cx_room, "room.door.10.sill", "50").unwrap(), EditOutcome::Command { .. }));
+        assert_eq!(field_edit(&cx_room, "room.door.10.sill", "0").unwrap(), EditOutcome::Nothing);
+        assert!(matches!(field_edit(&cx_room, "room.door.10.sill", "abc"), Err(EditError::Parse(_))));
 
         // In inches, re-committing '47.244' on a 1200 mm width returns Nothing
         let cx_in = EditContext {
@@ -1414,12 +1629,6 @@ mod tests {
             }
             _ => panic!("expected command"),
         }
-
-        // Room fields
-        let res = field_edit(&cx, "room.height", "3500").unwrap();
-        assert!(matches!(res, EditOutcome::Command { .. }));
-        let res = field_edit(&cx, "room.height", "3000").unwrap();
-        assert_eq!(res, EditOutcome::Nothing);
     }
 
     // E2: A corner edit producing a bow-tie gives Invalid containing "cross", and invalid_row points at right row.
@@ -1447,7 +1656,7 @@ mod tests {
         let err = res.unwrap_err();
         assert!(matches!(err, EditError::Invalid(ref msg) if msg.contains("cross")));
         let row = invalid_row(&err);
-        assert!(row.is_some());
+        assert_eq!(row, Some(1));
     }
 
     // E3: A stale corner index gives Stale.
@@ -1474,7 +1683,6 @@ mod tests {
     #[test]
     fn e4_room_corner_move_strands_door() {
         let mut doc = test_doc();
-        // Add a door on wall 0 (between (-3000, -2500) and (3000, -2500))
         doc.room.openings.push(Opening {
             id: OpeningId(10),
             name: "Door 1".into(),
@@ -1489,7 +1697,6 @@ mod tests {
             selection: Some(SelectionTarget::Room),
             units: LengthUnit::Millimetre,
         };
-        // Moving corner 0 shrinks wall 0 to 1000 mm so the 1000 mm door cannot fit with jambs
         let res = field_edit(&cx, "room.corner.0.x", "2000").unwrap();
         match res {
             EditOutcome::Command { fixes, .. } => {
@@ -1535,9 +1742,28 @@ mod tests {
             units: LengthUnit::Millimetre,
         };
 
-        // To Rounded
+        // 1. Rect (1200x900) -> Rounded (radius 25)
         let res = choice_edit(&cx, "platform.outline.kind", 1).unwrap();
-        match res {
+        let rounded_p = match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
+                match platform.outline {
+                    Outline::RoundedRectangle { size, radius } => {
+                        assert_eq!(size, DVec2::new(1200.0, 900.0));
+                        assert_eq!(radius, 25.0);
+                    }
+                    _ => panic!("expected rounded"),
+                }
+                *platform
+            }
+            _ => panic!("expected command"),
+        };
+
+        // Radius clamp to min(hx, hy)
+        let mut tiny_doc = doc.clone();
+        tiny_doc.platforms[0].outline = Outline::Rectangle { size: DVec2::new(50.0, 50.0) };
+        let tiny_cx = EditContext { doc: &tiny_doc, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let tiny_res = choice_edit(&tiny_cx, "platform.outline.kind", 1).unwrap();
+        match tiny_res {
             EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
                 match platform.outline {
                     Outline::RoundedRectangle { radius, .. } => assert_eq!(radius, 25.0),
@@ -1547,26 +1773,74 @@ mod tests {
             _ => panic!("expected command"),
         }
 
-        // To L
+        // 2. Rect -> L
         let res = choice_edit(&cx, "platform.outline.kind", 2).unwrap();
-        match res {
+        let l_p = match res {
             EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
                 match platform.outline {
-                    Outline::LShape { notch, notch_corner, .. } => {
+                    Outline::LShape { size, notch, notch_corner } => {
+                        assert_eq!(size, DVec2::new(1200.0, 900.0));
                         assert_eq!(notch, DVec2::new(400.0, 300.0));
                         assert_eq!(notch_corner, RectCorner::XPosYPos);
                     }
                     _ => panic!("expected L shape"),
                 }
+                *platform
+            }
+            _ => panic!("expected command"),
+        };
+
+        // 3. Rect -> Custom (exact polygon)
+        let res = choice_edit(&cx, "platform.outline.kind", 3).unwrap();
+        let custom_p = match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
+                match &platform.outline {
+                    Outline::Polygon { corners } => {
+                        let expected = doc.platforms[0].outline.to_polygon();
+                        match expected {
+                            Outline::Polygon { corners: ec } => assert_eq!(corners, &ec),
+                            _ => unreachable!(),
+                        }
+                    }
+                    _ => panic!("expected custom polygon"),
+                }
+                *platform
+            }
+            _ => panic!("expected command"),
+        };
+
+        // 4. Rounded -> Rect (bbox size, centred)
+        let mut doc_r = doc.clone();
+        doc_r.platforms[0] = rounded_p;
+        let cx_r = EditContext { doc: &doc_r, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let res = choice_edit(&cx_r, "platform.outline.kind", 0).unwrap();
+        match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
+                assert_eq!(platform.outline, Outline::Rectangle { size: DVec2::new(1200.0, 900.0) });
             }
             _ => panic!("expected command"),
         }
 
-        // To Custom
-        let res = choice_edit(&cx, "platform.outline.kind", 3).unwrap();
+        // 5. L -> Rect (bbox size, centred)
+        let mut doc_l = doc.clone();
+        doc_l.platforms[0] = l_p;
+        let cx_l = EditContext { doc: &doc_l, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let res = choice_edit(&cx_l, "platform.outline.kind", 0).unwrap();
         match res {
             EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
-                assert!(matches!(platform.outline, Outline::Polygon { .. }));
+                assert_eq!(platform.outline, Outline::Rectangle { size: DVec2::new(1200.0, 900.0) });
+            }
+            _ => panic!("expected command"),
+        }
+
+        // 6. Custom -> Rect (bbox size, centred)
+        let mut doc_c = doc.clone();
+        doc_c.platforms[0] = custom_p;
+        let cx_c = EditContext { doc: &doc_c, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let res = choice_edit(&cx_c, "platform.outline.kind", 0).unwrap();
+        match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
+                assert_eq!(platform.outline, Outline::Rectangle { size: DVec2::new(1200.0, 900.0) });
             }
             _ => panic!("expected command"),
         }
@@ -1591,30 +1865,10 @@ mod tests {
         assert!(matches!(res, Err(EditError::Invalid(msg)) if msg.contains("No wall is long enough")));
     }
 
-    // E8: Deleting a platform gives RemovePlatform.
+    // E8: Deleting a platform gives RemovePlatform, node gives RemoveNode, room gives Nothing.
     #[test]
-    fn e8_delete_platform() {
-        let doc = test_doc();
-        let cx = EditContext {
-            doc: &doc,
-            selection: Some(SelectionTarget::Platform(PlatformId(1))),
-            units: LengthUnit::Millimetre,
-        };
-        let res = action_edit(&cx, "platform.delete").unwrap();
-        match res {
-            EditOutcome::Command { command: Command::RemovePlatform(pid), .. } => {
-                assert_eq!(pid, PlatformId(1));
-            }
-            _ => panic!("expected RemovePlatform"),
-        }
-    }
-
-    // E9: Pinning: an outline edit on a platform with nodes converts Auto to At,
-    // and hole positions are unchanged for every node position.
-    #[test]
-    fn e9_pinning_rule() {
+    fn e8_delete_platform_node_and_room() {
         let mut doc = test_doc();
-        // Add a node on Platform 1
         doc.nodes.push(Node {
             id: NodeId(101),
             name: "Laser".into(),
@@ -1627,25 +1881,90 @@ mod tests {
             pickable: true,
         });
 
+        // 1. platform.delete
+        let cx_p = EditContext {
+            doc: &doc,
+            selection: Some(SelectionTarget::Platform(PlatformId(1))),
+            units: LengthUnit::Millimetre,
+        };
+        let res = action_edit(&cx_p, "platform.delete").unwrap();
+        assert_eq!(res, EditOutcome::Command {
+            command: Command::RemovePlatform(PlatformId(1)),
+            label: "Delete Platform".into(),
+            select: None,
+            fixes: Vec::new(),
+        });
+
+        // 2. selection.delete on Platform
+        let res = action_edit(&cx_p, "selection.delete").unwrap();
+        assert_eq!(res, EditOutcome::Command {
+            command: Command::RemovePlatform(PlatformId(1)),
+            label: "Delete Platform".into(),
+            select: None,
+            fixes: Vec::new(),
+        });
+
+        // 3. selection.delete on Node -> RemoveNode
+        let cx_n = EditContext {
+            doc: &doc,
+            selection: Some(SelectionTarget::Node(NodeId(101))),
+            units: LengthUnit::Millimetre,
+        };
+        let res = action_edit(&cx_n, "selection.delete").unwrap();
+        assert_eq!(res, EditOutcome::Command {
+            command: Command::RemoveNode(NodeId(101)),
+            label: "Delete".into(),
+            select: None,
+            fixes: Vec::new(),
+        });
+
+        // 4. selection.delete on Room -> Nothing
+        let cx_r = EditContext {
+            doc: &doc,
+            selection: Some(SelectionTarget::Room),
+            units: LengthUnit::Millimetre,
+        };
+        let res = action_edit(&cx_r, "selection.delete").unwrap();
+        assert_eq!(res, EditOutcome::Nothing);
+    }
+
+    // E9: Pinning: an outline edit on a platform with nodes converts Auto to At,
+    // and hole positions are unchanged for every node position.
+    #[test]
+    fn e9_pinning_rule() {
+        let mut doc = test_doc();
+        doc.nodes.push(Node {
+            id: NodeId(101),
+            name: "Laser".into(),
+            platform: PlatformId(1),
+            part: "Part A".into(),
+            shape: lab_core::model::Shape::Box { size: DVec3::ONE },
+            finish: lab_core::model::Finish::Stainless,
+            position: DVec3::new(112.5, 37.5, 100.0),
+            rotation: DQuat::IDENTITY,
+            pickable: true,
+        });
+
         assert_eq!(doc.platforms[0].hole_grid.as_ref().unwrap().origin, GridOrigin::Auto);
-
-        let orig_grid = doc.platforms[0].hole_grid.as_ref().unwrap();
-        let orig_bounds = doc.platforms[0].outline.bounds();
-        let expected_pinned_origin = lattice_origin(orig_grid, orig_bounds);
-
+        let old = compute_holes(&doc.platforms[0]).unwrap();
         let cx = EditContext {
             doc: &doc,
             selection: Some(SelectionTarget::Platform(PlatformId(1))),
             units: LengthUnit::Millimetre,
         };
 
-        let res = field_edit(&cx, "platform.outline.width", "1400").unwrap();
-        match res {
-            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
-                let g = platform.hole_grid.as_ref().unwrap();
-                assert_eq!(g.origin, GridOrigin::At(expected_pinned_origin));
-            }
-            _ => panic!("expected command"),
+        for w in ["1400", "1237", "1013"] {
+            let res = field_edit(&cx, "platform.outline.width", w).unwrap();
+            let p = match res {
+                EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => *platform,
+                _ => panic!("expected command"),
+            };
+            assert!(matches!(p.hole_grid.as_ref().unwrap().origin, GridOrigin::At(_)));
+            let new = compute_holes(&p).unwrap();
+            let pt = doc.nodes[0].position.truncate();
+            let a = old.position(old.nearest(pt).unwrap());
+            let b = new.position(new.nearest(pt).unwrap());
+            assert!((a - b).length() < 1e-9, "width {w}: hole shifted under node: {a:?} -> {b:?}");
         }
     }
 
@@ -1677,5 +1996,173 @@ mod tests {
         let text_with_err = "0, 0\n100, 0\nbad_val, 100\n0, 100";
         let err = parse_pasted_corners(text_with_err, LengthUnit::Millimetre, false).unwrap_err();
         assert!(err.starts_with("line 3:"));
+    }
+
+    // Regressions for Major 1-3 and Minor audit findings:
+
+    #[test]
+    fn regression_origin_x_edit_preserved() {
+        let mut doc = test_doc();
+        doc.nodes.push(Node {
+            id: NodeId(101),
+            name: "Laser".into(),
+            platform: PlatformId(1),
+            part: "Part A".into(),
+            shape: lab_core::model::Shape::Box { size: DVec3::ONE },
+            finish: lab_core::model::Finish::Stainless,
+            position: DVec3::new(112.5, 37.5, 100.0),
+            rotation: DQuat::IDENTITY,
+            pickable: true,
+        });
+        let cx = EditContext { doc: &doc, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let res = field_edit(&cx, "platform.grid.origin_x", "-500").unwrap();
+        let p = match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => *platform,
+            _ => panic!("expected command"),
+        };
+        let g = p.hole_grid.as_ref().unwrap();
+        let o = lattice_origin(g, p.outline.bounds());
+        assert_eq!(o.x, -500.0, "typed origin X was discarded");
+    }
+
+    #[test]
+    fn regression_preset_apply_pins_grid() {
+        let mut doc = test_doc();
+        doc.nodes.push(Node {
+            id: NodeId(101),
+            name: "Laser".into(),
+            platform: PlatformId(1),
+            part: "Part A".into(),
+            shape: lab_core::model::Shape::Box { size: DVec3::ONE },
+            finish: lab_core::model::Finish::Stainless,
+            position: DVec3::new(112.5, 37.5, 100.0),
+            rotation: DQuat::IDENTITY,
+            pickable: true,
+        });
+        let before = lattice_origin(doc.platforms[0].hole_grid.as_ref().unwrap(), doc.platforms[0].outline.bounds());
+        let cx = EditContext { doc: &doc, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let res = action_edit(&cx, "platform.preset.table-m-1500x1200").unwrap();
+        let p = match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => *platform,
+            _ => panic!("expected command"),
+        };
+        let after = lattice_origin(p.hole_grid.as_ref().unwrap(), p.outline.bounds());
+        let d = after - before;
+        let pitch = 25.0;
+        let on_lattice = (d.x / pitch).fract().abs() < 1e-9 && (d.y / pitch).fract().abs() < 1e-9;
+        assert!(on_lattice, "lattice shifted by {d:?} under placed parts");
+    }
+
+    #[test]
+    fn regression_corner_delete_pins_grid() {
+        let mut doc = test_doc();
+        doc.platforms[0].outline = Outline::Polygon {
+            corners: vec![
+                OutlineCorner::sharp(DVec2::new(-600.0, -450.0)),
+                OutlineCorner::sharp(DVec2::new(600.0, -450.0)),
+                OutlineCorner::sharp(DVec2::new(600.0, 450.0)),
+                OutlineCorner::sharp(DVec2::new(0.0, 470.0)),
+                OutlineCorner::sharp(DVec2::new(-600.0, 450.0)),
+            ],
+        };
+        doc.nodes.push(Node {
+            id: NodeId(101),
+            name: "Laser".into(),
+            platform: PlatformId(1),
+            part: "Part A".into(),
+            shape: lab_core::model::Shape::Box { size: DVec3::ONE },
+            finish: lab_core::model::Finish::Stainless,
+            position: DVec3::new(112.5, 37.5, 100.0),
+            rotation: DQuat::IDENTITY,
+            pickable: true,
+        });
+        let before = lattice_origin(doc.platforms[0].hole_grid.as_ref().unwrap(), doc.platforms[0].outline.bounds());
+        let cx = EditContext { doc: &doc, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let res = action_edit(&cx, "platform.corner.3.delete").unwrap();
+        let p = match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => *platform,
+            _ => panic!("expected command"),
+        };
+        let after = lattice_origin(p.hole_grid.as_ref().unwrap(), p.outline.bounds());
+        assert_eq!(before, after, "lattice moved under placed parts");
+    }
+
+    #[test]
+    fn regression_node_selected_platform_edit_returns_stale() {
+        let mut doc = test_doc();
+        doc.nodes.push(Node {
+            id: NodeId(101),
+            name: "Laser".into(),
+            platform: PlatformId(1),
+            part: "Part A".into(),
+            shape: lab_core::model::Shape::Box { size: DVec3::ONE },
+            finish: lab_core::model::Finish::Stainless,
+            position: DVec3::new(112.5, 37.5, 100.0),
+            rotation: DQuat::IDENTITY,
+            pickable: true,
+        });
+        let cx_node = EditContext { doc: &doc, selection: Some(SelectionTarget::Node(NodeId(101))), units: LengthUnit::Millimetre };
+        assert_eq!(field_edit(&cx_node, "platform.outline.width", "700"), Err(EditError::Stale));
+        assert_eq!(choice_edit(&cx_node, "platform.outline.kind", 1), Err(EditError::Stale));
+        assert_eq!(action_edit(&cx_node, "platform.preset.table-m-1500x1200"), Err(EditError::Stale));
+    }
+
+    #[test]
+    fn regression_door_window_add_multiple_and_labels() {
+        let doc = lab_core::sample::demo_document();
+        let mut current_doc = doc;
+        let cx = EditContext { doc: &current_doc, selection: Some(SelectionTarget::Room), units: LengthUnit::Millimetre };
+        // Adding first door
+        let res = action_edit(&cx, "room.door.add").unwrap();
+        match res {
+            EditOutcome::Command { command, .. } => {
+                command.apply(&mut current_doc).unwrap();
+            }
+            _ => panic!("expected SetRoom"),
+        }
+
+        // Adding second door succeeds without overlap
+        let cx2 = EditContext { doc: &current_doc, selection: Some(SelectionTarget::Room), units: LengthUnit::Millimetre };
+        let res2 = action_edit(&cx2, "room.door.add").unwrap();
+        match res2 {
+            EditOutcome::Command { command, .. } => {
+                command.apply(&mut current_doc).unwrap();
+            }
+            _ => panic!("expected SetRoom"),
+        }
+
+        // Adding window succeeds without overlap
+        let cx3 = EditContext { doc: &current_doc, selection: Some(SelectionTarget::Room), units: LengthUnit::Millimetre };
+        let res3 = action_edit(&cx3, "room.window.add").unwrap();
+        match res3 {
+            EditOutcome::Command { command, .. } => {
+                command.apply(&mut current_doc).unwrap();
+            }
+            _ => panic!("expected SetRoom"),
+        }
+
+        // Check window delete label is "Remove Window"
+        let win = current_doc.room.openings.iter().find(|o| o.name.starts_with("Window")).unwrap();
+        let win_del_action = format!("room.door.{}.delete", win.id.0);
+        let cx4 = EditContext { doc: &current_doc, selection: Some(SelectionTarget::Room), units: LengthUnit::Millimetre };
+        let del_res = action_edit(&cx4, &win_del_action).unwrap();
+        match del_res {
+            EditOutcome::Command { label, .. } => assert_eq!(label, "Remove Window"),
+            _ => panic!("expected command"),
+        }
+    }
+
+    #[test]
+    fn regression_rename_numeric_text_not_noop() {
+        let mut doc = test_doc();
+        doc.platforms[0].name = "10".into();
+        let cx = EditContext { doc: &doc, selection: Some(SelectionTarget::Platform(PlatformId(1))), units: LengthUnit::Millimetre };
+        let res = field_edit(&cx, "platform.name", "10.0").unwrap();
+        match res {
+            EditOutcome::Command { command: Command::UpdatePlatform { platform }, .. } => {
+                assert_eq!(platform.name, "10.0");
+            }
+            _ => panic!("expected UpdatePlatform, not no-op"),
+        }
     }
 }
