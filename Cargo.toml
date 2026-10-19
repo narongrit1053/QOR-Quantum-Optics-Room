@@ -7,6 +7,7 @@ members = [
     "crates/lab-viewport",
     "crates/lab-ui",
     "crates/lab-app",
+    "crates/lab-mates",
 ]
 
 [workspace.package]

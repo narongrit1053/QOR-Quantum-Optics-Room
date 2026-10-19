@@ -1,0 +1,11 @@
+[package]
+name = "lab-mates"
+description = "Connector compatibility, mate poses and hole snap for LabSetup (DESIGN.md §4.1)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-core.workspace = true
+glam.workspace = true
