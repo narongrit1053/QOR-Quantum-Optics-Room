@@ -16,10 +16,14 @@ use crate::picking::{HighlightLook, PickId};
 use crate::scene::{Backdrop, SceneEntity, SceneIndex, from_render};
 use crate::{FrameRequest, ViewMode};
 
-/// Fade rate (1/s) of the exponential approach; about 250 ms to (nearly) settle.
-const FADE_RATE: f32 = 12.0;
-/// Alphas closer than this to the target snap to it, so a fade ends in finite time.
-const FADE_SNAP: f32 = 0.01;
+/// Fade rate (1/s) of the exponential approach; settles in ~250 ms (ln(1/FADE_SNAP)/FADE_RATE).
+const FADE_RATE: f32 = 14.0;
+/// Alphas closer than this to the target snap to it, settling within 300 ms.
+const FADE_SNAP: f32 = 0.03;
+/// Maximum delta time (s) per fade step, so a slow GPU still finishes in real time.
+const MAX_FADE_DT: f32 = 0.25;
+/// Delta time (s) of a fade's first step: after an idle period the frame delta is huge.
+const FIRST_FADE_DT: f32 = 1.0 / 60.0;
 /// Hysteresis (mm) around the outer face for the "eye behind the wall" test.
 const HYSTERESIS: f64 = 50.0;
 
@@ -238,7 +242,8 @@ fn step_alpha(alpha: f32, target: f32, dt: f32) -> f32 {
 
 #[allow(clippy::too_many_arguments)]
 fn update_wall_fade(
-    time: Res<Time>,
+    // Bevy's Time::delta stays inflated for two updates after idle; measure the gap ourselves.
+    mut last_run: Local<Option<std::time::Instant>>,
     pending: Res<PendingRequests>,
     mut fade: ResMut<WallFade>,
     mut redraw: ResMut<RedrawState>,
@@ -260,7 +265,8 @@ fn update_wall_fade(
     if let Some(doc) = &index.snapshot {
         targets.extend(doc.platforms.iter().map(|p| p.position.extend(p.top_height)));
     }
-    let dt = time.delta_secs().min(1.0 / 30.0);
+    let now = std::time::Instant::now();
+    let dt = last_run.replace(now).map_or(FIRST_FADE_DT, |t| (now - t).as_secs_f32()).min(MAX_FADE_DT);
     let first_run = !fade.initialized;
     fade.initialized = true;
 
@@ -275,9 +281,17 @@ fn update_wall_fade(
             }
         };
         // A freshly spawned wall takes its state at once: rebuilding the room must not fade.
-        let alpha = if first_run || state.is_added() { target } else { step_alpha(state.alpha, target, dt) };
-        if state.target != target {
+        let started = state.target != target;
+        let alpha = if first_run || state.is_added() {
+            target
+        } else {
+            step_alpha(state.alpha, target, if started { dt.min(FIRST_FADE_DT) } else { dt })
+        };
+        if started {
             debug!("wall {entity}: fading to {target}");
+        }
+        if alpha != target || state.alpha != target {
+            trace!("wall {entity}: dt {dt:.4} alpha {alpha:.3}");
         }
         if state.alpha != alpha || state.target != target {
             state.alpha = alpha;
@@ -418,10 +432,63 @@ mod tests {
             frames += 1;
             assert!(frames < 100);
         }
-        // About a quarter to two fifths of a second at 60 fps.
+        // About a quarter of a second at 60 fps (16 frames at rate 14, snap 0.03).
         assert!((15..=25).contains(&frames), "{frames} frames");
         assert_eq!(look_for(1.0), (AlphaMode::Opaque, 1.0, Visibility::Inherited));
         assert_eq!(look_for(0.4), (AlphaMode::Blend, 0.4, Visibility::Inherited));
         assert_eq!(look_for(0.0).2, Visibility::Hidden);
+    }
+
+    #[test]
+    fn fade_after_idle_is_not_a_pop() {
+        // Real frame gaps as update_wall_fade measures them: the first is the idle gap.
+        for (frame_dt, min_steps) in [(0.016f32, 3), (0.13, 2)] {
+            for (start, target) in [(1.0, 0.0), (0.0, 1.0)] {
+                let (mut alpha, mut elapsed, mut steps) = (start, 0.0f32, 0);
+                while alpha != target {
+                    let real = if steps == 0 { 0.25 } else { frame_dt };
+                    let dt = if steps == 0 { real.min(FIRST_FADE_DT) } else { real.min(MAX_FADE_DT) };
+                    let next = step_alpha(alpha, target, dt);
+                    // At 130 ms frames a 300 ms fade has only ~2 frames, so big steps are unavoidable.
+                    assert!(frame_dt > 0.1 || (next - alpha).abs() <= 0.5, "jump {alpha} -> {next}");
+                    alpha = next;
+                    if steps > 0 {
+                        elapsed += real;
+                    }
+                    steps += 1;
+                    assert!(steps < 100);
+                }
+                assert!(steps >= min_steps, "{steps} steps at {frame_dt} s");
+                assert!(elapsed <= 0.30, "took {elapsed:.3} s after the first frame at {frame_dt} s");
+            }
+        }
+    }
+
+    #[test]
+    fn fade_settles_within_spec_at_various_frame_times() {
+        for dt_ms in [16.0, 65.0, 130.0] {
+            let dt = (dt_ms / 1000.0) as f32;
+            for (start, target) in [(1.0, 0.0), (0.0, 1.0)] {
+                let mut alpha = start;
+                let mut elapsed = 0.0f32;
+                let mut steps = 0;
+                while alpha != target {
+                    let next = step_alpha(alpha, target, dt.min(MAX_FADE_DT));
+                    if start > target {
+                        assert!(next <= alpha && next >= target, "overshot during fade out: {alpha} -> {next}");
+                    } else {
+                        assert!(next >= alpha && next <= target, "overshot during fade in: {alpha} -> {next}");
+                    }
+                    alpha = next;
+                    elapsed += dt;
+                    steps += 1;
+                    assert!(steps < 100, "did not settle: dt {dt_ms} ms, alpha {alpha}");
+                }
+                assert!(
+                    elapsed <= 0.30,
+                    "fade from {start} to {target} took {elapsed:.3} s with dt={dt_ms} ms (expected <= 0.30 s)"
+                );
+            }
+        }
     }
 }
