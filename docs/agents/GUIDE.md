@@ -119,6 +119,8 @@ When woken:
 
 Quotas: all Claude agents share one Claude plan; all Antigravity agents share one Flash quota. Every M1 issue has a `task.failed` wakeup that wakes a **triager on the other provider**, because the failed agent's own quota may be gone:
 
+**Automatic sweep** (board decision, 2026-10-20): the *Failed-run sweep* autopilot runs the Limit Dispatcher every 15 minutes on its own. It finds failed runs of Claude agents from the last 20 minutes and triages them by the steps below, skipping any issue that already has a later run or a pending wakeup. Nobody needs to register failure wakeups any more; existing ones still fire and the sweep backs them up.
+
 - Issues assigned to Antigravity agents (Gemini Engineer Flash): **Lead Engineer** triages.
 - Issues assigned to Claude agents (Lead Engineer, Engineer\*, QA Reviewer Sonnet) and the M1 parent: **Limit Dispatcher** (Flash) triages.
 
@@ -132,7 +134,7 @@ When woken by a failure, the triager does only this (no code, no worktree change
 
 Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Engineer Opus `c560211e-a30f-45de-8ed0-80e94df9c26b`, Engineer Opus Low `9bffb221-f102-43a0-a10a-f28e39ed5144`, Engineer Sonnet `1a8be1b5-3ca9-42ca-8e19-02b539b5826d`, QA Reviewer Sonnet `08ecefee-2d76-424c-a1e5-565b9427f347`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688`.
 
-Closed (`done`/`cancelled`) issues cannot hold wakeups. Whoever moves an issue from `done` back to `todo` registers one: `multica issue wakeup create <KEY> --kind event --event task.failed --mode continuous --agent-id <triager id> --instruction "A run on this issue failed. Triage it as the guide's 'Failed runs and usage limits' section says."` (triager: Lead Engineer for Antigravity assignees, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688` for Claude assignees).
+Closed (`done`/`cancelled`) issues cannot hold wakeups; the automatic sweep covers reopened issues, so no wakeup needs to be registered.
 
 The platform pauses a wakeup rule after it fires three times in a chain with no person in between, so an issue that keeps failing ends up waiting for the board.
 
