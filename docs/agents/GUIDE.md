@@ -99,19 +99,19 @@ You own the parent issue "M1". Multica wakes you when every sub-issue in the ear
 
 When woken:
 
-1. **A build stage (5-8) finished:** check each task's report and re-run its acceptance gates in its worktree. If a gate fails, comment the failure on that issue @-mentioning its engineer and set it `todo` (no merge yet). Otherwise merge the stage's tasks (Merges, below) and set the next stage to `todo`. After stage 8, set all stage-9 reviews to `todo`.
+1. **A build stage (5-8) finished:** read each task's report. If a report shows a failed or missing gate, comment that on the issue @-mentioning its engineer and set it `todo`. Otherwise @-mention **Gemini Engineer Flash** on the parent with the exact list of branches to merge (Merges, below); it re-runs the gates, merges, and reports back. When its report is clean, set the next stage to `todo`. After stage 8, set all stage-9 reviews to `todo`.
 2. **A build issue finished again during the audit** (a review fix): do nothing; the fix is merged after the audit.
-3. **Stage 9 finished:** merge every `m1-<ID>-fix` branch the audit produced (Merges), run the full §8.2 gates, then set T7 to `todo`.
+3. **Stage 9 finished:** @-mention **Gemini Engineer Flash** to merge every `m1-<ID>-fix` branch the audit produced (Merges) and run the full §8.2 gates; when its report is clean, set T7 to `todo`.
 4. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
 
 ## Failed runs and usage limits
 
-**Models** (board decision, 2026-10-19): every Antigravity agent runs **Gemini 3.8 Flash High**; Argon is not used (weekly limit). Claude agents: Lead Engineer Opus high, Rust Engineer Opus medium, Rust Engineer XHigh Opus **high** (the name is historical), Rust Engineer Sonnet Sonnet high. Implementation work, including review fix rounds, goes to Claude agents and Gemini Engineer Flash; Gemini Engineer and Gemini Engineer Medium take no new work.
+**Models** (board decision, 2026-10-19, revised the same day to save Claude tokens): **Claude is the manager only.** The Lead Engineer (Opus high) manages the project, writes detailed plans and does the final audit; it writes no code, runs no build-stage gates and does no merges. Every other agent, including Rust Engineer, Rust Engineer XHigh and Rust Engineer Sonnet (the names are historical), runs on Antigravity with **Gemini 3.8 Flash High**; Argon is not used (weekly limit). Implementation work, review fix rounds, merges and gates go to the Rust Engineers and Gemini Engineer Flash; Gemini Engineer and Gemini Engineer Medium take no new work.
 
 Quotas: all Claude agents share one Claude plan; all Antigravity agents share one Flash quota. Every M1 issue has a `task.failed` wakeup that wakes a **triager on the other provider**, because the failed agent's own quota may be gone:
 
-- Issues assigned to Antigravity agents (Gemini Engineer\*, QA Reviewer\*): **Lead Engineer** triages.
-- Issues assigned to Claude agents (Lead Engineer, Rust Engineer\*) and the M1 parent: **Limit Dispatcher** (Flash) triages.
+- Issues assigned to Antigravity agents (Gemini Engineer\*, QA Reviewer\*, Rust Engineer\*): **Lead Engineer** triages.
+- Issues assigned to the Lead Engineer and the M1 parent: **Limit Dispatcher** (Flash) triages.
 
 When woken by a failure, the triager does only this (no code, no worktree changes, no other issues):
 
@@ -123,10 +123,10 @@ When woken by a failure, the triager does only this (no code, no worktree change
 
 Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Rust Engineer `a2d64798-7e14-42f4-9de6-b369a1633278`, Rust Engineer XHigh `c864e3c5-8f38-466b-b01e-c54254dbd753`, Gemini Engineer `407bed7a-4d2b-4130-a012-a39da2d7d933`, Gemini Engineer Medium `7d8b7572-25aa-41f0-b243-16c986d4f43f`, QA Reviewer `ac9b1599-4d1d-43b7-b7ac-29c94ee1220d`, QA Reviewer Medium `64a587cf-66a5-4a64-a08d-e4b866964ccd`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, QA Reviewer Flash `fffab64a-dab3-4135-bc74-82fe0a5bfcbe`, Rust Engineer Sonnet `c40f5abb-f1fd-448d-841e-b4367b432c44`.
 
-Closed (`done`/`cancelled`) issues cannot hold wakeups. Whoever moves an issue from `done` back to `todo` registers one: `multica issue wakeup create <KEY> --kind event --event task.failed --mode continuous --agent-id <triager id> --instruction "A run on this issue failed. Triage it as the guide's 'Failed runs and usage limits' section says."` (triager: Lead Engineer for Antigravity assignees, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688` for Claude assignees).
+Closed (`done`/`cancelled`) issues cannot hold wakeups. Whoever moves an issue from `done` back to `todo` registers one: `multica issue wakeup create <KEY> --kind event --event task.failed --mode continuous --agent-id <triager id> --instruction "A run on this issue failed. Triage it as the guide's 'Failed runs and usage limits' section says."` (triager: Lead Engineer for Antigravity assignees, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688` for Lead Engineer issues).
 
 The platform pauses a wakeup rule after it fires three times in a chain with no person in between, so an issue that keeps failing ends up waiting for the board.
 
-## Merges (Lead Engineer only)
+## Merges (Gemini Engineer Flash, when the Lead asks)
 
-In `D:\Try\LabSetup` on `m1` (check it is clean): `git merge --no-ff m1-<ID>` for each reviewed task of the wave, with message `Merge <ID>: <title>` plus the trailer. Do not merge `m1-T6-spike`; T6b takes `dialogs.rs` from it. Run the gates spec §8.2 requires at that point, and `scripts/check-offline.ps1` whenever `lab-app` compiles. Fix only mechanical integration mismatches (commit `Integration fix: ...`). Then `git worktree remove D:/Try/LabSetup-wt/<ID>` (keep the branch).
+Only merge the branches the Lead Engineer listed. In `D:\Try\LabSetup` on `m1` (check it is clean): `git merge --no-ff m1-<ID>` for each reviewed task of the wave, with message `Merge <ID>: <title>` plus the trailer. Do not merge `m1-T6-spike`; T6b takes `dialogs.rs` from it. Run the gates spec §8.2 requires at that point, and `scripts/check-offline.ps1` whenever `lab-app` compiles. Fix only mechanical integration mismatches (commit `Integration fix: ...`). Then `git worktree remove D:/Try/LabSetup-wt/<ID>` (keep the branch). Report each merge commit and gate result on the parent, @-mentioning the Lead Engineer.
