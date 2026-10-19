@@ -16,10 +16,13 @@ use crate::picking::{HighlightLook, PickId};
 use crate::scene::{Backdrop, SceneEntity, SceneIndex, from_render};
 use crate::{FrameRequest, ViewMode};
 
-/// Fade rate (1/s) of the exponential approach; about 250 ms to (nearly) settle.
-const FADE_RATE: f32 = 12.0;
-/// Alphas closer than this to the target snap to it, so a fade ends in finite time.
-const FADE_SNAP: f32 = 0.01;
+/// Fade rate (1/s) of the exponential approach; settles in ~250 ms (ln(1/FADE_SNAP)/FADE_RATE).
+const FADE_RATE: f32 = 14.0;
+/// Alphas closer than this to the target snap to it, settling within 300 ms.
+const FADE_SNAP: f32 = 0.03;
+/// Maximum delta time (s) per fade step; prevents a long pause from overshooting
+/// while allowing the fade to finish in real time rather than frame count.
+const MAX_FADE_DT: f32 = 0.25;
 /// Hysteresis (mm) around the outer face for the "eye behind the wall" test.
 const HYSTERESIS: f64 = 50.0;
 
@@ -260,7 +263,7 @@ fn update_wall_fade(
     if let Some(doc) = &index.snapshot {
         targets.extend(doc.platforms.iter().map(|p| p.position.extend(p.top_height)));
     }
-    let dt = time.delta_secs().min(1.0 / 30.0);
+    let dt = time.delta_secs().min(MAX_FADE_DT);
     let first_run = !fade.initialized;
     fade.initialized = true;
 
@@ -418,10 +421,38 @@ mod tests {
             frames += 1;
             assert!(frames < 100);
         }
-        // About a quarter to two fifths of a second at 60 fps.
+        // About a quarter of a second at 60 fps (16 frames at rate 14, snap 0.03).
         assert!((15..=25).contains(&frames), "{frames} frames");
         assert_eq!(look_for(1.0), (AlphaMode::Opaque, 1.0, Visibility::Inherited));
         assert_eq!(look_for(0.4), (AlphaMode::Blend, 0.4, Visibility::Inherited));
         assert_eq!(look_for(0.0).2, Visibility::Hidden);
+    }
+
+    #[test]
+    fn fade_settles_within_spec_at_various_frame_times() {
+        for dt_ms in [16.0, 65.0, 130.0] {
+            let dt = (dt_ms / 1000.0) as f32;
+            for (start, target) in [(1.0, 0.0), (0.0, 1.0)] {
+                let mut alpha = start;
+                let mut elapsed = 0.0f32;
+                let mut steps = 0;
+                while alpha != target {
+                    let next = step_alpha(alpha, target, dt.min(MAX_FADE_DT));
+                    if start > target {
+                        assert!(next <= alpha && next >= target, "overshot during fade out: {alpha} -> {next}");
+                    } else {
+                        assert!(next >= alpha && next <= target, "overshot during fade in: {alpha} -> {next}");
+                    }
+                    alpha = next;
+                    elapsed += dt;
+                    steps += 1;
+                    assert!(steps < 100, "did not settle: dt {dt_ms} ms, alpha {alpha}");
+                }
+                assert!(
+                    elapsed <= 0.30,
+                    "fade from {start} to {target} took {elapsed:.3} s with dt={dt_ms} ms (expected <= 0.30 s)"
+                );
+            }
+        }
     }
 }
