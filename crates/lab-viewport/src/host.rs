@@ -135,13 +135,7 @@ pub fn start(
     let (texture_tx, texture_rx) = async_channel::bounded::<wgpu::Texture>(BUFFER_COUNT);
     let (event_tx, event_rx) = async_channel::unbounded::<ViewportEvent>();
 
-    let adapter = bevy::tasks::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::default(),
-        force_fallback_adapter: false,
-        compatible_surface: None,
-        apply_limit_buckets: false,
-    }))
-    .expect("no GPU adapter for the viewport");
+    let adapter = device_adapter(&instance, &device);
     let info = adapter.get_info();
     let quality = quality.unwrap_or(match info.device_type {
         // Measured on Intel UHD (DX12): directional shadows cost ~5x the rest of the frame.
@@ -217,6 +211,29 @@ pub fn start(
         .expect("failed to spawn the viewport thread");
 
     ViewportHandle { textures: texture_rx, requests: request_tx, events: event_rx }
+}
+
+/// The adapter `device` was created on. The UI chooses the GPU (preferring a discrete one), so
+/// quality, MSAA support and Bevy's `RenderAdapter` must describe that GPU, not whichever one
+/// a fresh adapter request would return.
+fn device_adapter(instance: &wgpu::Instance, device: &wgpu::Device) -> wgpu::Adapter {
+    let info = device.adapter_info();
+    let same_gpu = |other: &wgpu::AdapterInfo| {
+        (other.backend, other.vendor, other.device, other.device_type, &other.name, &other.device_pci_bus_id)
+            == (info.backend, info.vendor, info.device, info.device_type, &info.name, &info.device_pci_bus_id)
+    };
+    let adapters = bevy::tasks::block_on(instance.enumerate_adapters(info.backend.into()));
+    if let Some(adapter) = adapters.into_iter().find(|adapter| same_gpu(&adapter.get_info())) {
+        return adapter;
+    }
+    warn!("the UI's GPU adapter ({}) was not found again; requesting one", info.name);
+    bevy::tasks::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: None,
+        apply_limit_buckets: false,
+    }))
+    .expect("no GPU adapter for the viewport")
 }
 
 /// MSAA sample count the camera uses, already checked against the adapter.
