@@ -78,7 +78,7 @@ Then set the issue to `done` (or `blocked`, with the reason).
 Review issues are **adversarial**: assume the work is incomplete or wrong until proven otherwise. Re-run the gates yourself in the task's worktree. Check every acceptance criterion against real evidence, file ownership (`git diff m1...m1-<ID>`), interfaces exactly as the spec defines them (later tasks code against them), and correctness: logic bugs, unhandled edge cases the spec calls out, panics on user data, `unwrap`/`expect` on file contents, missing tests. Do not edit the task's files.
 
 - **Pass:** no blocker or major issues. Comment the verdict on the review issue and set it `done`.
-- **Fail:** comment each blocker or major issue (with `file:line` and evidence) on the **implementation** issue, @-mentioning its engineer, and set that issue back to `todo`. If that engineer is an Argon agent (Gemini Engineer, Gemini Engineer Medium), first reassign the issue to **Gemini Engineer Flash** and @-mention that agent instead (Argon is kept for reviews). Reopening a `done` issue also needs its failure wakeup again; see the end of 'Failed runs and usage limits'. Set your review issue to `in_review` (not done).
+- **Fail:** comment each blocker or major issue (with `file:line` and evidence) on the **implementation** issue, @-mentioning its engineer, and set that issue back to `todo`. Reopening a `done` issue also needs its failure wakeup again; see the end of 'Failed runs and usage limits'. Set your review issue to `in_review` (not done).
 - **Engineer, after fixing:** commit, set the implementation issue `done`, and comment there @-mentioning the reviewer: "Fixed in `<commit>`, please re-review <review issue key>". The reviewer reviews again from the top and updates the review issue.
 - After three failed rounds, the reviewer sets the review issue `blocked` and @-mentions the Lead Engineer with a summary.
 
@@ -106,9 +106,9 @@ When woken:
 
 ## Failed runs and usage limits
 
-**Model budget.** Argon has a weekly limit, so it is used for **reviews only**. Implementation work, including review fix rounds, runs on Claude Opus, Claude Sonnet (**Rust Engineer Sonnet**) and Gemini Flash (**Gemini Engineer Flash**). Gemini Engineer and Gemini Engineer Medium take no new work.
+**Models** (board decision, 2026-10-19): every Antigravity agent runs **Gemini 3.8 Flash High**; Argon is not used (weekly limit). Claude agents: Lead Engineer Opus high, Rust Engineer Opus medium, Rust Engineer XHigh Opus **high** (the name is historical), Rust Engineer Sonnet Sonnet high. Implementation work, including review fix rounds, goes to Claude agents and Gemini Engineer Flash; Gemini Engineer and Gemini Engineer Medium take no new work.
 
-Quotas: all Claude agents share one Claude plan; all Argon agents share one Argon quota; Flash has its own. Every M1 issue has a `task.failed` wakeup that wakes a **triager on the other provider**, because the failed agent's own quota may be gone:
+Quotas: all Claude agents share one Claude plan; all Antigravity agents share one Flash quota. Every M1 issue has a `task.failed` wakeup that wakes a **triager on the other provider**, because the failed agent's own quota may be gone:
 
 - Issues assigned to Antigravity agents (Gemini Engineer\*, QA Reviewer\*): **Lead Engineer** triages.
 - Issues assigned to Claude agents (Lead Engineer, Rust Engineer\*) and the M1 parent: **Limit Dispatcher** (Flash) triages.
@@ -117,13 +117,11 @@ When woken by a failure, the triager does only this (no code, no worktree change
 
 1. Read the error: `multica issue runs <KEY>`, then `multica issue run-messages <run-id>` for the failed run. If the latest run did not fail (it completed, or a later run is queued or running), comment that and stop.
 2. **Usage or rate limit** (429, "quota", "usage limit", "rate limit", "resource exhausted", "try again at ..."):
-   - Failed agent is **Argon**: reassign to its Flash fallback (engineers to **Gemini Engineer Flash**, reviewers to **QA Reviewer Flash**) with `multica issue update <KEY> --assignee "<name>"`. Exception: the T2 and T4b reviews (POLA-12, POLA-16) never go to Flash; schedule a rerun instead (below).
-   - Otherwise (Claude, Flash, or the exception): **schedule a rerun after the reset** for the same assignee: `multica issue wakeup create <KEY> --kind at --after <wait> --agent-id <assignee id> --instruction "Usage limit has reset. Continue this issue from its worktree and comments; do not start over."` Use the reset time from the error plus 10 minutes; if there is none, `5h`.
-   - If a reassignment does not start a run within a few minutes, `multica issue rerun <KEY>`.
+   - Any agent: **schedule a rerun after the reset** for the same assignee: `multica issue wakeup create <KEY> --kind at --after <wait> --agent-id <assignee id> --instruction "Usage limit has reset. Continue this issue from its worktree and comments; do not start over."` Use the reset time from the error plus 10 minutes; if there is none, `5h`.
 3. **Any other failure:** if the previous run on this issue did not fail the same way, `multica issue rerun <KEY>`. If it did, set the issue `blocked` and @-mention the Lead Engineer (or, if the Lead is the assignee, leave it for the board).
 4. Comment once on the issue: the error (one line) and what you did.
 
-Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Rust Engineer `a2d64798-7e14-42f4-9de6-b369a1633278`, Rust Engineer XHigh `c864e3c5-8f38-466b-b01e-c54254dbd753`, Gemini Engineer `407bed7a-4d2b-4130-a012-a39da2d7d933`, Gemini Engineer Medium `7d8b7572-25aa-41f0-b243-16c986d4f43f`, QA Reviewer `ac9b1599-4d1d-43b7-b7ac-29c94ee1220d`, QA Reviewer Medium `64a587cf-66a5-4a64-a08d-e4b866964ccd`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, QA Reviewer Flash `fffab64a-dab3-4135-bc74-82fe0a5bfcbe`.
+Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Rust Engineer `a2d64798-7e14-42f4-9de6-b369a1633278`, Rust Engineer XHigh `c864e3c5-8f38-466b-b01e-c54254dbd753`, Gemini Engineer `407bed7a-4d2b-4130-a012-a39da2d7d933`, Gemini Engineer Medium `7d8b7572-25aa-41f0-b243-16c986d4f43f`, QA Reviewer `ac9b1599-4d1d-43b7-b7ac-29c94ee1220d`, QA Reviewer Medium `64a587cf-66a5-4a64-a08d-e4b866964ccd`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, QA Reviewer Flash `fffab64a-dab3-4135-bc74-82fe0a5bfcbe`, Rust Engineer Sonnet `c40f5abb-f1fd-448d-841e-b4367b432c44`.
 
 Closed (`done`/`cancelled`) issues cannot hold wakeups. Whoever moves an issue from `done` back to `todo` registers one: `multica issue wakeup create <KEY> --kind event --event task.failed --mode continuous --agent-id <triager id> --instruction "A run on this issue failed. Triage it as the guide's 'Failed runs and usage limits' section says."` (triager: Lead Engineer for Antigravity assignees, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688` for Claude assignees).
 
