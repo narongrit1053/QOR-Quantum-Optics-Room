@@ -3811,6 +3811,7 @@ name = "lab-app"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "lab-catalog",
  "lab-core",
  "lab-file",
  "lab-geom",
@@ -3895,6 +3896,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "bevy",
+ "lab-catalog",
  "lab-core",
  "lab-geom",
  "wgpu",

@@ -327,6 +327,14 @@ fn run_on_demand(
                     pending.push(FrameRequest::ApplyChanges(snapshot, changes))
                 }
                 ViewportRequest::SetWallDisplay(display) => pending.push(FrameRequest::SetWallDisplay(display)),
+                ViewportRequest::SetCatalog(catalog) => {
+                    app.world_mut().insert_resource(crate::CatalogRes(catalog));
+                }
+                ViewportRequest::DragPart(drag) => {
+                    // shortcut: log only until POLA-43 builds the ghost and placement.
+                    eprintln!("viewport: drag {drag:?}");
+                    pending.push(FrameRequest::DragPart(drag));
+                }
             }
         }
         if !pending.is_empty() {

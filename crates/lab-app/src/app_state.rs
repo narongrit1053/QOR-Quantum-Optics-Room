@@ -4,8 +4,10 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use lab_app::Session;
+use lab_catalog::Catalog;
 use lab_core::{HoleSet, LengthUnit, Platform, PlatformId, SelectionTarget, compute_holes};
 use lab_file::{IoWorker, ProjectLocation, RecoveryCandidate, Settings};
 use lab_viewport::ViewportRequest;
@@ -82,6 +84,8 @@ pub struct AppState {
     pub busy_note: String,
     pub toast_undo: bool,
     pub timers: Timers,
+    pub catalog: Arc<Catalog>,
+    pub library: crate::library::LibraryState,
 }
 
 impl AppState {
@@ -103,6 +107,8 @@ impl AppState {
             busy_note: String::new(),
             toast_undo: false,
             timers: Timers::default(),
+            catalog: Arc::new(Catalog::default()),
+            library: Default::default(),
         }
     }
 

@@ -6,6 +6,7 @@ mod bridge;
 mod controller;
 mod dialogs;
 mod files;
+mod library;
 mod ui_models;
 
 use std::cell::{Cell, RefCell};
@@ -62,12 +63,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.io = Some(io);
     state.autosave_available = autosave_available;
     state.recovery = recovery;
+    let (catalog, warnings) = lab_catalog::Catalog::load_default();
+    for w in &warnings {
+        eprintln!("library: {}: {}", w.path.display(), w.message);
+    }
+    state.catalog = std::sync::Arc::new(catalog);
     let app = Rc::new(RefCell::new(state));
 
     bridge::listen_to_io(&ui, &app, &models);
     bridge::connect_input(&ui, &app);
     controller::connect(&ui, &app, &models);
+    library::connect(&ui, &app, &models);
     controller::refresh_all(&ui, &app.borrow(), &models);
+    library::fill(&app.borrow(), &models);
+    if !warnings.is_empty() {
+        let text = format!("{} library files could not be read; see the log.", warnings.len());
+        controller::show_toast(&ui, &app.borrow(), &text, false);
+    }
     if !autosave_available {
         ui.set_status("Autosave unavailable".into());
     }
@@ -110,6 +122,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 a.borrow_mut().requests = Some(handle.requests.clone());
                 a.borrow().send(ViewportRequest::SetWallDisplay(wall_display));
+                let catalog = a.borrow().catalog.clone();
+                a.borrow().send(ViewportRequest::SetCatalog(catalog));
                 bridge::listen_to_viewport(&ui, &a, &m, handle);
             }
             slint::RenderingState::BeforeRendering => {

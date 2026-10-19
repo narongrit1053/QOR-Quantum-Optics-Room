@@ -24,6 +24,8 @@ mod room;
 mod scene;
 mod sync;
 
+use std::sync::Arc;
+
 use lab_core::{ChangeSet, Document, PlatformId};
 pub use lab_core::{SelectionTarget, WallDisplay};
 
@@ -120,6 +122,25 @@ pub enum ViewportRequest {
     Resize { width: u32, height: u32 },
     /// Hand a texture back once the UI no longer displays it.
     ReleaseTexture(wgpu::Texture),
+    /// The part catalog used to build part meshes and ghosts.
+    SetCatalog(Arc<lab_catalog::Catalog>),
+    /// A library drag over the viewport.
+    DragPart(PartDrag),
+}
+
+/// What a library drag carries.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DragItem {
+    /// Catalog id.
+    Part(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PartDrag {
+    /// Pointer over the viewport while dragging (physical px, viewport-relative).
+    Move { item: DragItem, pos: Vec2, mods: Modifiers },
+    Drop { pos: Vec2, mods: Modifiers },
+    Cancel,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -147,4 +168,11 @@ pub(crate) enum FrameRequest {
     ApplyChanges(Box<Document>, ChangeSet),
     #[allow(dead_code)] // Read by the wall fade (room.rs, T4c).
     SetWallDisplay(WallDisplay),
+    #[allow(dead_code)] // Placement (place.rs, POLA-43).
+    DragPart(PartDrag),
 }
+
+/// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).
+#[allow(dead_code)] // Read by placement (POLA-43).
+#[derive(bevy::prelude::Resource, Default)]
+pub(crate) struct CatalogRes(pub Arc<lab_catalog::Catalog>);

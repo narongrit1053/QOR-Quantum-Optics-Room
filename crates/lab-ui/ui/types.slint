@@ -14,11 +14,15 @@ export struct SceneRow {
     is-beam: bool,
 }
 
-// M0
+// A library group header (`header`, `id` = group name) or a part row (`id` = catalog id).
 export struct LibraryRow {
+    id: string,
     label: string,
+    detail: string,
     letter: string,
     tint: color,
+    header: bool,
+    expanded: bool,
 }
 
 // M0 node fields (read-only label/value pairs).

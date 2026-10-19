@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 lab-core.workspace = true
+lab-catalog.workspace = true
 lab-geom.workspace = true
 lab-file.workspace = true
 lab-viewport.workspace = true

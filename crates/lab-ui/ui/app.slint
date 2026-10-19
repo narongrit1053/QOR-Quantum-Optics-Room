@@ -153,6 +153,12 @@ export component AppWindow inherits Window {
     callback viewport-left();
     callback view-mode-requested(int);
     callback clear-selection();
+    // Library sidebar. drag kind: 0 move, 1 drop, 2 cancel; x/y in window coordinates.
+    callback library-search(string);
+    callback library-toggle(string /* group */);
+    callback library-drag(string /* part id */, int, length, length);
+    // Right edge of the sidebar: drags left of it are not over the viewport.
+    out property <length> sidebar-right: sidebar.x + sidebar.width;
     // Development hook for the gallery: an unmodified key press while no text field has
     // focus and no sheet is open. Return true to consume it. The app leaves it unset.
     callback gallery-key(string /* text */) -> bool;
@@ -421,6 +427,7 @@ export component AppWindow inherits Window {
                         font-size: Theme.font-body;
                         vertical-alignment: center;
                         single-line: true;
+                        edited => { root.library-search(self.text); }
                         changed has-focus => {
                             if (self.has-focus) {
                                 EditState.focused-id = "sidebar.search";
@@ -449,19 +456,51 @@ export component AppWindow inherits Window {
                 }
 
                 SectionHeader { text: "LIBRARY"; }
-                for item in root.library: HorizontalLayout {
-                    spacing: 8px;
-                    padding-left: 4px;
-                    Glyph {
-                        letter: item.letter;
-                        tint: item.tint;
-                        y: 4px;
-                    }
-                    ListRow {
-                        label: item.label;
-                        detail: "M2";
-                        dimmed: true;
-                        horizontal-stretch: 1;
+                // Not interactive: a pointer drag on a row starts a part drag, not a scroll.
+                Flickable {
+                    vertical-stretch: 1;
+                    interactive: false;
+                    content-height: library-layout.preferred-height;
+                    library-layout := VerticalLayout {
+                        alignment: start;
+                        for item in root.library: HorizontalLayout {
+                            spacing: 8px;
+                            padding-left: item.header ? 4px : 16px;
+                            Glyph {
+                                letter: item.letter;
+                                tint: item.tint;
+                                y: 4px;
+                            }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                height: 28px;
+                                ListRow {
+                                    label: item.header ? (item.expanded ? "▾ " : "▸ ") + item.label : item.label;
+                                    detail: item.detail;
+                                    clicked => {
+                                        if (item.header) { root.library-toggle(item.id); }
+                                    }
+                                }
+                                // Keeps the pointer grab while pressed, so the drag can leave the sidebar.
+                                if !item.header: TouchArea {
+                                    mouse-cursor: grab;
+                                    moved => {
+                                        if (self.pressed) {
+                                            root.library-drag(item.id, 0, self.absolute-position.x + self.mouse-x,
+                                                self.absolute-position.y + self.mouse-y);
+                                        }
+                                    }
+                                    pointer-event(event) => {
+                                        if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                                            root.library-drag(item.id, 1, self.absolute-position.x + self.mouse-x,
+                                                self.absolute-position.y + self.mouse-y);
+                                        } else if (event.kind == PointerEventKind.cancel) {
+                                            root.library-drag(item.id, 2, 0, 0);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
