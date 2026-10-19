@@ -3823,6 +3823,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-catalog"
+version = "0.1.0"
+dependencies = [
+ "lab-core",
+ "serde",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
 name = "lab-core"
 version = "0.1.0"
 dependencies = [

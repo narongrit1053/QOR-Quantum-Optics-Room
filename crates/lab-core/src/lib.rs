@@ -17,6 +17,7 @@ pub mod limits;
 pub mod migrate;
 pub mod model;
 pub mod outline;
+pub mod part;
 pub mod prefs;
 pub mod presets;
 pub mod room;
