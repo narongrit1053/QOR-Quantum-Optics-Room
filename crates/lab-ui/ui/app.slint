@@ -21,6 +21,8 @@ export { EditState, TableFocus } from "fields.slint";
 export component AppWindow inherits Window {
     // ── Viewport (M0) ─────────────────────────────────────────────────────────
     in property <image> viewport-texture;
+    // True from launch until the host has rendered its warm-up frames (pipelines compiled).
+    in property <bool> viewport-preparing: true;
     out property <length> viewport-width: viewport.width;
     out property <length> viewport-height: viewport.height;
 
@@ -261,6 +263,16 @@ export component AppWindow inherits Window {
                 height: 100%;
                 source: root.viewport-texture;
                 image-fit: fill;
+            }
+
+            if root.viewport-preparing: Text {
+                width: 100%;
+                height: 100%;
+                text: "Preparing shaders…";
+                color: Theme.text-secondary;
+                font-size: Theme.font-caption;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
 
             keys := FocusScope {

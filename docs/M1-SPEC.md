@@ -1273,7 +1273,7 @@ pub(crate) fn wall_occludes(wall: &WallInfo, eye: DVec3, targets: &[DVec3], curr
      - Always: 1
      - Hidden: 0
      - Auto: 1 in `ViewMode::Top`, else `if wall_occludes(..) {0} else {1}`
-  3. On the first run after a spawn, `alpha = target` with no animation. Otherwise `alpha += (target-alpha)·(1-exp(-dt·12))` with `dt ≤ 1/30`, snapping within 0.01.
+  3. On the first run after a spawn, `alpha = target` with no animation. Otherwise alpha += (target−alpha)·(1−exp(−dt·14)), snapping within 0.03. `dt` is the real time since the previous `update_wall_fade` run (measured with `Instant`, not `Time::delta`), capped at 0.25 s; the first step of a fade is capped at 1/60 s. (Board decision (a) on POLA-2, 2026-10-19.)
   4. Write materials (looked up by `WallState.material`) only on change:
      - `alpha == 1`: Opaque, colour alpha 1, `Visibility::Inherited`
      - `0 < alpha < 1`: `AlphaMode::Blend`, colour alpha = alpha, visible
