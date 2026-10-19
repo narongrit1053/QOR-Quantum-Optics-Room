@@ -47,6 +47,9 @@ function Start-Lab([string]$Exe, [string]$Dir, [string]$Arg = '', [int]$Wait = 6
   New-Item -ItemType Directory -Force $Dir | Out-Null
   $env:LABSETUP_AUTOSAVE_DIR = "$Dir\autosave"; $env:LABSETUP_SETTINGS = "$Dir\settings.json"
   if ($Trace) { $env:LABSETUP_TRACE = '1'; $env:RUST_LOG = 'lab_viewport=debug' } else { Remove-Item Env:LABSETUP_TRACE, Env:RUST_LOG -ErrorAction SilentlyContinue }
+  # Exe copies need DXC beside them too, or shaders compile with the slow FXC.
+  $dxc = Join-Path (Split-Path $Exe) 'dxcompiler.dll'
+  if (-not (Test-Path $dxc)) { Copy-Item "$PSScriptRoot/../../third_party/dxc/dxcompiler.dll" $dxc }
   $a = @{ FilePath = $Exe; PassThru = $true; RedirectStandardError = "$Dir\stderr-$(Get-Date -f HHmmss).txt" }
   if ($Arg) { $a.ArgumentList = "`"$Arg`"" }
   $p = Start-Process @a; Start-Sleep $Wait

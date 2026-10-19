@@ -293,7 +293,7 @@ OpenCascade is LGPL-2.1 with an exception. It is dynamically linked inside the s
 
 1. **Slint↔Bevy wgpu lockstep.** Pin both versions and upgrade together. Fallback: Bevy-only UI with Feathers; the clean core/UI split keeps that swap contained to `lab-ui` and `lab-app`.
 2. **Directional shadows on integrated GPUs.** Measured on Intel UHD (DX12): shadows cut animation from ~21 to ~4–5 fps, even with one cascade at 1024 px and 2×2 filtering. Integrated GPUs therefore default to Balanced (no shadows). Profile with PIX before M5; candidates are baked/contact shadows or a cheaper shadow path.
-3. **First-run shader compilation** takes ~5 s on Intel UHD (synchronous pipeline compilation), which misses the 2 s startup target. Revisit with asynchronous compilation behind a placeholder frame.
+3. **First-run shader compilation** takes ~5 s on Intel UHD (synchronous pipeline compilation), which misses the 2 s startup target. Revisit with asynchronous compilation behind a placeholder frame. The cost is the DX12 shader compiler: with wgpu's fallback FXC, startup on the RTX 4050 showed an empty viewport for 10–15 s in a debug build and over 20 s with FXC optimisation (as a release build compiles). The app therefore ships DXC's `dxcompiler.dll` next to the exe (`third_party/dxc`, copied by `lab-app`'s build script), which wgpu picks automatically. F2 (POLA-28) has the measurements.
 4. **STEP robustness and size.** Sidecar isolation, timeout, a user-adjustable decimation slider, and per-part triangle budgets.
 5. **Vendor CAD terms.** Users import files they downloaded themselves; the installer never redistributes vendor files.
 6. **Bevy release churn (~quarterly).** All Bevy code lives in `lab-viewport`; upgrade on our schedule, not each release.

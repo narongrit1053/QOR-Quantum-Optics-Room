@@ -28,6 +28,8 @@ cargo run -p lab-app
 cargo test --workspace
 ```
 
+The build copies `third_party/dxc/dxcompiler.dll` next to the executable. Ship it, with its `LICENSE.txt`, beside `labsetup.exe`: without it shaders compile with the slow FXC and the viewport stays empty for 10 s or more at startup (see [third_party/dxc](third_party/dxc/README.md)).
+
 Check that nothing network-capable is linked into the app:
 
 ```bash

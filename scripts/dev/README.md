@@ -18,5 +18,5 @@ Notes from T7:
 - The app window is the visible top-level window of class `Window Class`; `Process.MainWindowHandle` may be winit's hidden window.
 - winit derives text from `WM_KEYDOWN`, so `Send-Text` posts key presses (numbers on the numpad, which ignores the keyboard layout); a bare `WM_CHAR` is ignored.
 - Posted Ctrl/Shift shortcuts are unreliable: the app's next real input message resyncs the key state. Use the project menu and the toolbar instead.
-- Right after startup the viewport may stay blank until a window message arrives; `Start-Lab` callers post a hover first.
+- The viewport stays blank until shaders compile (F2): ~2.5 s on the RTX 4050 with DXC, 10-20 s with FXC. `Start-Lab` copies `third_party/dxc/dxcompiler.dll` next to the exe copy so DXC is used; delete that copy with the exe.
 - `e2e.ps1` and `idle-series.ps1` assume the default 1456 × 939 window.
