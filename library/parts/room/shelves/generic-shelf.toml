@@ -1,0 +1,9 @@
+id = "generic:shelf"
+name = "Shelf, 1200 x 400 mm"
+category = "room/shelves"
+tags = ["shelf", "room"]
+
+[geometry]
+kind = "parametric"
+generator = "shelf"
+params = { width = 1200, depth = 400, thickness = 20, height = 500 }

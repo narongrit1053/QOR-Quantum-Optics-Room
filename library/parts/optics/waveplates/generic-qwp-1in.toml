@@ -1,0 +1,22 @@
+id = "generic:qwp-1in"
+name = "Quarter-Wave Plate, Ø1\""
+category = "optics/waveplates"
+tags = ["waveplate", "qwp", "1in"]
+
+[geometry]
+kind = "parametric"
+generator = "waveplate"
+params = { diameter = 25.4, thickness = 2 }
+
+[[connectors]]
+name = "edge"
+kind = "optic_bore"
+diameter = 25.4
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, -1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "plate"
+kind = "waveplate"
+clear_aperture = 22.9
+frame = { origin = [0, 0, 0], z = [0, 1, 0], x = [1, 0, 0] }

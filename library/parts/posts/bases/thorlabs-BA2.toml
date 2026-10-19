@@ -1,0 +1,23 @@
+id = "thorlabs:BA2"
+vendor = "Thorlabs"
+part_number = "BA2"
+name = "Mounting Base, 75 mm x 50 mm"
+category = "posts/bases"
+tags = ["base", "imperial"]
+
+[geometry]
+kind = "parametric"
+generator = "base"
+params = { length = 75, width = 50, thickness = 10 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "top"
+kind = "thread"
+spec = "1/4-20"
+gender = "male"
+frame = { origin = [0, 0, 10], z = [0, 0, 1], x = [1, 0, 0] }

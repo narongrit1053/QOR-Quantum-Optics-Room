@@ -1,0 +1,26 @@
+id = "generic:aom"
+name = "Acousto-Optic Modulator (AOM)"
+category = "modulators/aom-eom"
+tags = ["aom", "modulator", "acousto-optic"]
+
+[geometry]
+kind = "parametric"
+generator = "modulator_box"
+params = { length = 60, width = 40, height = 30, axis_height = 20 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "in"
+kind = "modulator"
+clear_aperture = 3
+frame = { origin = [0, -30, 20], z = [0, 1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "out"
+kind = "modulator"
+clear_aperture = 3
+frame = { origin = [0, 30, 20], z = [0, 1, 0], x = [1, 0, 0] }

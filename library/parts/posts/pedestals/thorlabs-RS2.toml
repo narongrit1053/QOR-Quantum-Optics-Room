@@ -1,0 +1,23 @@
+id = "thorlabs:RS2"
+vendor = "Thorlabs"
+part_number = "RS2"
+name = "Pedestal Pillar Post, Ø25 mm, L = 50.8 mm"
+category = "posts/pedestals"
+tags = ["post", "pedestal", "pillar"]
+
+[geometry]
+kind = "parametric"
+generator = "pedestal_post"
+params = { diameter = 25, length = 50.8, flange_diameter = 38 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "top"
+kind = "thread"
+spec = "8-32"
+gender = "male"
+frame = { origin = [0, 0, 50.8], z = [0, 0, 1], x = [1, 0, 0] }

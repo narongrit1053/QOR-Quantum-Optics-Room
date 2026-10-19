@@ -1,0 +1,23 @@
+id = "thorlabs:LB1"
+vendor = "Thorlabs"
+part_number = "LB1"
+name = "Beam Dump, Ø25 mm"
+category = "beam/dumps"
+tags = ["beam dump", "block", "imperial"]
+
+[geometry]
+kind = "parametric"
+generator = "beam_dump"
+params = { diameter = 25, length = 40, axis_height = 25 }
+
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "8-32"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "input"
+kind = "dump"
+frame = { origin = [0, -20, 25], z = [0, 1, 0], x = [1, 0, 0] }

@@ -1,0 +1,20 @@
+id = "generic:spcm"
+name = "Single-Photon Counting Module (SPCM)"
+category = "detectors/spcm"
+tags = ["spcm", "detector", "single photon"]
+
+[geometry]
+kind = "parametric"
+generator = "spcm"
+params = { length = 120, width = 60, height = 50, axis_height = 25 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "input"
+kind = "detector"
+clear_aperture = 0.18
+frame = { origin = [0, -60, 25], z = [0, 1, 0], x = [1, 0, 0] }

@@ -1,0 +1,22 @@
+id = "generic:bs-cube-0.5in"
+name = "Non-Polarizing Beamsplitter Cube, 1/2\""
+category = "optics/cubes"
+tags = ["cube", "beamsplitter", "bs", "0.5in"]
+
+[geometry]
+kind = "parametric"
+generator = "cube"
+params = { size = 12.7 }
+
+[[connectors]]
+name = "edge"
+kind = "optic_bore"
+diameter = 12.7
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, -1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "splitter"
+kind = "splitter"
+clear_aperture = 11.43
+frame = { origin = [0, 0, 0], z = [0.7071, 0.7071, 0], x = [0.7071, -0.7071, 0] }

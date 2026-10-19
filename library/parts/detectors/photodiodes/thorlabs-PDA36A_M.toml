@@ -1,0 +1,29 @@
+id = "thorlabs:PDA36A/M"
+vendor = "Thorlabs"
+part_number = "PDA36A/M"
+name = "Switchable Gain Si Detector"
+category = "detectors/photodiodes"
+tags = ["photodiode", "detector", "amplified", "metric"]
+
+[geometry]
+kind = "parametric"
+generator = "photodiode"
+params = { length = 40, width = 20, height = 50, axis_height = 25 }
+
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "M4"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "input"
+kind = "detector"
+clear_aperture = 9.8
+frame = { origin = [0, -20, 25], z = [0, 1, 0], x = [1, 0, 0] }

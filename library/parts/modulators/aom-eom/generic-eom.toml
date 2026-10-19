@@ -1,0 +1,26 @@
+id = "generic:eom"
+name = "Electro-Optic Modulator (EOM)"
+category = "modulators/aom-eom"
+tags = ["eom", "modulator", "electro-optic"]
+
+[geometry]
+kind = "parametric"
+generator = "modulator_box"
+params = { length = 80, width = 40, height = 40, axis_height = 20 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "in"
+kind = "modulator"
+clear_aperture = 4
+frame = { origin = [0, -40, 20], z = [0, 1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "out"
+kind = "modulator"
+clear_aperture = 4
+frame = { origin = [0, 40, 20], z = [0, 1, 0], x = [1, 0, 0] }

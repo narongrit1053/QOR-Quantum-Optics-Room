@@ -1,0 +1,9 @@
+id = "generic:laser-curtain"
+name = "Laser Safety Curtain, 2 x 2 m"
+category = "room/curtains"
+tags = ["curtain", "laser safety", "room"]
+
+[geometry]
+kind = "parametric"
+generator = "laser_curtain"
+params = { width = 2000, height = 2000 }

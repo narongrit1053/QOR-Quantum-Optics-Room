@@ -1,0 +1,22 @@
+id = "generic:mirror-2in"
+name = "Mirror, Ø2\""
+category = "optics/mirrors"
+tags = ["mirror", "2in"]
+
+[geometry]
+kind = "parametric"
+generator = "mirror"
+params = { diameter = 50.8, thickness = 9.5 }
+
+[[connectors]]
+name = "edge"
+kind = "optic_bore"
+diameter = 50.8
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, -1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "surface"
+kind = "mirror"
+clear_aperture = 45.72
+frame = { origin = [0, 0, 0], z = [0, 1, 0], x = [1, 0, 0] }

@@ -1,0 +1,31 @@
+id = "thorlabs:PH3"
+vendor = "Thorlabs"
+part_number = "PH3"
+name = "Post Holder, Ø1/2\", L = 76.2 mm"
+category = "posts/holders"
+tags = ["post holder", "holder", "imperial"]
+
+[geometry]
+kind = "parametric"
+generator = "post_holder"
+params = { bore = 12.7, height = 76.2, base_diameter = 30 }
+
+[[connectors]]
+name = "bottom"
+kind = "thread"
+spec = "1/4-20"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "bore"
+kind = "bore"
+diameter = 12.7
+gender = "female"
+range = [-71.2, -5]
+frame = { origin = [0, 0, 76.2], z = [0, 0, 1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }

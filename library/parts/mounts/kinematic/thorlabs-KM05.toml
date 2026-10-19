@@ -1,0 +1,25 @@
+id = "thorlabs:KM05"
+vendor = "Thorlabs"
+part_number = "KM05"
+name = "Kinematic Mirror Mount, Ø1/2\" Optics"
+category = "mounts/kinematic"
+tags = ["mount", "kinematic", "mirror", "imperial"]
+
+[geometry]
+kind = "parametric"
+generator = "kinematic_mount"
+params = { optic_diameter = 12.7, width = 25.4, height = 25.4, thickness = 12.7, axis_height = 12.7 }
+
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "8-32"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "optic_seat"
+kind = "optic_bore"
+diameter = 12.7
+gender = "female"
+frame = { origin = [0, 0, 12.7], z = [0, 1, 0], x = [1, 0, 0] }

@@ -1,0 +1,26 @@
+id = "generic:crystal-oven"
+name = "Crystal Oven"
+category = "crystals/ovens"
+tags = ["crystal", "oven", "ppktp", "spdc"]
+
+[geometry]
+kind = "parametric"
+generator = "crystal_oven"
+params = { length = 60, width = 40, height = 30, axis_height = 20 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "in"
+kind = "crystal"
+clear_aperture = 5
+frame = { origin = [0, -30, 20], z = [0, 1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "out"
+kind = "crystal"
+clear_aperture = 5
+frame = { origin = [0, 30, 20], z = [0, 1, 0], x = [1, 0, 0] }
