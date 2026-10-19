@@ -32,6 +32,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         wgpu_settings.backends = wgpu::Backends::DX12;
     }
+    // Prefer a discrete GPU (for example the NVIDIA one of a hybrid laptop); wgpu falls back
+    // to the integrated GPU, then to a software adapter, when there is none.
+    // `WGPU_POWER_PREF=low|none` still overrides this, `WGPU_ADAPTER_NAME` picks one by name.
+    wgpu_settings.power_preference =
+        wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance);
     slint::BackendSelector::new()
         .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::Automatic(wgpu_settings))
         .select()?;
