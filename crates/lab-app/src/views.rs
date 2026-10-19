@@ -9,7 +9,7 @@ use lab_core::presets::{PRESETS, PresetGroup};
 use lab_core::room::Room;
 use lab_core::selection::SelectionTarget;
 use lab_core::units::{
-    LengthUnit, format_angle_deg, format_count, format_length, format_length_with_unit,
+    LengthUnit, format_angle_deg, format_length, format_length_with_unit,
 };
 
 use crate::edit::EditError;
@@ -470,11 +470,7 @@ pub fn platform_view(doc: &Document, p: &Platform, holes: &HoleSet, units: Lengt
     }
 
     let hole_summary = if p.hole_grid.is_some() {
-        if !holes.is_empty() {
-            format!("{} holes · {} × {} grid", format_count(holes.len()), holes.cols, holes.rows)
-        } else {
-            "0 holes".into()
-        }
+        holes.summary()
     } else {
         "".into()
     };
@@ -553,8 +549,8 @@ pub fn room_view(doc: &Document, units: LengthUnit) -> RoomViewData {
     let (lo, hi) = lab_geom::bounds(&doc.room.outline);
     let (w_m, d_m) = ((hi.x - lo.x) / 1000.0, (hi.y - lo.y) / 1000.0);
     let area_m2 = lab_geom::signed_area(&doc.room.outline).abs() / 1_000_000.0;
-    let doors = doc.room.openings.iter().filter(|o| o.name.starts_with("Door")).count();
-    let windows = doc.room.openings.iter().filter(|o| o.name.starts_with("Window")).count();
+    let doors = doc.room.openings.iter().filter(|o| o.sill <= 1e-6).count();
+    let windows = doc.room.openings.iter().filter(|o| o.sill > 1e-6).count();
 
     let mut subtitle_parts = vec![
         format!("{w_m:.2} × {d_m:.2} m"),
