@@ -71,6 +71,10 @@ Then set the issue to `done` (or `blocked`, with the reason).
 
 ## Reviews
 
+**Final audit (stage 9).** The task is already merged into `m1`, and later tasks build on it. Review it as merged: create a review worktree `git -C D:/Try/LabSetup worktree add --detach D:/Try/LabSetup-wt/review-<ID> m1`, run the task's gates there, and read the task's change with `git log --oneline --grep "<ID>" m1` and `git diff <merge>^1 <merge>` for its merge commit (plus any `Integration fix` commits touching its files). Check its interfaces against how later tasks actually use them. Remove the review worktree when done.
+
+**Fixes during the audit** go on a new branch from the current `m1`: `git -C D:/Try/LabSetup worktree add D:/Try/LabSetup-wt/<ID>-fix -b m1-<ID>-fix m1`, touching only the task's owned files. The reviewer re-reviews that branch; the Lead merges it after the audit.
+
 Review issues are **adversarial**: assume the work is incomplete or wrong until proven otherwise. Re-run the gates yourself in the task's worktree. Check every acceptance criterion against real evidence, file ownership (`git diff m1...m1-<ID>`), interfaces exactly as the spec defines them (later tasks code against them), and correctness: logic bugs, unhandled edge cases the spec calls out, panics on user data, `unwrap`/`expect` on file contents, missing tests. Do not edit the task's files.
 
 - **Pass:** no blocker or major issues. Comment the verdict on the review issue and set it `done`.
@@ -80,11 +84,25 @@ Review issues are **adversarial**: assume the work is incomplete or wrong until 
 
 ## Lead Engineer: running the stages
 
-You own the parent issue "M1". Multica wakes you when every sub-issue in the earliest unfinished stage is `done` or `cancelled`. Each wave has two stages: implementation, then review. When woken:
+You own the parent issue "M1". Multica wakes you when every sub-issue in the earliest unfinished stage is `done` or `cancelled`.
 
-1. **An implementation stage finished:** set that wave's review sub-issues to `todo`.
-2. **A review stage finished:** merge the wave (below), then set the next wave's implementation sub-issues to `todo`. After the last wave, set "T7" to `todo` (it is yours).
-3. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
+**Build first, audit last** (board decision, 2026-10-19). Waves 1 and 2 (T1, T4a, T5, T6-spike, T2) were reviewed and merged the old way. From stage 5 on, every remaining feature is built and merged first, and all the remaining reviews run together at the end:
+
+| Stage | Issues |
+|---|---|
+| 5 | T3, T4b |
+| 6 | T4c, T6a |
+| 7 | T6c |
+| 8 | T6b |
+| 9 | Reviews of T3, T4b, T4c, T6a, T6c, T6b (final audit, in parallel) |
+| 10 | T7 (yours) |
+
+When woken:
+
+1. **A build stage (5-8) finished:** check each task's report and re-run its acceptance gates in its worktree. If a gate fails, comment the failure on that issue @-mentioning its engineer and set it `todo` (no merge yet). Otherwise merge the stage's tasks (Merges, below) and set the next stage to `todo`. After stage 8, set all stage-9 reviews to `todo`.
+2. **A build issue finished again during the audit** (a review fix): do nothing; the fix is merged after the audit.
+3. **Stage 9 finished:** merge every `m1-<ID>-fix` branch the audit produced (Merges), run the full §8.2 gates, then set T7 to `todo`.
+4. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
 
 ## Failed runs and usage limits
 
