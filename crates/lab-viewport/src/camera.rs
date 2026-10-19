@@ -8,13 +8,17 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 
 use bevy::{
     camera::{ScalingMode, primitives::Aabb},
+    ecs::system::SystemParam,
     light::ShadowFilteringMethod,
+    math::DVec3,
     prelude::*,
 };
+use lab_core::{Document, SelectionTarget};
 
 use crate::host::{MsaaSamples, PendingRequests, RedrawState, ViewportSize};
-use crate::scene::{Backdrop, SceneEntity};
-use crate::{FrameRequest, Modifiers, PointerButton, ViewMode, ViewportInput};
+use crate::picking::Selection;
+use crate::scene::{SceneIndex, SceneNode, to_render};
+use crate::{FrameRequest, FrameTarget, Modifiers, PointerButton, ViewMode, ViewportInput};
 
 /// Vertical field of view (≈34°): narrow enough to look calm, wide enough for a room.
 const FOV: f32 = 0.6;
@@ -64,6 +68,25 @@ pub(crate) struct OrbitCamera {
     current: View,
     target: View,
     mode: ViewMode,
+}
+
+// The getters are read by the wall fade (room.rs, T4c).
+#[allow(dead_code)]
+impl OrbitCamera {
+    /// The point the camera orbits, in render space (current, possibly easing, view).
+    pub(crate) fn focus(&self) -> Vec3 {
+        self.current.focus
+    }
+
+    /// The eye of the current view in render space: the translation `animate_camera` writes to
+    /// the camera's `Transform` this frame.
+    pub(crate) fn eye(&self) -> Vec3 {
+        self.current.eye()
+    }
+
+    pub(crate) fn mode(&self) -> ViewMode {
+        self.mode
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -131,18 +154,29 @@ pub(crate) fn to_camera_space(camera: &Camera, full: &ViewportSize, pos: Vec2) -
     }
 }
 
+/// What framing reads: the snapshot (data-driven bounds that work in the frame entities spawn),
+/// the selection and the bounds of spawned nodes.
+#[derive(SystemParam)]
+pub(crate) struct FrameSources<'w, 's> {
+    index: Res<'w, SceneIndex>,
+    selection: Res<'w, Selection>,
+    nodes: Query<'w, 's, (&'static SceneNode, &'static Aabb, &'static GlobalTransform)>,
+}
+
 pub(crate) fn handle_input(
     pending: Res<PendingRequests>,
     full: Res<ViewportSize>,
     mut pointer: ResMut<PointerState>,
     mut clicks: ResMut<Clicks>,
     mut cameras: Query<(&mut OrbitCamera, &Camera, &GlobalTransform)>,
-    bounds: Query<(&Aabb, &GlobalTransform), (With<SceneEntity>, Without<Backdrop>)>,
+    sources: FrameSources,
 ) {
     clicks.0.clear();
     let Ok((mut orbit, camera, camera_transform)) = cameras.single_mut() else { return };
     // Pointer deltas are in full-resolution pixels, whatever the current render scale.
     let viewport_height = full.0.y;
+    // Selection as of each request (picking applies `Select` after this system).
+    let mut selected = sources.selection.selected;
 
     for request in &pending.0 {
         match request {
@@ -185,8 +219,14 @@ pub(crate) fn handle_input(
                 }
             },
             FrameRequest::SetViewMode(mode) => set_mode(&mut orbit, *mode),
-            FrameRequest::FrameAll => frame_all(&mut orbit, camera, &bounds),
-            FrameRequest::Select(_) | FrameRequest::LoadDocument(_) => {}
+            FrameRequest::Frame(target) => {
+                if let Some((min, max)) = frame_bounds(*target, selected, &sources) {
+                    frame_box(&mut orbit, camera, min, max);
+                }
+            }
+            FrameRequest::Select(target) => selected = *target,
+            FrameRequest::LoadDocument(_) => selected = None,
+            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) => {}
         }
     }
 }
@@ -240,28 +280,83 @@ fn set_mode(orbit: &mut OrbitCamera, mode: ViewMode) {
     }
 }
 
-fn frame_all(orbit: &mut OrbitCamera, camera: &Camera, bounds: &Query<(&Aabb, &GlobalTransform), (With<SceneEntity>, Without<Backdrop>)>) {
+/// Render-space box of a document-space (mm, +Z up) box.
+fn render_box(lo: DVec3, hi: DVec3) -> (Vec3, Vec3) {
+    let (a, b) = (to_render(lo), to_render(hi));
+    (a.min(b), a.max(b))
+}
+
+fn platform_box(doc: &Document, id: lab_core::PlatformId) -> Option<(Vec3, Vec3)> {
+    let (lo, hi) = doc.platform(id)?.room_aabb();
+    Some(render_box(lo, hi))
+}
+
+fn room_box(doc: &Document) -> (Vec3, Vec3) {
+    let (lo, hi) = doc.room.bounds_outer();
+    render_box(lo.extend(0.0), hi.extend(doc.room.wall_height))
+}
+
+/// World-space box of a spawned node (needs its `Aabb`, computed the frame after it spawns).
+fn node_box(sources: &FrameSources, id: lab_core::NodeId) -> Option<(Vec3, Vec3)> {
+    let (_, aabb, transform) = sources.nodes.iter().find(|(node, ..)| node.0 == id)?;
+    Some(aabb_box(aabb, transform))
+}
+
+fn aabb_box(aabb: &Aabb, transform: &GlobalTransform) -> (Vec3, Vec3) {
+    let (c, h) = (Vec3::from(aabb.center), Vec3::from(aabb.half_extents));
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for (aabb, transform) in bounds {
-        let (c, h) = (Vec3::from(aabb.center), Vec3::from(aabb.half_extents));
-        for corner in [-1.0f32, 1.0].into_iter().flat_map(|x| [-1.0f32, 1.0].into_iter().flat_map(move |y| [-1.0f32, 1.0].map(|z| Vec3::new(x, y, z)))) {
-            let p = transform.transform_point(c + h * corner);
-            min = min.min(p);
-            max = max.max(p);
+    for x in [-1.0f32, 1.0] {
+        for y in [-1.0f32, 1.0] {
+            for z in [-1.0f32, 1.0] {
+                let p = transform.transform_point(c + h * Vec3::new(x, y, z));
+                min = min.min(p);
+                max = max.max(p);
+            }
         }
     }
-    if !min.is_finite() {
+    (min, max)
+}
+
+/// Bounds for `target` in render space; `None` when there is nothing to frame (unknown ids,
+/// nothing selected, no document).
+fn frame_bounds(target: FrameTarget, selected: Option<SelectionTarget>, sources: &FrameSources) -> Option<(Vec3, Vec3)> {
+    let doc = sources.index.snapshot.as_ref()?;
+    match target {
+        FrameTarget::Platform(id) => platform_box(doc, id),
+        FrameTarget::Room => Some(room_box(doc)),
+        FrameTarget::Selection => match selected? {
+            SelectionTarget::Node(id) => node_box(sources, id),
+            SelectionTarget::Platform(id) => platform_box(doc, id),
+            SelectionTarget::Room => Some(room_box(doc)),
+        },
+        FrameTarget::All => {
+            if doc.platforms.is_empty() {
+                return Some(room_box(doc));
+            }
+            let boxes = doc
+                .platforms
+                .iter()
+                .filter_map(|p| platform_box(doc, p.id))
+                .chain(sources.nodes.iter().map(|(_, aabb, transform)| aabb_box(aabb, transform)));
+            boxes.reduce(|(a0, a1), (b0, b1)| (a0.min(b0), a1.max(b1)))
+        }
+    }
+}
+
+/// Eases the camera so the box `min..max` (render space) fits the view.
+fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max: Vec3) {
+    if !min.is_finite() || !max.is_finite() {
         return;
     }
     let aspect = camera.logical_viewport_size().map_or(1.0, |s| s.x / s.y.max(1.0));
     let half_fov = (FOV / 2.0).min(((FOV / 2.0).tan() * aspect).atan());
-    let radius = (max - min).length() / 2.0;
+    let radius = ((max - min).length() / 2.0).max(0.01);
     orbit.target.focus = (min + max) / 2.0;
-    orbit.target.distance = radius / half_fov.sin() * 1.02;
+    orbit.target.distance = (radius / half_fov.sin() * 1.02).max(0.05);
 }
 
-fn animate_camera(
+pub(crate) fn animate_camera(
     time: Res<Time>,
     mut redraw: ResMut<RedrawState>,
     mut cameras: Query<(&mut OrbitCamera, &mut Transform, &mut Projection)>,
@@ -281,6 +376,7 @@ fn animate_camera(
         c.pitch += (t.pitch - c.pitch) * k;
         c.distance = (c.distance.ln() + (t.distance.ln() - c.distance.ln()) * k).exp();
         redraw.keep_alive = true;
+        redraw.moving = true;
     }
 
     let next = orbit.current.transform();

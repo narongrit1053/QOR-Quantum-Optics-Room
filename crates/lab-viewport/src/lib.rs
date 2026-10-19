@@ -15,11 +15,17 @@
 //! picked; edits go through `lab_core::Command` on the UI side.
 
 mod camera;
+mod hole_material;
 mod host;
+mod mesh;
 mod picking;
+mod platform;
+mod room;
 mod scene;
+mod sync;
 
-use lab_core::{Document, NodeId};
+use lab_core::{ChangeSet, Document, PlatformId};
+pub use lab_core::{SelectionTarget, WallDisplay};
 
 pub use bevy::math::Vec2;
 pub use host::{ViewportHandle, start};
@@ -86,15 +92,30 @@ pub enum ViewMode {
     Top,
 }
 
+/// What [`ViewportRequest::Frame`] fits into view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FrameTarget {
+    /// Every platform (and the parts on them); the room when there are no platforms.
+    All,
+    /// The current selection. Nothing happens when nothing is selected.
+    Selection,
+    Platform(PlatformId),
+    Room,
+}
+
 pub enum ViewportRequest {
     Input(ViewportInput),
     SetViewMode(ViewMode),
-    /// Animate the camera so the whole scene fits.
-    FrameAll,
-    /// Select a node from outside the viewport (e.g. the scene list).
-    Select(Option<NodeId>),
-    /// Replace the rendered scene with this document snapshot.
+    /// Animate the camera so the target fits. Unknown ids are ignored.
+    Frame(FrameTarget),
+    /// Select something from outside the viewport (e.g. the scene list).
+    Select(Option<SelectionTarget>),
+    /// Replace the rendered scene with this document snapshot (full rebuild). Clears the
+    /// selection and hover.
     LoadDocument(Box<Document>),
+    /// Incremental update: `snapshot` is the document after `changes`.
+    ApplyChanges { snapshot: Box<Document>, changes: ChangeSet },
+    SetWallDisplay(WallDisplay),
     /// Size of the viewport in physical pixels.
     Resize { width: u32, height: u32 },
     /// Hand a texture back once the UI no longer displays it.
@@ -107,8 +128,11 @@ pub enum ViewportEvent {
     /// A new texture is waiting on the texture channel. `frames_rendered` counts every frame
     /// since start, which makes on-demand rendering easy to verify.
     FrameReady { frames_rendered: u64 },
-    SelectionChanged(Option<NodeId>),
-    HoverChanged(Option<NodeId>),
+    SelectionChanged(Option<SelectionTarget>),
+    /// Nodes only in M1.
+    HoverChanged(Option<SelectionTarget>),
+    /// An item could not be built and was skipped. The text is a complete sentence.
+    SceneError(String),
 }
 
 /// Requests that reach the Bevy world for the next update (everything except texture
@@ -117,7 +141,10 @@ pub enum ViewportEvent {
 pub(crate) enum FrameRequest {
     Input(ViewportInput),
     SetViewMode(ViewMode),
-    FrameAll,
-    Select(Option<NodeId>),
+    Frame(FrameTarget),
+    Select(Option<SelectionTarget>),
     LoadDocument(Box<Document>),
+    ApplyChanges(Box<Document>, ChangeSet),
+    #[allow(dead_code)] // Read by the wall fade (room.rs, T4c).
+    SetWallDisplay(WallDisplay),
 }

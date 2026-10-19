@@ -42,10 +42,25 @@ pub struct ViewportHandle {
 pub(crate) struct PendingRequests(pub Vec<FrameRequest>);
 
 /// Systems set `keep_alive` when they need another frame right away (e.g. an animation that
-/// has not settled). The host resets it before every update.
+/// has not settled). Camera motion also sets `moving`, which renders the next frame at reduced
+/// resolution with a sharp frame once motion stops; other frames (settle frames, fades) render
+/// at full resolution, so nothing follows them. The host resets both after every update.
 #[derive(Resource, Default)]
 pub(crate) struct RedrawState {
     pub keep_alive: bool,
+    pub moving: bool,
+}
+
+/// Extra frames still to render after a spawn, so assets created this frame (meshes, materials,
+/// mask images) are prepared and shown before the viewport goes idle. Counted down in `Last`.
+#[derive(Resource, Default)]
+pub(crate) struct SettleFrames(pub u8);
+
+fn count_down_settle_frames(mut settle: ResMut<SettleFrames>, mut redraw: ResMut<RedrawState>) {
+    if settle.0 > 0 {
+        settle.0 -= 1;
+        redraw.keep_alive = true;
+    }
 }
 
 /// Sends events to the UI and wakes the UI thread so it handles them right away.
@@ -165,11 +180,13 @@ pub fn start(
                 .insert_resource(CurrentTarget(ManualTextureViewHandle(0)))
                 .init_resource::<PendingRequests>()
                 .init_resource::<RedrawState>()
+                .init_resource::<SettleFrames>()
                 .insert_resource(events)
                 .insert_resource(quality)
                 .insert_resource(MsaaSamples(msaa_samples))
                 .insert_resource(ViewportSize(Vec2::new(640.0, 480.0)))
-                .add_systems(First, apply_render_target);
+                .add_systems(First, apply_render_target)
+                .add_systems(Last, count_down_settle_frames);
             app.add_plugins(
                 DefaultPlugins
                     .build()
@@ -193,6 +210,7 @@ pub fn start(
                     }),
             );
             app.add_plugins((SendFrameToUiPlugin(texture_tx), ExtractResourcePlugin::<BackBuffer>::default()));
+            app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin));
             app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
             app.run();
         })
@@ -285,9 +303,13 @@ fn run_on_demand(
                     pending.push(FrameRequest::Input(input));
                 }
                 ViewportRequest::SetViewMode(mode) => pending.push(FrameRequest::SetViewMode(mode)),
-                ViewportRequest::FrameAll => pending.push(FrameRequest::FrameAll),
-                ViewportRequest::Select(id) => pending.push(FrameRequest::Select(id)),
+                ViewportRequest::Frame(target) => pending.push(FrameRequest::Frame(target)),
+                ViewportRequest::Select(target) => pending.push(FrameRequest::Select(target)),
                 ViewportRequest::LoadDocument(doc) => pending.push(FrameRequest::LoadDocument(doc)),
+                ViewportRequest::ApplyChanges { snapshot, changes } => {
+                    pending.push(FrameRequest::ApplyChanges(snapshot, changes))
+                }
+                ViewportRequest::SetWallDisplay(display) => pending.push(FrameRequest::SetWallDisplay(display)),
             }
         }
         if !pending.is_empty() {
@@ -325,9 +347,10 @@ fn run_on_demand(
         world.resource_mut::<PendingRequests>().0.clear();
         let mut redraw = world.resource_mut::<RedrawState>();
         frames_rendered += 1;
-        animating = std::mem::take(&mut redraw.keep_alive);
+        let keep_alive = std::mem::take(&mut redraw.keep_alive);
+        animating = std::mem::take(&mut redraw.moving);
         // A few warm-up frames let GPU resources created at startup settle.
-        dirty = animating || frames_rendered < WARMUP_FRAMES;
+        dirty = keep_alive || animating || frames_rendered < WARMUP_FRAMES;
         if scale < 1.0 {
             reduced_since = Some(Instant::now());
         }
