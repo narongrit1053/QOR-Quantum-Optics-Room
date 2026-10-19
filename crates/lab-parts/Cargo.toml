@@ -1,0 +1,13 @@
+[package]
+name = "lab-parts"
+description = "Parametric part mesh generators for LabSetup (DESIGN.md §5)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-core.workspace = true
+lab-geom.workspace = true
+glam.workspace = true
+thiserror.workspace = true

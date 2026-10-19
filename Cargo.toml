@@ -8,6 +8,7 @@ members = [
     "crates/lab-viewport",
     "crates/lab-ui",
     "crates/lab-app",
+    "crates/lab-parts",
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ lab-ui = { path = "crates/lab-ui" }
 lab-geom = { path = "crates/lab-geom" }
 lab-file = { path = "crates/lab-file" }
 lab-catalog = { path = "crates/lab-catalog" }
+lab-parts = { path = "crates/lab-parts" }
 
 # Slint and Bevy must share one wgpu major version (Slint's `unstable-wgpu-30` <-> Bevy 0.20).
 # Upgrade them together; see docs/DESIGN.md §9.
