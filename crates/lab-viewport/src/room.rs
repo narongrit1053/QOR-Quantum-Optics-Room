@@ -20,9 +20,10 @@ use crate::{FrameRequest, ViewMode};
 const FADE_RATE: f32 = 14.0;
 /// Alphas closer than this to the target snap to it, settling within 300 ms.
 const FADE_SNAP: f32 = 0.03;
-/// Maximum delta time (s) per fade step; prevents a long pause from overshooting
-/// while allowing the fade to finish in real time rather than frame count.
+/// Maximum delta time (s) per fade step, so a slow GPU still finishes in real time.
 const MAX_FADE_DT: f32 = 0.25;
+/// Delta time (s) of a fade's first step: after an idle period the frame delta is huge.
+const FIRST_FADE_DT: f32 = 1.0 / 60.0;
 /// Hysteresis (mm) around the outer face for the "eye behind the wall" test.
 const HYSTERESIS: f64 = 50.0;
 
@@ -278,9 +279,17 @@ fn update_wall_fade(
             }
         };
         // A freshly spawned wall takes its state at once: rebuilding the room must not fade.
-        let alpha = if first_run || state.is_added() { target } else { step_alpha(state.alpha, target, dt) };
-        if state.target != target {
+        let started = state.target != target;
+        let alpha = if first_run || state.is_added() {
+            target
+        } else {
+            step_alpha(state.alpha, target, if started { dt.min(FIRST_FADE_DT) } else { dt })
+        };
+        if started {
             debug!("wall {entity}: fading to {target}");
+        }
+        if alpha != target || state.alpha != target {
+            trace!("wall {entity}: dt {dt:.4} alpha {alpha:.3}");
         }
         if state.alpha != alpha || state.target != target {
             state.alpha = alpha;
@@ -426,6 +435,31 @@ mod tests {
         assert_eq!(look_for(1.0), (AlphaMode::Opaque, 1.0, Visibility::Inherited));
         assert_eq!(look_for(0.4), (AlphaMode::Blend, 0.4, Visibility::Inherited));
         assert_eq!(look_for(0.0).2, Visibility::Hidden);
+    }
+
+    #[test]
+    fn fade_after_idle_is_not_a_pop() {
+        // Bevy frame deltas as update_wall_fade sees them: the first is the idle gap.
+        for (frame_dt, min_steps) in [(0.016f32, 3), (0.13, 2)] {
+            for (start, target) in [(1.0, 0.0), (0.0, 1.0)] {
+                let (mut alpha, mut elapsed, mut steps) = (start, 0.0f32, 0);
+                while alpha != target {
+                    let real = if steps == 0 { 0.25 } else { frame_dt };
+                    let dt = if steps == 0 { real.min(FIRST_FADE_DT) } else { real.min(MAX_FADE_DT) };
+                    let next = step_alpha(alpha, target, dt);
+                    // At 130 ms frames a 300 ms fade has only ~2 frames, so big steps are unavoidable.
+                    assert!(frame_dt > 0.1 || (next - alpha).abs() <= 0.6, "jump {alpha} -> {next}");
+                    alpha = next;
+                    if steps > 0 {
+                        elapsed += real;
+                    }
+                    steps += 1;
+                    assert!(steps < 100);
+                }
+                assert!(steps >= min_steps, "{steps} steps at {frame_dt} s");
+                assert!(elapsed <= 0.30, "took {elapsed:.3} s after the first frame at {frame_dt} s");
+            }
+        }
     }
 
     #[test]
