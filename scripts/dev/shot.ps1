@@ -13,7 +13,7 @@ public static class W {
 "@
 [W]::SetProcessDPIAware() | Out-Null
 $p = Get-Process -Id $ProcessId
-$h = $p.MainWindowHandle
+. "$PSScriptRoot\lab.ps1"; $h = Find-AppWindow $ProcessId   # MainWindowHandle may be winit's hidden window
 if ($h -eq [IntPtr]::Zero) { throw "process has no main window" }
 $r = New-Object W+RECT
 [W]::GetWindowRect($h, [ref]$r) | Out-Null

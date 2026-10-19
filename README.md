@@ -8,7 +8,13 @@ The design, decisions and measurements are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
-Milestone M0 (architecture spike) is done: a demo table with a 780 nm beam path, orbit/pan/zoom, an animated 3D ↔ top view switch, click selection with an inspector, and a scene list. See [docs/DESIGN.md §13](docs/DESIGN.md) for measured results.
+Milestone M1 (core and platforms) is built and verified; the board signs it off. On top of M0's demo table, viewport and picking it adds:
+- optical tables, breadboards and custom platforms from Thorlabs-sized presets, with rectangular, rounded, L-shaped or free polygon outlines (filleted corners), metric, imperial or custom hole grids and exclusion zones;
+- an editable room (rectangle or L, any polygon) with mitred walls, doors and windows, and walls that fade when they block the view;
+- inspector editing in millimetres or inches, with undo and redo;
+- `.labsetup` archives, Save as Folder (`project.json`), autosave and crash recovery.
+
+See [docs/DESIGN.md §14](docs/DESIGN.md) for the M1 measurements and §13 for M0.
 
 ## Build and run
 
@@ -35,9 +41,18 @@ powershell -ExecutionPolicy Bypass -File scripts/check-offline.ps1
 | Left-drag | Orbit (pans in the top view) |
 | Right/middle-drag, Shift+left-drag | Pan |
 | Wheel | Zoom toward the cursor |
-| Click | Select a part (Esc clears) |
+| Click | Select a part, platform or wall (Esc clears) |
 | `T` / `P` | Top view / 3D view |
-| `F` | Frame everything |
+| `F` / `Shift+F` | Frame everything / frame the selection |
+| `Delete` | Delete the selection (a platform takes the parts on it) |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Shift+Z` / `Ctrl+Y` | Redo |
+| `Ctrl+N` / `Ctrl+O` | New / Open… |
+| `Ctrl+S` / `Ctrl+Shift+S` | Save / Save As… (Save as Folder… is in the project menu) |
+| `Enter` / `Esc` in a field | Apply / revert the value; lengths accept `mm`, `cm`, `m`, `in`, `"`, `ft`, `'` |
+| `Ctrl+Enter` in the paste sheet | Apply the pasted corners |
+
+The project menu (click the project name) has New, Open…, Open Demo, Save, Save As… and Save as Folder…. The `+` next to SCENE adds a platform from a preset.
 
 ## Environment variables
 
@@ -46,12 +61,18 @@ powershell -ExecutionPolicy Bypass -File scripts/check-offline.ps1
 | `LABSETUP_QUALITY=high\|balanced\|low` | Override the automatic rendering quality (default: High on discrete GPUs, Balanced on integrated ones) |
 | `LABSETUP_TRACE=1` | Print frame-pacing timestamps to stderr |
 | `RUST_LOG=lab_viewport=debug` | Log every rendered viewport frame with its resolution |
+| `WGPU_POWER_PREF=low` | Use the integrated GPU (the default prefers a discrete one) |
+| `LABSETUP_AUTOSAVE_DIR` | Autosave folder (default `%LOCALAPPDATA%\LabSetuputosave`) |
+| `LABSETUP_SETTINGS` | Settings file (default `%APPDATA%\LabSetup\settings.json`): display units, wall display, last folder |
 
 ## Layout
 
 | Crate | Purpose |
 |---|---|
-| `crates/lab-core` | Document model, commands with undo/redo, hole grids, demo setup. No GPU or UI dependencies. |
-| `crates/lab-viewport` | Bevy viewport: on-demand rendering host, scene building, orbit camera, picking. |
+| `crates/lab-geom` | Pure geometry: polygons, fillets, triangulation, extrusion, mitred walls with openings. |
+| `crates/lab-core` | Document model (schema 2), outlines, holes, room, validation, commands with undo/redo, presets, migration, demo setup. No GPU or UI dependencies. |
+| `crates/lab-file` | `.labsetup` archives and folders, atomic saves, autosave and recovery, settings, the I/O worker thread. |
+| `crates/lab-viewport` | Bevy viewport: on-demand rendering host, incremental scene sync, hole shader, room walls and fade, orbit camera, picking. |
 | `crates/lab-ui` | Slint UI: design tokens, components, main window. |
-| `crates/lab-app` | The executable, which wires the document, UI and viewport together. |
+| `crates/lab-app` | The executable: session and edit pipeline, view models, file dialogs and flows, wiring the document, UI and viewport together. |
+| `scripts/dev` | Helpers for checking the running app (screenshots, posted input, idle measurement, the M1 end-to-end run). |
