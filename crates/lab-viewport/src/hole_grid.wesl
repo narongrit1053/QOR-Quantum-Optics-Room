@@ -19,6 +19,7 @@ struct HoleGridParams {
     accent: vec4<f32>,
     zone_count: u32,
     zones: array<vec4<f32>, 16>,
+    blueprint: u32,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> grid: HoleGridParams;
@@ -84,6 +85,19 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             tint = max(tint, 1.0 - smoothstep(-0.5 * px, 0.5 * px, sd));
             line = max(line, 1.0 - smoothstep(0.5 * px, 1.5 * px, abs(sd)));
         }
+    }
+
+    if (grid.blueprint != 0u) {
+        // Flat, unlit: dark blue-grey fill, holes as 1 px outlines that fade into the far-field mean.
+        let ring = present * clamp(1.0 - abs(d - grid.hole_radius) / px, 0.0, 1.0);
+        let lines = mix(far * 0.6, ring, t);
+        var c = mix(vec3<f32>(0.035, 0.05, 0.08), vec3<f32>(0.75, 0.82, 0.9), lines);
+        c = mix(c, grid.accent.rgb, 0.15 * tint);
+        c = mix(c, grid.accent.rgb, 0.85 * line);
+        c = mix(c, grid.accent.rgb, 0.25 * grid.highlight);
+        var bp: FragmentOutput;
+        bp.color = vec4<f32>(c, 1.0);
+        return bp;
     }
 
     var pbr_input = pbr_input_from_standard_material(in, is_front);

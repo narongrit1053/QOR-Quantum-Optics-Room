@@ -282,7 +282,20 @@ fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
     match id {
         "edit.undo" => undo_redo(ui, app, models, false),
         "edit.redo" => undo_redo(ui, app, models, true),
-        "view.frame_all" => app.borrow().send(ViewportRequest::Frame(FrameTarget::All)),
+        "view.frame_all" => {
+            // In Top, F frames the selected platform (POLA-49).
+            let a = app.borrow();
+            let target = match a.session.selection {
+                Some(SelectionTarget::Platform(id)) if ui.get_view_mode() == 1 => FrameTarget::Platform(id),
+                _ => FrameTarget::All,
+            };
+            a.send(ViewportRequest::Frame(target));
+        }
+        "view.blueprint" => {
+            let on = !ui.get_blueprint();
+            ui.set_blueprint(on);
+            app.borrow().send(ViewportRequest::SetBlueprint(on));
+        }
         "view.frame_selection" => app.borrow().send(ViewportRequest::Frame(FrameTarget::Selection)),
         "view.top" | "view.3d" => {
             let top = id == "view.top";

@@ -233,7 +233,7 @@ pub(crate) fn handle_input(
             }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
-            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) => {}
+            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) => {}
         }
     }
 }

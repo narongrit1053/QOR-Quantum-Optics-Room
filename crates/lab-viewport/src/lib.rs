@@ -14,6 +14,7 @@
 //! The viewport never edits the document. It renders a snapshot and reports what the user
 //! picked; edits go through `lab_core::Command` on the UI side.
 
+mod blueprint;
 mod camera;
 mod gizmo;
 mod hole_material;
@@ -131,6 +132,8 @@ pub enum ViewportRequest {
     DragPart(PartDrag),
     /// The pointer tool: selecting, or the move/rotate gizmo on the selected node.
     SetTool(Tool),
+    /// POLA-49. Flat "blueprint" look; applies only while a camera is in Top mode.
+    SetBlueprint(bool),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -227,6 +230,7 @@ pub(crate) enum FrameRequest {
     SetWallDisplay(WallDisplay),
     DragPart(PartDrag),
     SetTool(Tool),
+    SetBlueprint(bool),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).
