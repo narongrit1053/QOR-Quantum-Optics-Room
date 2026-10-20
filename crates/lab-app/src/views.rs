@@ -15,7 +15,7 @@ use lab_core::units::{
 };
 
 use lab_catalog::Catalog;
-use lab_core::model::{Attach, Parent};
+use lab_core::model::Attach;
 use lab_core::part::{Geometry, ParamValue};
 
 use crate::edit::{EditError, node_mate, node_yaw};
