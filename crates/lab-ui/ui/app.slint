@@ -394,6 +394,14 @@ export component AppWindow inherits Window {
                 image-fit: fill;
             }
 
+            // Split view (POLA-51): the seam between the 3D and Top panes.
+            if root.view-mode == 2: Rectangle {
+                x: parent.width / 2;
+                width: 1phx;
+                height: 100%;
+                background: #FFFFFF40;
+            }
+
             if root.viewport-preparing: Text {
                 width: 100%;
                 height: 100%;
@@ -834,7 +842,7 @@ export component AppWindow inherits Window {
             height: self.preferred-height;
             spacing: Theme.gap;
             SegmentedControl {
-                items: ["3D", "Top"];
+                items: ["3D", "Top", "Split"];
                 current: root.view-mode;
                 selected(i) => {
                     root.view-mode = i;

@@ -179,6 +179,7 @@ pub fn start(
                 .insert_resource(quality)
                 .insert_resource(MsaaSamples(msaa_samples))
                 .insert_resource(ViewportSize(Vec2::new(640.0, 480.0)))
+                .init_resource::<TargetSize>()
                 .add_systems(First, apply_render_target)
                 .add_systems(Last, count_down_settle_frames);
             app.add_plugins(
@@ -472,8 +473,14 @@ fn render_into(app: &mut App, target: wgpu::Texture, handle: ManualTextureViewHa
         },
     );
     world.resource_mut::<CurrentTarget>().0 = handle;
+    world.resource_mut::<TargetSize>().0 = UVec2::new(target.width(), target.height());
     app.update();
 }
+
+/// Physical size of the texture this frame renders into (smaller than [`ViewportSize`] while
+/// the adaptive scaler reduces resolution); the split view's pane rects come from it.
+#[derive(Resource, Default)]
+pub(crate) struct TargetSize(pub UVec2);
 
 /// The texture view this frame renders into. Applied to every camera at the start of each
 /// update, which also covers cameras spawned during startup.

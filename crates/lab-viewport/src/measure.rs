@@ -9,7 +9,7 @@ use bevy::{
 };
 use lab_core::{Document, NodeId, PlatformId, SelectionTarget, compute_holes};
 
-use crate::camera::{Clicks, OrbitCamera, PointerState, handle_input, to_camera_space};
+use crate::camera::{Clicks, OrbitCamera, PointerState, camera_at, handle_input};
 use crate::host::{EventSender, PendingRequests, ViewportSize};
 use crate::picking::{PickId, pick};
 use crate::scene::{SceneIndex, from_render, to_render};
@@ -86,12 +86,13 @@ fn measure_input(
     if !measure.active {
         return;
     }
-    let (Some(doc), Ok((camera, camera_transform))) = (&index.snapshot, cameras.single()) else { return };
+    let Some(doc) = &index.snapshot else { return };
 
     let snapped = |pos: Vec2, ray_cast: &mut MeshRayCast| -> Option<DVec3> {
+        let ((), camera, camera_transform, p) = camera_at(cameras.iter().map(|(c, t)| ((), c, t)), &full, pos)?;
         let to_screen = |p: DVec3| {
             let v = camera.world_to_viewport(camera_transform, to_render(p)).ok()?;
-            let size = camera.logical_viewport_size()?;
+            let size = camera.logical_target_size()?;
             Some(if full.0.x > 0.0 && full.0.y > 0.0 { v * full.0 / size } else { v })
         };
         let near = |p: DVec3| to_screen(p).map(|s| s.distance(pos)).filter(|&d| d <= SNAP_PX);
@@ -105,7 +106,7 @@ fn measure_input(
         if let Some((_, p)) = origin {
             return Some(p);
         }
-        let ray = camera.viewport_to_world(camera_transform, to_camera_space(camera, &full, pos)).ok()?;
+        let ray = camera.viewport_to_world(camera_transform, p).ok()?;
         let filter = |entity: Entity| targets.contains(entity);
         let settings = MeshRayCastSettings::default().with_filter(&filter);
         match ray_cast.cast_ray(ray, &settings).first().map(|(e, h)| (targets.get(*e).ok(), from_render(h.point))) {

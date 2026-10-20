@@ -97,7 +97,11 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
 
     let a = app.clone();
     ui.on_view_mode_requested(move |mode| {
-        let mode = if mode == 1 { ViewMode::Top } else { ViewMode::Perspective };
+        let mode = match mode {
+            1 => ViewMode::Top,
+            2 => ViewMode::Split,
+            _ => ViewMode::Perspective,
+        };
         a.borrow().send(ViewportRequest::SetViewMode(mode));
     });
     app.borrow().send(ViewportRequest::SetReduceMotion(reduce_motion()));

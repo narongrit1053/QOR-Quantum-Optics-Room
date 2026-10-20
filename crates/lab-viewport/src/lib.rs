@@ -99,6 +99,8 @@ pub enum ViewMode {
     Perspective,
     /// Orthographic view straight down onto the tables.
     Top,
+    /// POLA-51. Left half Perspective, right half Top, in one texture.
+    Split,
 }
 
 /// What [`ViewportRequest::Frame`] fits into view.

@@ -16,7 +16,7 @@ use lab_catalog::Catalog;
 use lab_core::part::Frame;
 use lab_core::{Attach, Document, Node, NodeId, Parent, SelectionTarget, Shape, compute_holes};
 
-use crate::camera::{OrbitCamera, handle_input, to_camera_space};
+use crate::camera::{OrbitCamera, PointerState, camera_at, handle_input, to_camera_space};
 use crate::host::{EventSender, PendingRequests, SettleFrames, ViewportSize};
 use crate::picking::{PickId, Selection};
 use crate::scene::{SceneIndex, from_render, part_mesh, to_render};
@@ -269,6 +269,7 @@ fn render_ray(ray: Ray3d) -> (DVec3, DVec3) {
 fn gizmo_input(
     pending: Res<PendingRequests>,
     cameras: Query<(&Camera, &GlobalTransform), With<OrbitCamera>>,
+    pointer: Res<PointerState>,
     handles_q: Query<&GizmoHandle>,
     picks: Query<&PickId>,
     mut ray_cast: MeshRayCast,
@@ -286,7 +287,11 @@ fn gizmo_input(
             FrameRequest::SetTool(tool) => gizmo.tool = *tool,
             FrameRequest::Input(input) => {
                 let Some(doc) = &index.snapshot else { continue };
-                let Ok((camera, camera_transform)) = cameras.single() else { continue };
+                let anchor = match *input {
+                    ViewportInput::PointerDown { pos, .. } => pos,
+                    _ => pointer.press_start().unwrap_or_default(),
+                };
+                let Some(((), camera, camera_transform, _)) = camera_at(cameras.iter().map(|(c, t)| ((), c, t)), &full, anchor) else { continue };
                 let ray_at = |pos: Vec2| camera.viewport_to_world(camera_transform, to_camera_space(camera, &full, pos)).ok();
                 match *input {
                     ViewportInput::PointerDown { button: PointerButton::Left, pos, .. } => {
