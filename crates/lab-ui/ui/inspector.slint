@@ -418,7 +418,7 @@ export component PlatformInspector inherits Rectangle {
         Divider { }
         SectionHeader { text: "SUPPORT"; }
         SegmentedControl {
-            items: ["Legs", "None"];
+            items: ["Legs", "Isolators", "None", "On platform"];
             current: root.support;
             floating: false;
             selected(i) => { root.choice-selected("platform.support", i); }

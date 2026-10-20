@@ -188,8 +188,11 @@ fn platform_field_val(p: &Platform, field: &str, units: LengthUnit) -> Option<St
 
     if let Some(rest) = field.strip_prefix("platform.support.") {
         return match (rest, &p.support) {
-            ("leg_size", Support::Legs { size, .. }) => Some(format_length(*size, units)),
-            ("leg_inset", Support::Legs { inset, .. }) => Some(format_length(*inset, units)),
+            ("leg_size", Support::Legs { size, .. } | Support::Isolators { size, .. }) => Some(format_length(*size, units)),
+            ("leg_inset", Support::Legs { inset, .. } | Support::Isolators { inset, .. }) => {
+                Some(format_length(*inset, units))
+            }
+            ("standoff", Support::OnPlatform { standoff, .. }) => Some(format_length(*standoff, units)),
             _ => None,
         };
     }
@@ -478,14 +481,38 @@ pub fn field_edit(cx: &EditContext, field: &str, text: &str) -> Result<EditOutco
                 "leg_size" => {
                     let sz = parse_length(trimmed, cx.units)?;
                     match &mut p.support {
-                        Support::Legs { size, .. } => *size = sz,
+                        Support::Legs { size, .. } | Support::Isolators { size, .. } => *size = sz,
                         _ => return Err(EditError::UnknownField(field.into())),
                     }
                 }
                 "leg_inset" => {
                     let inset_val = parse_length(trimmed, cx.units)?;
                     match &mut p.support {
-                        Support::Legs { inset, .. } => *inset = inset_val,
+                        Support::Legs { inset, .. } | Support::Isolators { inset, .. } => *inset = inset_val,
+                        _ => return Err(EditError::UnknownField(field.into())),
+                    }
+                }
+                "standoff" => {
+                    let h = parse_length(trimmed, cx.units)?;
+                    match &mut p.support {
+                        Support::OnPlatform { standoff, .. } => *standoff = h,
+                        _ => return Err(EditError::UnknownField(field.into())),
+                    }
+                }
+                "on.name" => {
+                    let base = cx
+                        .doc
+                        .platforms
+                        .iter()
+                        .find(|b| b.id != p.id && b.name == trimmed)
+                        .ok_or_else(|| EditError::Invalid(format!("No other platform is named “{trimmed}”")))?;
+                    match &mut p.support {
+                        Support::OnPlatform { parent, .. } if *parent == base.id => return Ok(EditOutcome::Nothing),
+                        Support::OnPlatform { parent, .. } => {
+                            *parent = base.id;
+                            p.position = DVec2::ZERO;
+                            p.rotation_z = 0.0;
+                        }
                         _ => return Err(EditError::UnknownField(field.into())),
                     }
                 }
@@ -723,7 +750,30 @@ pub fn choice_edit(cx: &EditContext, choice: &str, index: i32) -> Result<EditOut
             "platform.support" => {
                 p.support = match index {
                     0 => Support::Legs { size: 120.0, inset: 150.0 },
-                    1 => Support::Fixed,
+                    1 => Support::Isolators { size: 120.0, inset: 150.0 },
+                    2 => Support::Fixed,
+                    3 => {
+                        if matches!(p.support, Support::OnPlatform { .. }) {
+                            return Ok(EditOutcome::Nothing);
+                        }
+                        // The largest other platform (by area) is the likeliest base; centred on it.
+                        let base = cx
+                            .doc
+                            .platforms
+                            .iter()
+                            .filter(|b| b.id != p.id)
+                            .max_by(|a, b| {
+                                let area = |p: &Platform| {
+                                    let (lo, hi) = p.outline.bounds();
+                                    (hi.x - lo.x) * (hi.y - lo.y)
+                                };
+                                area(a).total_cmp(&area(b))
+                            })
+                            .ok_or_else(|| EditError::Invalid("There is no other platform to stand on".into()))?;
+                        p.position = DVec2::ZERO;
+                        p.rotation_z = 0.0;
+                        Support::OnPlatform { parent: base.id, standoff: 100.0 }
+                    }
                     _ => return Err(EditError::Invalid("Invalid support".into())),
                 };
             }
@@ -905,6 +955,26 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
     }
     if action == "room.corners.paste" {
         return Ok(EditOutcome::OpenPaste("room".into()));
+    }
+
+    if action == "platform.add.raised-bb" {
+        let base = match cx.selection {
+            Some(SelectionTarget::Platform(pid)) => cx.doc.platform(pid),
+            _ => None,
+        }
+        .ok_or_else(|| EditError::Invalid("Select the platform the breadboard should stand on".into()))?;
+        let preset = PRESETS.iter().find(|p| p.id == "bb-m-300x300").ok_or(EditError::Stale)?;
+        let new_id = PlatformId(cx.doc.next_free_id());
+        let mut p = platform_from_preset(cx.doc, preset, new_id, Some(base.id));
+        p.position = DVec2::ZERO;
+        p.rotation_z = 0.0;
+        p.support = Support::OnPlatform { parent: base.id, standoff: 100.0 };
+        return Ok(EditOutcome::Command {
+            command: Command::AddPlatform { platform: Box::new(p), index: None },
+            label: "Add Raised breadboard".into(),
+            select: Some(SelectionTarget::Platform(new_id)),
+            fixes: Vec::new(),
+        });
     }
 
     if let Some(preset_id) = action.strip_prefix("platform.add.") {

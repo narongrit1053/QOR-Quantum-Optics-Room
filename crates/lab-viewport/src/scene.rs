@@ -16,7 +16,7 @@ use bevy::{
 };
 use lab_catalog::Catalog;
 use lab_core::part::{Geometry, Params};
-use lab_core::{Document, Finish, Node, NodeId, PlatformId, SelectionTarget, Shape};
+use lab_core::{Document, Finish, Node, NodeId, PlatformId, SelectionTarget, Shape, Support};
 use lab_parts::PartMesh;
 
 use crate::hole_material::HoleTopMaterial;
@@ -274,7 +274,7 @@ fn apply_op(
         }
         SyncOp::BuildPlatform(id) => {
             let Some(p) = doc.platform(id) else { return };
-            let transform = platform_root_transform(p);
+            let transform = platform_root_transform(doc, p);
             let root = match index.platforms.remove(&id) {
                 Some(existing) => {
                     for part in existing.parts {
@@ -296,11 +296,13 @@ fn apply_op(
                 Vec::new()
             });
             index.platforms.insert(id, PlatformEntities { root, parts });
+            place_stacked(commands, index, doc);
         }
         SyncOp::PlacePlatform(id) => {
             if let (Some(p), Some(platform)) = (doc.platform(id), index.platforms.get(&id)) {
-                commands.entity(platform.root).insert(platform_root_transform(p));
+                commands.entity(platform.root).insert(platform_root_transform(doc, p));
             }
+            place_stacked(commands, index, doc);
         }
         SyncOp::SpawnNode(id) => {
             let Some(node) = doc.node(id) else { return };
@@ -324,6 +326,15 @@ fn apply_op(
             let (position, rotation) = doc.node_pose(id).unwrap_or((node.position, node.rotation));
             let entity = spawn_node(commands, root, node, position, rotation, assets, events);
             index.nodes.insert(id, entity);
+        }
+    }
+}
+
+/// Re-places every stacked (`OnPlatform`) platform, so one moved anywhere below carries it.
+fn place_stacked(commands: &mut Commands, index: &SceneIndex, doc: &Document) {
+    for p in doc.platforms.iter().filter(|p| matches!(p.support, Support::OnPlatform { .. })) {
+        if let Some(platform) = index.platforms.get(&p.id) {
+            commands.entity(platform.root).insert(platform_root_transform(doc, p));
         }
     }
 }
