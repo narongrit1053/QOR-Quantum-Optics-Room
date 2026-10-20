@@ -8,7 +8,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
-import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, Spinner } from "components.slint";
+import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu } from "overlays.slint";
@@ -26,7 +26,7 @@ component SceneItem inherits Rectangle {
     callback renamed(string);
     callback action(string);
     property <bool> renaming;
-    property <bool> hot: row-touch.has-hover || lock-btn.hovered || del-btn.hovered;
+    property <bool> hot: row-touch.has-hover || lock-btn.hovered || iso-btn.hovered || del-btn.hovered;
 
     height: 28px;
     border-radius: 7px;
@@ -101,6 +101,13 @@ component SceneItem inherits Rectangle {
             active: item.locked;
             clicked => { root.action(item.locked ? "unlock" : "lock"); }
         }
+        iso-btn := IconButton {
+            visible: item.kind == 1 && root.hot;
+            icon: "◎";
+            size: 22px;
+            icon-size: 12px;
+            clicked => { root.action("isolate"); }
+        }
         del-btn := IconButton {
             visible: item.kind != 2 && root.hot;
             icon: "✕";
@@ -117,6 +124,8 @@ export component AppWindow inherits Window {
     in property <image> viewport-texture;
     // True from launch until the host has rendered its warm-up frames (pipelines compiled).
     in property <bool> viewport-preparing: true;
+    // Name of the isolated platform (POLA-52); empty when nothing is isolated.
+    in property <string> isolated-name;
     out property <length> viewport-width: viewport.width;
     out property <length> viewport-height: viewport.height;
 
@@ -417,7 +426,11 @@ export component AppWindow inherits Window {
                         return accept;
                     }
                     if (event.text == Key.Escape) {
-                        root.clear-selection();
+                        if (root.isolated-name != "" && root.tool == 0) {
+                            root.action("view.show_all");
+                        } else {
+                            root.clear-selection();
+                        }
                         return accept;
                     }
                     reject
@@ -446,6 +459,31 @@ export component AppWindow inherits Window {
                         if (!self.has-hover) {
                             root.viewport-left();
                         }
+                    }
+                }
+            }
+
+            if root.isolated-name != "": Rectangle {
+                y: Theme.inset + 52px;
+                x: (parent.width - self.width) / 2;
+                width: banner-row.preferred-width;
+                height: 32px;
+                border-radius: 16px;
+                background: Theme.accent-soft;
+                banner-row := HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 4px;
+                    spacing: 10px;
+                    Text {
+                        text: "Isolated: " + root.isolated-name;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                    }
+                    PillButton {
+                        y: 2px;
+                        label: "Show all";
+                        clicked => { root.action("view.show_all"); }
                     }
                 }
             }

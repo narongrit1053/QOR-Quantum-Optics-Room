@@ -206,7 +206,7 @@ pub fn start(
             app.add_plugins((SendFrameToUiPlugin(texture_tx), ExtractResourcePlugin::<BackBuffer>::default()));
             app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin));
             app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
-            app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin));
+            app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::isolate::IsolatePlugin));
             app.run();
         })
         .expect("failed to spawn the viewport thread");
@@ -333,6 +333,8 @@ fn run_on_demand(
                 }
                 ViewportRequest::DragPart(drag) => pending.push(FrameRequest::DragPart(drag)),
                 ViewportRequest::SetTool(tool) => pending.push(FrameRequest::SetTool(tool)),
+                ViewportRequest::Isolate(id) => pending.push(FrameRequest::Isolate(id)),
+                ViewportRequest::SetReduceMotion(on) => pending.push(FrameRequest::SetReduceMotion(on)),
             }
         }
         if !pending.is_empty() {
