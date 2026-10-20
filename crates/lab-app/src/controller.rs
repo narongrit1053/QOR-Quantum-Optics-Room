@@ -51,6 +51,8 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         on_action(&ui, &a, &m, &id);
     });
 
+    crate::import::connect(ui, app, models);
+
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
     ui.on_paste_corners(move |target, text| {
         let Some(ui) = w.upgrade() else { return SharedString::new() };
@@ -345,6 +347,7 @@ fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
             // Drops any live-preview state (corner tint, previewed outline).
             refresh_all(ui, &app.borrow(), models);
         }
+        "import.step" => crate::import::choose_file(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),
         "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" => {
             let (index, tool) = match id {

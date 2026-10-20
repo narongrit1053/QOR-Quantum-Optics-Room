@@ -57,7 +57,7 @@ fn new_node(
         Geometry::Parametric { generator, params } => lab_parts::generate(generator, params)
             .ok()
             .and_then(|mesh| mesh.pieces.first().map(|(f, _)| f.clone())),
-        Geometry::Mesh { .. } => None,
+        Geometry::Mesh { .. } => def.meta.get("finish").map(|f| crate::import::finish_from_meta(f)),
     };
     Some(Node {
         id: NodeId(id),

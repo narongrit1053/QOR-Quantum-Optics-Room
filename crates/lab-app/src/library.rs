@@ -89,6 +89,18 @@ pub fn fill(app: &AppState, models: &UiModels) {
     sync(&models.library, rows(&app.catalog, &app.library.query, &app.library.collapsed));
 }
 
+/// Reloads the catalog from disk, sends it to the viewport and refreshes the sidebar
+/// (M4-PLAN: after an import and after the connector wizard saves).
+pub fn reload_catalog(app: &mut AppState, models: &UiModels) {
+    let (catalog, warnings) = Catalog::load_default();
+    for w in &warnings {
+        eprintln!("library: {}: {}", w.path.display(), w.message);
+    }
+    app.catalog = std::sync::Arc::new(catalog);
+    app.send(ViewportRequest::SetCatalog(app.catalog.clone()));
+    fill(app, models);
+}
+
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     let (a, m) = (app.clone(), models.clone());
     ui.on_library_search(move |text| {

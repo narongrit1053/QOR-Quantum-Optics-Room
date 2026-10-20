@@ -1,0 +1,201 @@
+// "Import STEP…" dialog (M4-PLAN POLA-59): form → progress → error or done.
+
+import { LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { SegmentedControl, PillButton, Spinner } from "components.slint";
+
+component Field inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 8px;
+    Text {
+        width: 96px;
+        text: root.label;
+        color: Theme.text-secondary;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+    }
+    @children
+}
+
+export component ImportDialog inherits Rectangle {
+    // 0 closed, 1 form, 2 converting, 3 error, 4 done.
+    in property <int> step;
+    in property <string> file-name;
+    in-out property <int> vendor;
+    in-out property <int> up-axis; // 0 Y, 1 Z
+    in-out property <string> part-number;
+    in-out property <string> part-name;
+    in-out property <string> category;
+    in-out property <int> finish; // 0 anodized black, 1 stainless, 2 painted
+    in property <string> progress;
+    in property <string> error;
+    in property <string> done-text;
+    in property <string> part-id;
+    callback start();
+    callback cancel();
+    callback choose-another();
+    callback define-connectors(string);
+
+    visible: root.step != 0;
+    background: #00000073;
+
+    TouchArea {
+        scroll-event(event) => { accept }
+    }
+
+    keys := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel();
+            }
+            accept
+        }
+    }
+
+    changed step => {
+        if (root.step == 1) {
+            keys.focus();
+        }
+    }
+
+    Rectangle {
+        width: 460px;
+        height: layout.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 - 40px;
+        background: #232428;
+        border-radius: Theme.radius-panel;
+        border-width: 1px;
+        border-color: #ffffff1a;
+
+        layout := VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            Text {
+                text: "Import STEP: " + root.file-name;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                overflow: elide;
+            }
+
+            if root.step == 1: VerticalLayout {
+                spacing: 10px;
+                Field {
+                    label: "Vendor";
+                    SegmentedControl {
+                        floating: false;
+                        compact: true;
+                        items: ["Thorlabs", "MOGLabs", "Toptica", "Other"];
+                        current: root.vendor;
+                        selected(i) => {
+                            root.vendor = i;
+                            root.up-axis = i == 0 ? 0 : 1;
+                        }
+                    }
+                }
+                Field {
+                    label: "Up axis";
+                    SegmentedControl {
+                        floating: false;
+                        compact: true;
+                        items: ["Y", "Z"];
+                        current: root.up-axis;
+                        selected(i) => { root.up-axis = i; }
+                    }
+                }
+                Field {
+                    label: "Part number";
+                    LineEdit { text <=> root.part-number; }
+                }
+                Field {
+                    label: "Name";
+                    LineEdit { text <=> root.part-name; }
+                }
+                Field {
+                    label: "Category";
+                    LineEdit { text <=> root.category; }
+                }
+                Field {
+                    label: "Finish";
+                    SegmentedControl {
+                        floating: false;
+                        compact: true;
+                        segment-width: 96px;
+                        items: ["Anodized black", "Stainless", "Painted"];
+                        current: root.finish;
+                        selected(i) => { root.finish = i; }
+                    }
+                }
+                Text {
+                    text: "The finish is used where the file has no colours.";
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    PillButton { label: "Cancel"; clicked => { root.cancel(); } }
+                    PillButton {
+                        label: "Import";
+                        primary: true;
+                        enabled: root.part-number != "" && root.part-name != "";
+                        clicked => { root.start(); }
+                    }
+                }
+            }
+
+            if root.step == 2: VerticalLayout {
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Spinner { }
+                    Text {
+                        text: root.progress;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    PillButton { label: "Cancel"; clicked => { root.cancel(); } }
+                }
+            }
+
+            if root.step == 3: VerticalLayout {
+                spacing: 12px;
+                Text {
+                    text: root.error;
+                    color: Theme.warning;
+                    font-size: Theme.font-body;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    PillButton { label: "Close"; clicked => { root.cancel(); } }
+                    PillButton { label: "Choose another file"; primary: true; clicked => { root.choose-another(); } }
+                }
+            }
+
+            if root.step == 4: VerticalLayout {
+                spacing: 12px;
+                Text {
+                    text: root.done-text;
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-body;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    PillButton { label: "Define connectors…"; clicked => { root.define-connectors(root.part-id); } }
+                    PillButton { label: "Place"; primary: true; clicked => { root.cancel(); } }
+                }
+            }
+        }
+    }
+}
