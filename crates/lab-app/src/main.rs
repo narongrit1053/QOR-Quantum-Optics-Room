@@ -8,6 +8,7 @@ mod dialogs;
 mod files;
 mod library;
 mod place;
+mod scene;
 mod ui_models;
 
 use std::cell::{Cell, RefCell};
@@ -75,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     bridge::connect_input(&ui, &app);
     controller::connect(&ui, &app, &models);
     library::connect(&ui, &app, &models);
+    scene::connect(&ui, &app, &models);
     controller::refresh_all(&ui, &app.borrow(), &models);
     library::fill(&app.borrow(), &models);
     if !warnings.is_empty() {

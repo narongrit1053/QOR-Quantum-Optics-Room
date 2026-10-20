@@ -86,6 +86,8 @@ pub struct AppState {
     pub timers: Timers,
     pub catalog: Arc<Catalog>,
     pub library: crate::library::LibraryState,
+    /// Scene-tree rows (`(kind, id)`) whose children are hidden.
+    pub scene_collapsed: std::collections::HashSet<(i32, i32)>,
 }
 
 impl AppState {
@@ -109,6 +111,7 @@ impl AppState {
             timers: Timers::default(),
             catalog: Arc::new(Catalog::default()),
             library: Default::default(),
+            scene_collapsed: Default::default(),
         }
     }
 
