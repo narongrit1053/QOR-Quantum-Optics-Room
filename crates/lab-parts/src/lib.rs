@@ -68,6 +68,7 @@ const GENERATORS: &[GeneratorInfo] = &[
     gi("spcm", &[("length", 120.0), ("width", 60.0), ("height", 50.0), ("axis_height", 25.0)]),
     gi("crystal_oven", &[("length", 60.0), ("width", 40.0), ("height", 30.0), ("axis_height", 20.0)]),
     gi("laser_head", &[("length", 200.0), ("width", 80.0), ("height", 60.0), ("axis_height", 40.0)]),
+    gi("riser", &[("length", 100.0), ("width", 75.0), ("height", 25.0)]),
     gi("rack_19in", &[("units", 42.0), ("depth", 800.0)]),
     gi("desk", &[("width", 1500.0), ("depth", 750.0), ("height", 750.0)]),
     gi("shelf", &[("width", 1200.0), ("depth", 400.0), ("thickness", 20.0), ("height", 500.0)]),
@@ -184,6 +185,10 @@ fn build(name: &str, p: &dyn Fn(&str) -> f64) -> Result<PartMesh, GenError> {
             let (l, w, h) = (p("length"), p("width"), p("height"));
             let finish = if name == "laser_head" { GREY } else { BLACK };
             b.cuboid(finish, DVec3::new(-w / 2.0, -l / 2.0, 0.0), DVec3::new(w / 2.0, l / 2.0, h));
+        }
+        "riser" => {
+            let (l, w) = (p("length"), p("width"));
+            b.cuboid(BLACK, DVec3::new(-w / 2.0, -l / 2.0, 0.0), DVec3::new(w / 2.0, l / 2.0, p("height")));
         }
         "rack_19in" => {
             let (h, d) = (p("units") * 44.45 + 100.0, p("depth"));

@@ -293,6 +293,9 @@ export component AppWindow inherits Window {
     in property <int> wizard-optic-kind;
     in property <[string]> wizard-optic-kinds;
     in property <string> wizard-aperture;
+    in property <int> wizard-template;
+    in property <int> wizard-direction;
+    in property <string> wizard-wavelength;
     callback wizard-choose(int);
     callback wizard-pick(string, int);
     callback wizard-field(string, string) -> bool;
@@ -930,6 +933,9 @@ export component AppWindow inherits Window {
                 optic-kind: root.wizard-optic-kind;
                 optic-kinds: root.wizard-optic-kinds;
                 aperture: root.wizard-aperture;
+                template: root.wizard-template;
+                direction: root.wizard-direction;
+                wavelength: root.wizard-wavelength;
                 choose(i) => { root.wizard-choose(i); }
                 pick(id, i) => { root.wizard-pick(id, i); }
                 field(id, t) => { return root.wizard-field(id, t); }

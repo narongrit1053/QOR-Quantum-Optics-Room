@@ -34,7 +34,14 @@ struct Wizard {
     optic_kind: i32,
     aperture: Option<f64>,
     message: String,
+    /// 0 generic, 1 laser head.
+    template: i32,
+    /// Laser head: 0 = clicked face normal, then +X, -X, +Y, -Y.
+    direction: i32,
+    wavelength: Option<f64>,
 }
+
+const DIRECTIONS: [DVec3; 4] = [DVec3::X, DVec3::NEG_X, DVec3::Y, DVec3::NEG_Y];
 
 thread_local! {
     static WIZARD: RefCell<Option<Wizard>> = const { RefCell::new(None) };
@@ -61,6 +68,11 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         with(|wz| match id.as_str() {
             "kind" => wz.hole_kind = i,
             "gender" => wz.gender = i,
+            "template" => {
+                wz.template = i;
+                wz.step = 0;
+            }
+            "direction" => wz.direction = i,
             _ => wz.optic_kind = i,
         });
         refresh(&w);
@@ -138,6 +150,9 @@ pub fn open(ui: &AppWindow, app: &AppState, part_id: &str) {
             optic_kind: 0,
             aperture: None,
             message: String::new(),
+            template: 0,
+            direction: 0,
+            wavelength: None,
         })
     });
     app.send(ViewportRequest::InspectPart(Some(part_id.to_string())));
@@ -152,14 +167,15 @@ pub fn on_part_point(ui: &AppWindow, point: DVec3, normal: DVec3) {
     with(|wz| {
         wz.point = point;
         wz.normal = normal;
-        wz.step = 1;
+        wz.step = if wz.template == 1 { 4 } else { 1 };
+        wz.direction = 0;
         wz.message.clear();
     });
     refresh(&ui.as_weak());
 }
 
 /// LOD0 of a stored GLB, or the generated mesh of a parametric part, merged into one mesh.
-fn part_mesh(def: &PartDef) -> Result<TriMesh, String> {
+pub(crate) fn part_mesh(def: &PartDef) -> Result<TriMesh, String> {
     let mut mesh = TriMesh::default();
     match &def.geometry {
         Geometry::Mesh { asset } => {
@@ -208,6 +224,10 @@ fn field(wz: &mut Wizard, id: &str, text: &str) -> bool {
             Ok(d) if d > 0.0 => wz.diameter = d,
             _ => return false,
         },
+        "wavelength" => match text.parse::<f64>() {
+            Ok(nm) if nm > 0.0 => wz.wavelength = Some(nm),
+            _ => return false,
+        },
         "aperture" if text.is_empty() => wz.aperture = None,
         "aperture" => match text.parse::<f64>() {
             Ok(d) if d > 0.0 => wz.aperture = Some(d),
@@ -247,8 +267,30 @@ fn confirm(wz: &mut Wizard) {
             let name = unique(&wz.def, kind);
             wz.def.optical_ports.push(OpticalPort { name, kind: kind.into(), clear_aperture: wz.aperture, frame });
         }
+        4 => {
+            let Some(nm) = wz.wavelength else {
+                wz.message = "Enter the wavelength first.".into();
+                return;
+            };
+            let z = match wz.direction {
+                0 => wz.normal.normalize_or(DVec3::Y),
+                d => DIRECTIONS[(d - 1).clamp(0, 3) as usize],
+            };
+            let helper = if z.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+            let frame = Frame { origin: wz.point, z, x: z.cross(helper).cross(z).normalize() };
+            let def = &mut wz.def;
+            def.optical_ports.retain(|p| p.name != "output");
+            def.optical_ports.push(OpticalPort { name: "output".into(), kind: "source".into(), clear_aperture: None, frame });
+            def.connectors.retain(|c| c.name != "seat");
+            let seat = Frame { origin: DVec3::ZERO, z: DVec3::NEG_Z, x: DVec3::X };
+            def.connectors.insert(0, ConnectorDef { name: "seat".into(), kind: ConnectorKind::HoleGridSeat, frame: seat });
+            def.category = "lasers/heads".into();
+            def.tags = vec!["laser".into(), "source".into()];
+            def.meta.insert("wavelength_nm".into(), format!("{nm}"));
+        }
         _ => return,
     }
+    wz.message.clear();
     wz.step = 0;
     wz.fit = None;
 }
@@ -295,6 +337,9 @@ fn refresh(ui: &slint::Weak<AppWindow>) {
         ui.set_wizard_gender(wz.gender);
         ui.set_wizard_diameter(format!("{:.2}", wz.diameter).into());
         ui.set_wizard_optic_kind(wz.optic_kind);
+        ui.set_wizard_template(wz.template);
+        ui.set_wizard_direction(wz.direction);
+        ui.set_wizard_wavelength(wz.wavelength.map(|w| format!("{w}")).unwrap_or_default().into());
         ui.set_wizard_aperture(wz.aperture.map(|a| format!("{a:.2}")).unwrap_or_default().into());
     });
 }
