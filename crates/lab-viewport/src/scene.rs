@@ -414,7 +414,7 @@ fn spawn_node(
     parent
 }
 
-fn finish_material(finish: &Finish) -> StandardMaterial {
+pub(crate) fn finish_material(finish: &Finish) -> StandardMaterial {
     match finish {
         Finish::AnodizedBlack => StandardMaterial {
             base_color: Color::srgb_u8(29, 30, 33),

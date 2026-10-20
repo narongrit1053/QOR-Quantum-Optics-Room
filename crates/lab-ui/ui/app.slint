@@ -667,10 +667,17 @@ export component AppWindow inherits Window {
                         for item in root.library: HorizontalLayout {
                             spacing: 8px;
                             padding-left: item.header ? 4px : 16px;
-                            Glyph {
+                            if !item.has-thumb: Glyph {
                                 letter: item.letter;
                                 tint: item.tint;
                                 y: 4px;
+                            }
+                            // POLA-61: the part's offscreen-rendered thumbnail.
+                            if item.has-thumb: Image {
+                                source: item.thumb;
+                                width: 28px;
+                                height: 28px;
+                                image-fit: contain;
                             }
                             Rectangle {
                                 horizontal-stretch: 1;

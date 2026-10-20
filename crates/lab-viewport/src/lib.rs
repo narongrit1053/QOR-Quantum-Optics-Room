@@ -31,6 +31,7 @@ mod platform;
 mod room;
 mod scene;
 mod sync;
+mod thumbnail;
 
 use std::sync::Arc;
 
@@ -146,6 +147,9 @@ pub enum ViewportRequest {
     Isolate(Option<PlatformId>),
     /// POLA-52. Windows "reduce animations": camera moves jump instead of animating.
     SetReduceMotion(bool),
+    /// POLA-61. Render catalog part `part` offscreen (256×256, transparent background, 3/4 view)
+    /// and write a PNG to `path`. Queued; one at a time.
+    RenderThumbnail { part: String, path: std::path::PathBuf },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -227,6 +231,8 @@ pub enum ViewportEvent {
     /// POLA-54. Overlay items for the Top camera, sent after each frame in which the Top camera or
     /// the document changed. Empty when no camera is in Top mode.
     Overlay(Vec<OverlayItem>),
+    /// POLA-61. The PNG for `part` is written (`ok` false on failure; the app skips it then).
+    ThumbnailReady { part: String, path: std::path::PathBuf, ok: bool },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -267,6 +273,7 @@ pub(crate) enum FrameRequest {
     SetBlueprint(bool),
     Isolate(Option<PlatformId>),
     SetReduceMotion(bool),
+    RenderThumbnail(String, std::path::PathBuf),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).
