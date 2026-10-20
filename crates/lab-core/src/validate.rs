@@ -10,7 +10,7 @@ use crate::limits::{
     LEG_SIZE, MARGIN_MAX, MAX_COORD, MAX_ID, MAX_LATTICE_AXIS, MAX_LATTICE_POINTS, MAX_ZONES, NAME_MAX_CHARS, PITCH,
     PITCH_CLEARANCE, THICKNESS, TOP_HEIGHT_MAX,
 };
-use crate::model::{Document, Platform, Support};
+use crate::model::{Document, Node, Parent, Platform, PlatformId, Support};
 use crate::outline::OutlineError;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -31,6 +31,64 @@ pub enum PlatformError {
     Grid(GridError),
     #[error("Legs: size must be 10–500 mm and the inset at least half the size")]
     Legs,
+    #[error("Isolators: size must be 10–500 mm and the inset at least half the size")]
+    Isolators,
+    #[error("Standoff must be between 0 and 5000 mm")]
+    Standoff,
+}
+
+/// Why a node's parent chain is broken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParentProblem {
+    UnknownPlatform,
+    UnknownNode,
+    Cycle,
+}
+
+impl Document {
+    /// Walks `node`'s parent chain through `extra` (nodes about to be added) and the document.
+    /// `extra_platform` counts as existing (a platform about to be restored).
+    pub(crate) fn parent_problem(
+        &self,
+        extra: &[Node],
+        extra_platform: Option<PlatformId>,
+        node: &Node,
+    ) -> Option<ParentProblem> {
+        let find = |id| extra.iter().find(|n| n.id == id).or_else(|| self.node(id));
+        let mut at = node;
+        for _ in 0..=self.nodes.len() + extra.len() {
+            match at.parent {
+                Parent::Room => return None,
+                Parent::Platform(p) => {
+                    let known = extra_platform == Some(p) || self.platform(p).is_some();
+                    return (!known).then_some(ParentProblem::UnknownPlatform);
+                }
+                Parent::Node(id) if id == node.id => return Some(ParentProblem::Cycle),
+                Parent::Node(id) => match find(id) {
+                    Some(n) => at = n,
+                    None => return Some(ParentProblem::UnknownNode),
+                },
+            }
+        }
+        Some(ParentProblem::Cycle)
+    }
+
+    /// Whether `platform`'s `OnPlatform` chain reaches a platform it starts from (with
+    /// `platform` replacing the stored one of the same id).
+    pub(crate) fn platform_cycle(&self, platform: &Platform) -> bool {
+        let mut at = platform;
+        for _ in 0..=self.platforms.len() {
+            let Support::OnPlatform { parent, .. } = at.support else { return false };
+            if parent == platform.id {
+                return true;
+            }
+            match self.platform(parent) {
+                Some(p) => at = p,
+                None => return false,
+            }
+        }
+        true
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -173,12 +231,15 @@ impl Platform {
         if let Some(grid) = &self.hole_grid {
             validate_grid(grid, self.outline.bounds()).map_err(PlatformError::Grid)?;
         }
-        if let Support::Legs { size, inset } = self.support
-            && !(LEG_SIZE.contains(&size) && inset >= size / 2.0 && inset.is_finite())
-        {
-            return Err(PlatformError::Legs);
+        let legs_ok = |size: f64, inset: f64| LEG_SIZE.contains(&size) && inset >= size / 2.0 && inset.is_finite();
+        match self.support {
+            Support::Legs { size, inset } if !legs_ok(size, inset) => Err(PlatformError::Legs),
+            Support::Isolators { size, inset } if !legs_ok(size, inset) => Err(PlatformError::Isolators),
+            Support::OnPlatform { standoff, .. } if !(0.0..=TOP_HEIGHT_MAX).contains(&standoff) => {
+                Err(PlatformError::Standoff)
+            }
+            _ => Ok(()),
         }
-        Ok(())
     }
 }
 
@@ -221,10 +282,24 @@ impl Document {
             if let Err(e) = p.validate() {
                 problems.push(format!("Platform “{}”: {}", p.name, lower_first(&e.to_string())));
             }
+            if let Support::OnPlatform { parent, .. } = p.support {
+                if self.platform(parent).is_none() {
+                    problems.push(format!("Platform “{}” sits on a platform that does not exist", p.name));
+                } else if self.platform_cycle(p) {
+                    problems.push(format!("Platform “{}” is stacked on itself", p.name));
+                }
+            }
         }
         for n in &self.nodes {
-            if self.platform(n.platform).is_none() {
-                problems.push(format!("Part “{}” is on a platform that does not exist", n.name));
+            match self.parent_problem(&[], None, n) {
+                Some(ParentProblem::UnknownPlatform) => {
+                    problems.push(format!("Part “{}” is on a platform that does not exist", n.name));
+                }
+                Some(ParentProblem::UnknownNode) => {
+                    problems.push(format!("Part “{}” is attached to a part that does not exist", n.name));
+                }
+                Some(ParentProblem::Cycle) => problems.push(format!("Part “{}” is attached to itself", n.name)),
+                None => {}
             }
         }
         if problems.is_empty() { Ok(()) } else { Err(problems) }
@@ -378,7 +453,7 @@ mod tests {
                 .to_vec(),
         };
         bad.nodes[0].id = NodeId(bad.nodes[1].id.0);
-        bad.nodes[2].platform = PlatformId(77);
+        bad.nodes[2].parent = Parent::Platform(PlatformId(77));
         bad.room.openings.push(Opening {
             id: OpeningId(1),
             name: "Door 1".into(),

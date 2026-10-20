@@ -130,7 +130,10 @@ mod tests {
         doc.nodes.push(lab_core::Node {
             id: NodeId(1),
             name: "Initial".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: lab_core::model::Shape::Box { size: lab_core::glam::DVec3::ONE },
             finish: lab_core::model::Finish::Stainless,

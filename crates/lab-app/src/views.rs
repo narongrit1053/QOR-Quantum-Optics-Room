@@ -171,7 +171,7 @@ pub fn scene_rows(doc: &Document, selection: Option<SelectionTarget>) -> Vec<Sce
 
     // 2. Platforms and nested nodes
     for p in &doc.platforms {
-        let p_nodes: Vec<&Node> = doc.nodes.iter().filter(|n| n.platform == p.id).collect();
+        let p_nodes: Vec<&Node> = doc.nodes_on(p.id).collect();
         let p_detail = if !p_nodes.is_empty() {
             format!("{}", p_nodes.len())
         } else {
@@ -492,7 +492,7 @@ pub fn platform_view(doc: &Document, p: &Platform, holes: &HoleSet, units: Lengt
         }).collect()
     }).unwrap_or_default();
 
-    let support = match p.support { Support::Legs { .. } => 0, Support::Fixed => 1 };
+    let support = match p.support { Support::Legs { .. } => 0, _ => 1 };
     let support_fields = match p.support {
         Support::Legs { size, inset } => vec![
             EditFieldData {
@@ -512,7 +512,7 @@ pub fn platform_view(doc: &Document, p: &Platform, holes: &HoleSet, units: Lengt
                 invalid: false,
             },
         ],
-        Support::Fixed => Vec::new(),
+        _ => Vec::new(),
     };
 
     let node_count = doc.nodes_on(p.id).count() as i32;
@@ -663,7 +663,7 @@ pub fn room_view(doc: &Document, units: LengthUnit) -> RoomViewData {
 }
 
 pub fn node_view(doc: &Document, node: &Node, holes: Option<&HoleSet>, units: LengthUnit) -> NodeViewData {
-    let platform = doc.platform(node.platform);
+    let platform = doc.root_platform(node.id).and_then(|p| doc.platform(p));
     let hole = holes.and_then(|set| {
         let pt = node.position.truncate();
         let idx = set.nearest(pt)?;
@@ -690,6 +690,7 @@ pub fn node_view(doc: &Document, node: &Node, holes: Option<&HoleSet>, units: Le
             format_length(*length, units),
             units.suffix()
         ),
+        Shape::Part => node.part.clone(),
     };
 
     let finish = match &node.finish {
@@ -1039,7 +1040,10 @@ mod tests {
         doc.nodes.push(Node {
             id: NodeId(10),
             name: "Laser · head".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: Shape::Box { size: DVec3::ONE },
             finish: Finish::Stainless,

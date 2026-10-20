@@ -7,10 +7,12 @@
 use glam::{DQuat, DVec3};
 
 use crate::limits::MAX_ID;
-use crate::model::{Document, Node, NodeId, Platform, PlatformId, Support};
+use crate::model::{Attach, Document, Node, NodeId, Parent, Platform, PlatformId, Support};
+use crate::part::Params;
 use crate::room::Room;
 use crate::selection::SelectionTarget;
-use crate::validate::{PlatformError, RoomError};
+use crate::units::Mm;
+use crate::validate::{ParentProblem, PlatformError, RoomError};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -20,7 +22,15 @@ pub enum Command {
         node: Node,
         index: Option<usize>,
     },
-    RemoveNode(NodeId),
+    /// Removes the nodes and all their descendants.
+    RemoveNodes(Vec<NodeId>),
+    /// Inverse of `RemoveNodes`: each `(index, node)` in ascending index order.
+    RestoreNodes(Vec<(usize, Node)>),
+    /// Adds the nodes in order (parents may be earlier nodes of the list) as one step.
+    PlaceAssembly {
+        nodes: Vec<Node>,
+    },
+    /// §4.3's SetTransform.
     SetPlacement {
         id: NodeId,
         position: DVec3,
@@ -30,11 +40,26 @@ pub enum Command {
         id: NodeId,
         name: String,
     },
+    SetAttach {
+        id: NodeId,
+        parent: Parent,
+        attach: Attach,
+        position: DVec3,
+        rotation: DQuat,
+    },
+    SetParams {
+        id: NodeId,
+        params: Params,
+    },
+    SetLocked {
+        id: NodeId,
+        locked: bool,
+    },
     AddPlatform {
         platform: Box<Platform>,
         index: Option<usize>,
     },
-    /// Removes the platform and every node on it.
+    /// Removes the platform and every node rooted on it. Refused while platforms sit on it.
     RemovePlatform(PlatformId),
     /// Inverse of `RemovePlatform`: the platform at `index`, then each `(index, node)` in
     /// ascending index order.
@@ -70,7 +95,7 @@ impl PlatformAspects {
     pub fn between(old: &Platform, new: &Platform) -> Self {
         let top_height = old.top_height != new.top_height;
         let geometry = old.outline != new.outline || old.thickness != new.thickness;
-        let legs = matches!(new.support, Support::Legs { .. });
+        let legs = matches!(new.support, Support::Legs { .. } | Support::Isolators { .. });
         Self {
             name: old.name != new.name,
             kind: old.kind != new.kind,
@@ -203,6 +228,55 @@ pub enum CommandError {
     /// Not in M1-SPEC §3.7: an id above MAX_ID (ids cross into Slint `int`).
     #[error("id {0} is too large")]
     IdTooLarge(u64),
+    #[error("node {0:?} is attached to a part that does not exist")]
+    UnknownParent(NodeId),
+    /// A node or platform (raw id) would end up attached to itself.
+    #[error("item {0} would be attached to itself")]
+    ParentCycle(u64),
+    #[error("other platforms sit on platform {0:?}")]
+    PlatformHasChildren(PlatformId),
+}
+
+/// Checks the parent chain of each of `nodes` (which may refer to each other).
+fn check_parents(doc: &Document, nodes: &[Node], platform: Option<PlatformId>) -> Result<(), CommandError> {
+    for n in nodes {
+        match doc.parent_problem(nodes, platform, n) {
+            None => {}
+            Some(ParentProblem::UnknownPlatform) => return Err(CommandError::UnknownPlatform(n.id)),
+            Some(ParentProblem::UnknownNode) => return Err(CommandError::UnknownParent(n.id)),
+            Some(ParentProblem::Cycle) => return Err(CommandError::ParentCycle(n.id.0)),
+        }
+    }
+    Ok(())
+}
+
+/// New nodes: unused, unique ids within MAX_ID.
+fn check_new_nodes<'a>(doc: &Document, nodes: impl IntoIterator<Item = &'a Node>) -> Result<(), CommandError> {
+    let mut ids = Vec::new();
+    for n in nodes {
+        if doc.node(n.id).is_some() {
+            return Err(CommandError::DuplicateNode(n.id));
+        }
+        if ids.contains(&n.id) {
+            return Err(CommandError::DuplicateId(n.id.0));
+        }
+        check_new_id(doc, n.id.0)?;
+        ids.push(n.id);
+    }
+    Ok(())
+}
+
+/// An `OnPlatform` support must name an existing platform without forming a loop.
+fn check_stacking(doc: &Document, platform: &Platform) -> Result<(), CommandError> {
+    if let Support::OnPlatform { parent, .. } = platform.support {
+        if parent != platform.id && doc.platform(parent).is_none() {
+            return Err(CommandError::NoSuchPlatform(parent));
+        }
+        if doc.platform_cycle(platform) {
+            return Err(CommandError::ParentCycle(platform.id.0));
+        }
+    }
+    Ok(())
 }
 
 /// A new object's id must be unused and at most MAX_ID.
@@ -222,26 +296,62 @@ impl Command {
     pub fn apply(self, doc: &mut Document) -> Result<(Command, ChangeSet), CommandError> {
         match self {
             Command::AddNode { node, index } => {
-                if doc.node(node.id).is_some() {
-                    return Err(CommandError::DuplicateNode(node.id));
-                }
-                check_new_id(doc, node.id.0)?;
-                if doc.platform(node.platform).is_none() {
-                    return Err(CommandError::UnknownPlatform(node.id));
-                }
+                check_new_nodes(doc, [&node])?;
+                check_parents(doc, std::slice::from_ref(&node), None)?;
                 let id = node.id;
                 let index = index.unwrap_or(doc.nodes.len()).min(doc.nodes.len());
                 doc.nodes.insert(index, node);
                 doc.bump_next_id(id.0);
-                Ok((Command::RemoveNode(id), ChangeSet { nodes_added: vec![id], ..Default::default() }))
+                Ok((Command::RemoveNodes(vec![id]), ChangeSet { nodes_added: vec![id], ..Default::default() }))
             }
-            Command::RemoveNode(id) => {
-                let index = doc.node_index(id).ok_or(CommandError::UnknownNode(id))?;
-                let node = doc.nodes.remove(index);
-                Ok((
-                    Command::AddNode { node, index: Some(index) },
-                    ChangeSet { nodes_removed: vec![id], ..Default::default() },
-                ))
+            Command::RemoveNodes(ids) => {
+                let mut all = Vec::new();
+                for id in ids {
+                    if doc.node(id).is_none() {
+                        return Err(CommandError::UnknownNode(id));
+                    }
+                    for x in std::iter::once(id).chain(doc.descendants(id)) {
+                        if !all.contains(&x) {
+                            all.push(x);
+                        }
+                    }
+                }
+                let mut removed = Vec::new();
+                let mut kept = Vec::with_capacity(doc.nodes.len());
+                for (i, node) in std::mem::take(&mut doc.nodes).into_iter().enumerate() {
+                    if all.contains(&node.id) { removed.push((i, node)) } else { kept.push(node) }
+                }
+                doc.nodes = kept;
+                let changes = ChangeSet { nodes_removed: removed.iter().map(|(_, n)| n.id).collect(), ..Default::default() };
+                Ok((Command::RestoreNodes(removed), changes))
+            }
+            Command::RestoreNodes(mut nodes) => {
+                nodes.sort_by_key(|(i, _)| *i);
+                check_new_nodes(doc, nodes.iter().map(|(_, n)| n))?;
+                for (len, (i, _)) in (doc.nodes.len()..).zip(&nodes) {
+                    if *i > len {
+                        return Err(CommandError::BadIndex);
+                    }
+                }
+                let list: Vec<Node> = nodes.iter().map(|(_, n)| n.clone()).collect();
+                check_parents(doc, &list, None)?;
+                let mut added = Vec::with_capacity(nodes.len());
+                for (i, node) in nodes {
+                    added.push(node.id);
+                    doc.bump_next_id(node.id.0);
+                    doc.nodes.insert(i, node);
+                }
+                Ok((Command::RemoveNodes(added.clone()), ChangeSet { nodes_added: added, ..Default::default() }))
+            }
+            Command::PlaceAssembly { nodes } => {
+                check_new_nodes(doc, &nodes)?;
+                check_parents(doc, &nodes, None)?;
+                let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+                for node in nodes {
+                    doc.bump_next_id(node.id.0);
+                    doc.nodes.push(node);
+                }
+                Ok((Command::RemoveNodes(ids.clone()), ChangeSet { nodes_added: ids, ..Default::default() }))
             }
             Command::SetPlacement { id, position, rotation } => {
                 let node = doc.node_mut(id).ok_or(CommandError::UnknownNode(id))?;
@@ -257,10 +367,53 @@ impl Command {
                 let old = std::mem::replace(&mut node.name, name);
                 Ok((Command::Rename { id, name: old }, node_update(id, changed)))
             }
+            Command::SetAttach { id, parent, attach, position, rotation } => {
+                let node = doc.node(id).ok_or(CommandError::UnknownNode(id))?;
+                match parent {
+                    Parent::Room => {}
+                    Parent::Platform(p) if doc.platform(p).is_none() => return Err(CommandError::UnknownPlatform(id)),
+                    Parent::Platform(_) => {}
+                    Parent::Node(p) if doc.node(p).is_none() => return Err(CommandError::UnknownParent(id)),
+                    Parent::Node(p) if p == id || doc.descendants(id).contains(&p) => {
+                        return Err(CommandError::ParentCycle(id.0));
+                    }
+                    Parent::Node(_) => {}
+                }
+                let inverse = Command::SetAttach {
+                    id,
+                    parent: node.parent,
+                    attach: node.attach.clone(),
+                    position: node.position,
+                    rotation: node.rotation,
+                };
+                let node = doc.node_mut(id).ok_or(CommandError::UnknownNode(id))?;
+                let changed = node.parent != parent
+                    || node.attach != attach
+                    || node.position != position
+                    || node.rotation != rotation;
+                node.parent = parent;
+                node.attach = attach;
+                node.position = position;
+                node.rotation = rotation;
+                Ok((inverse, node_update(id, changed)))
+            }
+            Command::SetParams { id, params } => {
+                let node = doc.node_mut(id).ok_or(CommandError::UnknownNode(id))?;
+                let changed = node.params != params;
+                let old = std::mem::replace(&mut node.params, params);
+                Ok((Command::SetParams { id, params: old }, node_update(id, changed)))
+            }
+            Command::SetLocked { id, locked } => {
+                let node = doc.node_mut(id).ok_or(CommandError::UnknownNode(id))?;
+                let changed = node.locked != locked;
+                let old = std::mem::replace(&mut node.locked, locked);
+                Ok((Command::SetLocked { id, locked: old }, node_update(id, changed)))
+            }
             Command::AddPlatform { platform, index } => {
                 let id = platform.id;
                 check_new_id(doc, id.0)?;
                 platform.validate().map_err(CommandError::InvalidPlatform)?;
+                check_stacking(doc, &platform)?;
                 let index = index.unwrap_or(doc.platforms.len()).min(doc.platforms.len());
                 doc.platforms.insert(index, *platform);
                 doc.bump_next_id(id.0);
@@ -268,11 +421,15 @@ impl Command {
             }
             Command::RemovePlatform(id) => {
                 let index = doc.platform_index(id).ok_or(CommandError::NoSuchPlatform(id))?;
+                if doc.platforms.iter().any(|p| matches!(p.support, Support::OnPlatform { parent, .. } if parent == id)) {
+                    return Err(CommandError::PlatformHasChildren(id));
+                }
+                let on: Vec<NodeId> = doc.nodes_on(id).map(|n| n.id).collect();
                 let platform = doc.platforms.remove(index);
                 let mut nodes = Vec::new();
                 let mut kept = Vec::with_capacity(doc.nodes.len());
                 for (i, node) in std::mem::take(&mut doc.nodes).into_iter().enumerate() {
-                    if node.platform == id {
+                    if on.contains(&node.id) {
                         nodes.push((i, node));
                     } else {
                         kept.push(node);
@@ -302,15 +459,15 @@ impl Command {
                 if index > doc.platforms.len() {
                     return Err(CommandError::BadIndex);
                 }
-                for (len, (i, n)) in (doc.nodes.len()..).zip(&nodes) {
+                for (len, (i, _)) in (doc.nodes.len()..).zip(&nodes) {
                     if *i > len {
                         return Err(CommandError::BadIndex);
                     }
-                    if n.platform != id && doc.platform(n.platform).is_none() {
-                        return Err(CommandError::UnknownPlatform(n.id));
-                    }
                 }
+                let list: Vec<Node> = nodes.iter().map(|(_, n)| n.clone()).collect();
+                check_parents(doc, &list, Some(id))?;
                 platform.validate().map_err(CommandError::InvalidPlatform)?;
+                check_stacking(doc, &platform)?;
                 doc.platforms.insert(index, *platform);
                 let mut added = Vec::with_capacity(nodes.len());
                 for (i, node) in nodes {
@@ -329,6 +486,7 @@ impl Command {
                 let id = platform.id;
                 let index = doc.platform_index(id).ok_or(CommandError::NoSuchPlatform(id))?;
                 platform.validate().map_err(CommandError::InvalidPlatform)?;
+                check_stacking(doc, &platform)?;
                 let old = std::mem::replace(&mut doc.platforms[index], *platform);
                 let new = &doc.platforms[index];
                 let changes = if old == *new {
@@ -362,12 +520,58 @@ impl Command {
         }
     }
 
+    /// Mates `id` to node `parent` (connector `self_conn` of `id` to `parent_conn`); `position`
+    /// and `rotation` are the resulting pose in the parent's frame.
+    #[allow(clippy::too_many_arguments)]
+    pub fn mate(
+        id: NodeId,
+        parent: NodeId,
+        self_conn: impl Into<String>,
+        parent_conn: impl Into<String>,
+        slide: Mm,
+        twist: f64,
+        position: DVec3,
+        rotation: DQuat,
+    ) -> Command {
+        let attach = Attach::Mate { self_conn: self_conn.into(), parent_conn: parent_conn.into(), slide, twist };
+        Command::SetAttach { id, parent: Parent::Node(parent), attach, position, rotation }
+    }
+
+    /// Detaches `id` to its root platform (or the room) as `Attach::Free`; `position` and
+    /// `rotation` are in that frame. Deviation from docs/M2-PLAN.md: takes `doc` to find the root.
+    pub fn unmate(doc: &Document, id: NodeId, position: DVec3, rotation: DQuat) -> Command {
+        let parent = doc.root_platform(id).map_or(Parent::Room, Parent::Platform);
+        Command::SetAttach { id, parent, attach: Attach::Free, position, rotation }
+    }
+
     /// The undo label, computed before the command is applied ("Add Table B", "Edit Room").
     pub fn label(&self, doc: &Document) -> String {
         let node_name = |id: &NodeId| doc.node(*id).map_or_else(|| "Part".to_string(), |n| n.name.clone());
         match self {
             Command::AddNode { node, .. } => format!("Add {}", node.name),
-            Command::RemoveNode(id) => format!("Delete {}", node_name(id)),
+            Command::RemoveNodes(ids) => match ids.as_slice() {
+                [id] => format!("Delete {}", node_name(id)),
+                _ => format!("Delete {} parts", ids.len()),
+            },
+            Command::RestoreNodes(nodes) => match nodes.as_slice() {
+                [(_, n)] => format!("Restore {}", n.name),
+                _ => format!("Restore {} parts", nodes.len()),
+            },
+            Command::PlaceAssembly { nodes } => match nodes.first() {
+                Some(n) if nodes.len() == 1 => format!("Add {}", n.name),
+                _ => format!("Add {} parts", nodes.len()),
+            },
+            Command::SetAttach { id, attach, .. } => {
+                let was_mated = doc.node(*id).is_some_and(|n| matches!(n.attach, Attach::Mate { .. }));
+                match attach {
+                    Attach::Mate { .. } => format!("Mate {}", node_name(id)),
+                    _ if was_mated => format!("Unmate {}", node_name(id)),
+                    _ => format!("Move {}", node_name(id)),
+                }
+            }
+            Command::SetParams { id, .. } => format!("Edit {}", node_name(id)),
+            Command::SetLocked { id, locked: true } => format!("Lock {}", node_name(id)),
+            Command::SetLocked { id, locked: false } => format!("Unlock {}", node_name(id)),
             Command::SetPlacement { id, .. } => format!("Move {}", node_name(id)),
             Command::Rename { id, .. } => format!("Rename {}", node_name(id)),
             Command::AddPlatform { platform, .. } => format!("Add {}", platform.name),
@@ -413,7 +617,7 @@ mod tests {
         let mut history = History::default();
         let id = some_node(&doc);
 
-        let changes = history.execute(&mut doc, Command::RemoveNode(id)).unwrap();
+        let changes = history.execute(&mut doc, Command::RemoveNodes(vec![id])).unwrap();
         assert_eq!(changes.nodes_removed, vec![id]);
         assert!(doc.node(id).is_none());
 
@@ -463,7 +667,7 @@ mod tests {
         let mut doc = demo_document();
         let before = doc.clone();
         let mut history = History::default();
-        let err = history.execute(&mut doc, Command::RemoveNode(NodeId(999_999))).unwrap_err();
+        let err = history.execute(&mut doc, Command::RemoveNodes(vec![NodeId(999_999)])).unwrap_err();
         assert_eq!(err, CommandError::UnknownNode(NodeId(999_999)));
         let duplicate = doc.nodes[0].clone();
         assert!(history.execute(&mut doc, Command::AddNode { node: duplicate, index: None }).is_err());
@@ -526,7 +730,7 @@ mod tests {
         new_node.id = NodeId(doc.next_free_id());
         let changes = round_trip(&doc, Command::AddNode { node: new_node.clone(), index: Some(2) });
         assert_eq!(changes.nodes_added, vec![new_node.id]);
-        round_trip(&doc, Command::RemoveNode(id));
+        round_trip(&doc, Command::RemoveNodes(vec![id]));
         round_trip(&doc, Command::SetPlacement { id, position: DVec3::ONE, rotation: DQuat::from_rotation_z(1.0) });
         round_trip(&doc, Command::Rename { id, name: "Renamed".into() });
 
@@ -574,7 +778,7 @@ mod tests {
         let doc = demo_document();
         let table = doc.platforms[0].clone();
         let node = doc.nodes[0].clone();
-        assert_rejected(&doc, Command::RemoveNode(NodeId(9999)), |e| *e == CommandError::UnknownNode(NodeId(9999)));
+        assert_rejected(&doc, Command::RemoveNodes(vec![NodeId(9999)]), |e| *e == CommandError::UnknownNode(NodeId(9999)));
         assert_rejected(&doc, Command::AddNode { node: node.clone(), index: None }, |e| {
             *e == CommandError::DuplicateNode(node.id)
         });
@@ -585,7 +789,7 @@ mod tests {
         });
         let mut orphan = node.clone();
         orphan.id = NodeId(doc.next_free_id());
-        orphan.platform = PlatformId(4242);
+        orphan.parent = Parent::Platform(PlatformId(4242));
         assert_rejected(&doc, Command::AddNode { node: orphan.clone(), index: None }, |e| {
             *e == CommandError::UnknownPlatform(orphan.id)
         });
@@ -700,7 +904,7 @@ mod tests {
         for k in [0usize, 7, 15, 30] {
             let mut node = doc.nodes[k].clone();
             node.id = NodeId(doc.next_free_id());
-            node.platform = bb_id;
+            node.parent = Parent::Platform(bb_id);
             history.execute(&mut doc, Command::AddNode { node, index: Some(k) }).unwrap();
         }
         let before = doc.clone();
@@ -708,7 +912,7 @@ mod tests {
         assert_eq!(label, "Delete Table A");
         let changes = history.execute(&mut doc, Command::RemovePlatform(table)).unwrap();
         assert_eq!(doc.nodes.len(), 4);
-        assert!(doc.nodes.iter().all(|n| n.platform == bb_id));
+        assert!(doc.nodes.iter().all(|n| n.parent == Parent::Platform(bb_id)));
         assert_eq!(changes.single_target(), None);
         let changes = history.undo(&mut doc).unwrap().unwrap();
         assert_eq!(doc.nodes, before.nodes);
@@ -808,7 +1012,7 @@ mod tests {
         let doc = demo_document();
         let node = &doc.nodes[0];
         let table = &doc.platforms[0];
-        assert_eq!(Command::RemoveNode(node.id).label(&doc), format!("Delete {}", node.name));
+        assert_eq!(Command::RemoveNodes(vec![node.id]).label(&doc), format!("Delete {}", node.name));
         assert_eq!(Command::Rename { id: node.id, name: "x".into() }.label(&doc), format!("Rename {}", node.name));
         assert_eq!(
             Command::SetPlacement { id: node.id, position: DVec3::ZERO, rotation: DQuat::IDENTITY }.label(&doc),
@@ -821,5 +1025,121 @@ mod tests {
         assert_eq!(Command::AddPlatform { platform: Box::new(table.clone()), index: None }.label(&doc), "Add Table A");
         assert_eq!(Command::SetRoom(Box::new(doc.room.clone())).label(&doc), "Edit Room");
         assert_eq!(Command::RemovePlatform(PlatformId(999)).label(&doc), "Delete Platform");
+    }
+
+    // ---- M2: parents, attachments and assemblies ----
+
+    fn part(id: u64, name: &str, parent: Parent, attach: Attach, z: f64) -> Node {
+        Node {
+            id: NodeId(id),
+            name: name.into(),
+            part: format!("thorlabs:{name}"),
+            parent,
+            attach,
+            position: DVec3::new(0.0, 0.0, z),
+            rotation: DQuat::IDENTITY,
+            shape: crate::model::Shape::Part,
+            finish: crate::model::Finish::AnodizedBlack,
+            params: Default::default(),
+            pickable: true,
+            locked: false,
+        }
+    }
+
+    fn mate(self_conn: &str, parent_conn: &str, slide: f64) -> Attach {
+        Attach::Mate { self_conn: self_conn.into(), parent_conn: parent_conn.into(), slide, twist: 0.0 }
+    }
+
+    /// base -> holder -> post -> mount on the demo table.
+    fn stack(doc: &Document) -> Vec<Node> {
+        let first = doc.next_free_id();
+        let table = doc.platforms[0].id;
+        let hole = Attach::Hole { hole: crate::holes::LatticeIndex { i: 3, j: 4 } };
+        vec![
+            part(first, "BA1/M", Parent::Platform(table), hole, 0.0),
+            part(first + 1, "PH50/M", Parent::Node(NodeId(first)), mate("bottom", "top", 0.0), 10.0),
+            part(first + 2, "TR50/M", Parent::Node(NodeId(first + 1)), mate("bottom", "bore", -12.0), 38.0),
+            part(first + 3, "KM100", Parent::Node(NodeId(first + 2)), mate("base_tap", "top", 0.0), 50.0),
+        ]
+    }
+
+    #[test]
+    fn place_assembly_undo_redo() {
+        let mut doc = demo_document();
+        let before = doc.clone();
+        let mut history = History::default();
+        let nodes = stack(&doc);
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        let changes = history.execute(&mut doc, Command::PlaceAssembly { nodes }).unwrap();
+        assert_eq!(changes.nodes_added, ids);
+        assert_eq!(doc.validate(), Ok(()));
+        let after = doc.clone();
+        let table = doc.platforms[0].id;
+        assert_eq!(doc.root_platform(ids[3]), Some(table));
+        assert_eq!(doc.descendants(ids[0]), ids[1..].to_vec());
+        assert_eq!(doc.node_pose(ids[3]).unwrap().0, DVec3::new(0.0, 0.0, 98.0));
+        assert_eq!(doc.nodes_on(table).count(), before.nodes.len() + 4);
+
+        history.undo(&mut doc).unwrap().unwrap();
+        assert!(doc.content_eq(&before));
+        history.redo(&mut doc).unwrap().unwrap();
+        assert!(doc.content_eq(&after));
+
+        // Removing the holder takes the post and the mount with it; undo restores them.
+        let (restore, changes) = Command::RemoveNodes(vec![ids[1]]).apply(&mut doc).unwrap();
+        assert_eq!(changes.nodes_removed, ids[1..].to_vec());
+        restore.apply(&mut doc).unwrap();
+        assert!(doc.content_eq(&after));
+    }
+
+    #[test]
+    fn attach_commands_round_trip() {
+        let mut doc = demo_document();
+        let nodes = stack(&doc);
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        Command::PlaceAssembly { nodes }.apply(&mut doc).unwrap();
+        let unmate = Command::unmate(&doc, ids[2], DVec3::new(5.0, 0.0, 0.0), DQuat::IDENTITY);
+        assert_eq!(unmate.label(&doc), "Unmate TR50/M");
+        round_trip(&doc, unmate);
+        let mate = Command::mate(ids[2], ids[1], "bottom", "bore", -5.0, 0.0, DVec3::ZERO, DQuat::IDENTITY);
+        assert_eq!(mate.label(&doc), "Mate TR50/M");
+        round_trip(&doc, mate);
+        round_trip(&doc, Command::SetLocked { id: ids[0], locked: true });
+        let mut params = crate::part::Params::new();
+        params.insert("length".into(), crate::part::ParamValue::Number(75.0));
+        round_trip(&doc, Command::SetParams { id: ids[2], params });
+        round_trip(&doc, Command::RemoveNodes(vec![ids[0], ids[2]]));
+
+        // A node cannot be attached below itself, nor to a missing parent.
+        let cycle = Command::mate(ids[0], ids[3], "seat", "top", 0.0, 0.0, DVec3::ZERO, DQuat::IDENTITY);
+        assert_rejected(&doc, cycle, |e| *e == CommandError::ParentCycle(ids[0].0));
+        let orphan = Command::mate(ids[0], NodeId(9999), "seat", "top", 0.0, 0.0, DVec3::ZERO, DQuat::IDENTITY);
+        assert_rejected(&doc, orphan, |e| *e == CommandError::UnknownParent(ids[0]));
+        let mut bad = stack(&doc);
+        bad[1].parent = Parent::Node(NodeId(9999));
+        assert_rejected(&doc, Command::PlaceAssembly { nodes: bad }, |e| matches!(e, CommandError::UnknownParent(_)));
+    }
+
+    #[test]
+    fn stacked_platforms() {
+        let mut doc = demo_document();
+        let table = doc.platforms[0].clone();
+        let mut bb = breadboard(&doc, None);
+        bb.position = DVec2::new(100.0, 0.0);
+        bb.rotation_z = 0.0;
+        bb.support = Support::OnPlatform { parent: table.id, standoff: 100.0 };
+        let bb_id = bb.id;
+        Command::AddPlatform { platform: Box::new(bb.clone()), index: None }.apply(&mut doc).unwrap();
+        let (origin, rotation) = doc.platform_pose(bb_id).unwrap();
+        let expected = table.position.extend(table.top_height) + DVec3::new(100.0, 0.0, 100.0 + bb.thickness);
+        assert!(origin.distance(expected) < 1e-9, "{origin}");
+        assert_eq!(rotation, table.rotation_z);
+        assert_rejected(&doc, Command::RemovePlatform(table.id), |e| *e == CommandError::PlatformHasChildren(table.id));
+        let mut looped = table.clone();
+        looped.support = Support::OnPlatform { parent: bb_id, standoff: 10.0 };
+        assert_rejected(&doc, Command::UpdatePlatform { platform: Box::new(looped) }, |e| {
+            *e == CommandError::ParentCycle(table.id.0)
+        });
+        assert_eq!(doc.validate(), Ok(()));
     }
 }

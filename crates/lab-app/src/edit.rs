@@ -867,7 +867,7 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
     if action == "selection.delete" {
         return match cx.selection {
             Some(SelectionTarget::Node(nid)) => Ok(EditOutcome::Command {
-                command: Command::RemoveNode(nid),
+                command: Command::RemoveNodes(vec![nid]),
                 label: "Delete".into(),
                 select: None,
                 fixes: Vec::new(),
@@ -1872,7 +1872,10 @@ mod tests {
         doc.nodes.push(Node {
             id: NodeId(101),
             name: "Laser".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: lab_core::model::Shape::Box { size: DVec3::ONE },
             finish: lab_core::model::Finish::Stainless,
@@ -1912,7 +1915,7 @@ mod tests {
         };
         let res = action_edit(&cx_n, "selection.delete").unwrap();
         assert_eq!(res, EditOutcome::Command {
-            command: Command::RemoveNode(NodeId(101)),
+            command: Command::RemoveNodes(vec![NodeId(101)]),
             label: "Delete".into(),
             select: None,
             fixes: Vec::new(),
@@ -1936,7 +1939,10 @@ mod tests {
         doc.nodes.push(Node {
             id: NodeId(101),
             name: "Laser".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: lab_core::model::Shape::Box { size: DVec3::ONE },
             finish: lab_core::model::Finish::Stainless,
@@ -2006,7 +2012,10 @@ mod tests {
         doc.nodes.push(Node {
             id: NodeId(101),
             name: "Laser".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: lab_core::model::Shape::Box { size: DVec3::ONE },
             finish: lab_core::model::Finish::Stainless,
@@ -2031,7 +2040,10 @@ mod tests {
         doc.nodes.push(Node {
             id: NodeId(101),
             name: "Laser".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: lab_core::model::Shape::Box { size: DVec3::ONE },
             finish: lab_core::model::Finish::Stainless,
@@ -2068,7 +2080,10 @@ mod tests {
         doc.nodes.push(Node {
             id: NodeId(101),
             name: "Laser".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: lab_core::model::Shape::Box { size: DVec3::ONE },
             finish: lab_core::model::Finish::Stainless,
@@ -2093,7 +2108,10 @@ mod tests {
         doc.nodes.push(Node {
             id: NodeId(101),
             name: "Laser".into(),
-            platform: PlatformId(1),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
             part: "Part A".into(),
             shape: lab_core::model::Shape::Box { size: DVec3::ONE },
             finish: lab_core::model::Finish::Stainless,
