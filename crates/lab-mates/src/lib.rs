@@ -1,5 +1,7 @@
 //! Connector compatibility, mate poses and hole snap (DESIGN.md §4.1, docs/M2-PLAN.md).
 
+pub mod solver;
+
 use glam::{DAffine3, DMat3, DQuat, DVec2, DVec3};
 use lab_core::part::{ConnectorKind, Frame, PartDef};
 use lab_core::{HoleSet, LatticeIndex};
