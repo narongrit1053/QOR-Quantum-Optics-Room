@@ -40,11 +40,12 @@ Fix it in the same run, check it once, move on.
 - Build the whole feature in one pass, including its UI wiring, so a user can use it.
 - **Check once:** `cargo build --package lab-app --offline` passes, and the feature works once on its happy path (launch the app, or one unit test for pure logic such as the solver or snap math). No test suites, benchmarks or screenshots; Hardening does that.
 - Do not refactor, rename or tidy code you were not asked to change.
-- Report in **five lines or fewer**: branch and tip commit, the one check and its result, what is not done, defect-log lines you added. Set the issue `done` and stop.
+- Report in **five lines or fewer**: branch and tip commit, the one check and its result, what is not done, defect-log lines you added. End the report with `@Lead Engineer` so the Lead knows it is in. Set the issue `done` (or `blocked`, with the reason) and stop.
 
 ## Lead Engineer
 
 - **Plan issue (stage 1 of each milestone):** write `docs/M<n>-PLAN.md` on `draft`: for each build task, the files it owns, the interfaces other tasks depend on (exact types and function signatures), and what "works" means. Keep it short; engineers implement from it. The engineer on each issue is a default sized to the job; reassign if the plan shows it is harder or easier. Commit the plan and set the plan issue `done`.
+- **Woken by a report @-mention:** if other issues of the same stage are still open, stop without commenting. If the report says `blocked`, decide now (see 'Lead decides alone'). If it was the stage's last issue, go on as below.
 - **A build stage finished:** read the reports only. @-mention Engineer Sonnet on the parent to merge the stage's branches into `draft` and run `cargo build --workspace --offline` once; when it reports success, set the next stage to `todo`. Do not run gates, open the app or review code.
 - **A milestone's last stage finished:** set the parent `done` and set stage 1 of the next milestone to `todo`.
 - No per-task reviews in the First Draft. Do not reopen a finished task for a deferred defect.

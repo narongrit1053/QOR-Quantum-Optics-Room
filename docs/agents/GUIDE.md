@@ -69,7 +69,7 @@ When you finish, comment on your issue with:
 4. Deviations from the spec.
 5. Anything blocked.
 
-Then set the issue to `done` (or `blocked`, with the reason).
+End the comment with `@Lead Engineer` so the Lead knows the report is in. Then set the issue to `done` (or `blocked`, with the reason).
 
 ## Reviews
 
