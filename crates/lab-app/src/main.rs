@@ -8,6 +8,7 @@ mod dialogs;
 mod files;
 mod library;
 mod measure;
+mod overlay;
 mod place;
 mod transform;
 mod stack;

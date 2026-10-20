@@ -110,3 +110,12 @@ export struct PresetRow {
     label: string,
     hint: string,
 }
+
+// A Top-view overlay item (POLA-54), in logical px over the viewport. Labels use x, y and text;
+// dimensions also carry `commands`, the SVG path of the line and its end ticks.
+export struct OverlayItem {
+    x: length,
+    y: length,
+    text: string,
+    commands: string,
+}

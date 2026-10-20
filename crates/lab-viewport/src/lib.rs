@@ -23,6 +23,7 @@ mod isolate;
 mod measure;
 mod mesh;
 mod outline;
+mod overlay;
 mod picking;
 mod place;
 mod platform;
@@ -222,6 +223,17 @@ pub enum ViewportEvent {
     /// POLA-53. Current measurement in the room frame (mm, +Z up); `b` is None while the second
     /// point is not picked yet. `None` = cleared.
     Measured(Option<Measurement>),
+    /// POLA-54. Overlay items for the Top camera, sent after each frame in which the Top camera or
+    /// the document changed. Empty when no camera is in Top mode.
+    Overlay(Vec<OverlayItem>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum OverlayItem {
+    /// Name label anchored at the target's projected origin (node) or top-left corner (platform).
+    Label { target: SelectionTarget, pos: Vec2 },
+    /// Dimension line between two projected points; the app formats `length_mm` in the display unit.
+    Dimension { a: Vec2, b: Vec2, length_mm: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

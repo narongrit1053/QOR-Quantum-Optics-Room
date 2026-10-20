@@ -38,7 +38,7 @@ impl Plugin for MeasurePlugin {
 }
 
 /// A node's origin in the room frame (mm).
-fn node_room_pos(doc: &Document, id: NodeId) -> Option<DVec3> {
+pub(crate) fn node_room_pos(doc: &Document, id: NodeId) -> Option<DVec3> {
     let (pos, _) = doc.node_pose(id)?;
     Some(match doc.root_platform(id).and_then(|p| doc.platform_pose(p)) {
         Some((origin, angle)) => origin + DQuat::from_rotation_z(angle) * pos,

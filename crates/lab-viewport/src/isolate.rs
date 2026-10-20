@@ -11,7 +11,7 @@ use crate::scene::SceneIndex;
 use crate::{FrameRequest, ViewportEvent};
 
 #[derive(Resource, Default)]
-struct Isolated(Option<PlatformId>);
+pub(crate) struct Isolated(pub Option<PlatformId>);
 
 pub(crate) struct IsolatePlugin;
 
@@ -23,7 +23,7 @@ impl Plugin for IsolatePlugin {
 }
 
 /// `root` and every platform whose `OnPlatform` chain reaches it.
-fn kept_platforms(doc: &Document, root: PlatformId) -> BTreeSet<PlatformId> {
+pub(crate) fn kept_platforms(doc: &Document, root: PlatformId) -> BTreeSet<PlatformId> {
     let reaches = |mut id: PlatformId| {
         // Bounded walk: the document forbids loops, but do not trust it with a hang.
         for _ in 0..=doc.platforms.len() {
