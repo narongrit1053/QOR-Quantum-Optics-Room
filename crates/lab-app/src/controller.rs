@@ -341,10 +341,11 @@ fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
             refresh_all(ui, &app.borrow(), models);
         }
         "paste.cancel" => ui.set_paste_target("".into()),
-        "tool.select" | "tool.move" | "tool.rotate" => {
+        "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" => {
             let (index, tool) = match id {
                 "tool.move" => (1, Tool::Move),
                 "tool.rotate" => (2, Tool::Rotate),
+                "tool.measure" => (3, Tool::Measure),
                 _ => (0, Tool::Select),
             };
             ui.set_tool(index);
@@ -412,6 +413,7 @@ fn apply_preference(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiMode
         let walls = match change {
             PreferenceChange::Units(unit) => {
                 a.settings.display_unit = unit;
+                crate::measure::refresh(ui, unit);
                 None
             }
             PreferenceChange::Walls(display) => {

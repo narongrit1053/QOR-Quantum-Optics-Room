@@ -93,6 +93,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     let name = id.and_then(|id| app.session.doc.platform(id)).map(|p| p.name.clone());
                     ui.set_isolated_name(name.unwrap_or_default().into());
                 }
+                ViewportEvent::Measured(m) => crate::measure::on_measured(&ui, &app, m),
                 ViewportEvent::PlaceRequested(request) => {
                     crate::place::on_place_requested(&ui, &app, &models, request);
                 }

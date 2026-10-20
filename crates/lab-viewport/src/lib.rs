@@ -20,6 +20,7 @@ mod gizmo;
 mod hole_material;
 mod host;
 mod isolate;
+mod measure;
 mod mesh;
 mod outline;
 mod picking;
@@ -149,6 +150,8 @@ pub enum Tool {
     Select,
     Move,
     Rotate,
+    /// POLA-53
+    Measure,
 }
 
 /// What a library drag carries.
@@ -214,7 +217,13 @@ pub enum ViewportEvent {
     /// POLA-52. The isolated platform after an `Isolate` request (None = released, also when
     /// the platform was deleted).
     IsolationChanged(Option<PlatformId>),
+    /// POLA-53. Current measurement in the room frame (mm, +Z up); `b` is None while the second
+    /// point is not picked yet. `None` = cleared.
+    Measured(Option<Measurement>),
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Measurement { pub a: bevy::math::DVec3, pub b: Option<bevy::math::DVec3> }
 
 /// Where a dropped item goes. `position`/`rotation` are relative to `parent`, as `Node` stores them.
 #[derive(Clone, Debug, PartialEq)]

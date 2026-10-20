@@ -7,6 +7,7 @@ mod controller;
 mod dialogs;
 mod files;
 mod library;
+mod measure;
 mod place;
 mod transform;
 mod stack;
