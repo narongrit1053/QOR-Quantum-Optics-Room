@@ -374,7 +374,7 @@ fn apply_preference(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiMode
 
 /// Runs a command through the history (edit flow step 5).
 #[allow(clippy::too_many_arguments)]
-fn execute(
+pub(crate) fn execute(
     ui: &AppWindow,
     app: &Rc<RefCell<AppState>>,
     models: &Rc<UiModels>,

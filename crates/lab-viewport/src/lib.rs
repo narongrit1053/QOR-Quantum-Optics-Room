@@ -19,6 +19,7 @@ mod hole_material;
 mod host;
 mod mesh;
 mod picking;
+mod place;
 mod platform;
 mod room;
 mod scene;
@@ -154,6 +155,18 @@ pub enum ViewportEvent {
     HoverChanged(Option<SelectionTarget>),
     /// An item could not be built and was skipped. The text is a complete sentence.
     SceneError(String),
+    /// A library drag was dropped where the item can go.
+    PlaceRequested(PlaceRequest),
+}
+
+/// Where a dropped item goes. `position`/`rotation` are relative to `parent`, as `Node` stores them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaceRequest {
+    pub item: DragItem,
+    pub parent: lab_core::Parent,
+    pub attach: lab_core::Attach,
+    pub position: bevy::math::DVec3,
+    pub rotation: bevy::math::DQuat,
 }
 
 /// Requests that reach the Bevy world for the next update (everything except texture
@@ -168,11 +181,9 @@ pub(crate) enum FrameRequest {
     ApplyChanges(Box<Document>, ChangeSet),
     #[allow(dead_code)] // Read by the wall fade (room.rs, T4c).
     SetWallDisplay(WallDisplay),
-    #[allow(dead_code)] // Placement (place.rs, POLA-43).
     DragPart(PartDrag),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).
-#[allow(dead_code)] // Read by placement (POLA-43).
 #[derive(bevy::prelude::Resource, Default)]
 pub(crate) struct CatalogRes(pub Arc<lab_catalog::Catalog>);

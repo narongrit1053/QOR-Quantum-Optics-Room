@@ -206,6 +206,7 @@ pub fn start(
             app.add_plugins((SendFrameToUiPlugin(texture_tx), ExtractResourcePlugin::<BackBuffer>::default()));
             app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin));
             app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
+            app.add_plugins(crate::place::PlacePlugin);
             app.run();
         })
         .expect("failed to spawn the viewport thread");
@@ -330,11 +331,7 @@ fn run_on_demand(
                 ViewportRequest::SetCatalog(catalog) => {
                     app.world_mut().insert_resource(crate::CatalogRes(catalog));
                 }
-                ViewportRequest::DragPart(drag) => {
-                    // shortcut: log only until POLA-43 builds the ghost and placement.
-                    eprintln!("viewport: drag {drag:?}");
-                    pending.push(FrameRequest::DragPart(drag));
-                }
+                ViewportRequest::DragPart(drag) => pending.push(FrameRequest::DragPart(drag)),
             }
         }
         if !pending.is_empty() {

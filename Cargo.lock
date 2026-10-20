@@ -3815,6 +3815,7 @@ dependencies = [
  "lab-core",
  "lab-file",
  "lab-geom",
+ "lab-parts",
  "lab-ui",
  "lab-viewport",
  "raw-window-handle",
@@ -3899,6 +3900,9 @@ dependencies = [
  "lab-catalog",
  "lab-core",
  "lab-geom",
+ "lab-mates",
+ "lab-parts",
+ "serde_json",
  "wgpu",
 ]
 
