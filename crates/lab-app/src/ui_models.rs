@@ -101,6 +101,9 @@ pub fn scene_row(r: SceneRowData) -> SceneRow {
         depth: r.depth,
         selected: r.selected,
         is_beam: r.is_beam,
+        locked: r.locked,
+        expandable: r.expandable,
+        expanded: r.expanded,
     }
 }
 

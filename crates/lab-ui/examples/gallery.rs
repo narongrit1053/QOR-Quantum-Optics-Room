@@ -265,6 +265,9 @@ fn scene(m: &Models, selected: (i32, i32)) {
         depth,
         selected: (kind, id) == selected,
         is_beam: beam,
+        locked: false,
+        expandable: false,
+        expanded: true,
     };
     sync_vec(
         &m.scene,

@@ -138,7 +138,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
     ui.set_display_unit(unit_index(app.units()));
     ui.set_wall_display(wall_index(app.settings.wall_display));
     ui_models::fill_presets(models, preset_rows(app.units()));
-    ui_models::fill_scene(models, scene_rows(&session.doc, session.selection));
+    ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &app.scene_collapsed));
 }
 
 /// The inspector for the current selection, including every choice property.

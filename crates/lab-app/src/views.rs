@@ -3,7 +3,9 @@
 
 use lab_core::glam::DVec2;
 use lab_core::holes::{ExclusionZone, HoleSet, ZoneShape};
-use lab_core::model::{Document, Finish, Node, Platform, PlatformKind, Shape, Support, Surface};
+use std::collections::HashSet;
+
+use lab_core::model::{Document, Finish, Node, Parent, Platform, PlatformKind, Shape, Support, Surface};
 use lab_core::outline::Outline;
 use lab_core::presets::{PRESETS, PresetGroup};
 use lab_core::room::Room;
@@ -27,6 +29,9 @@ pub struct SceneRowData {
     pub depth: i32,
     pub selected: bool,
     pub is_beam: bool,
+    pub locked: bool,
+    pub expandable: bool,
+    pub expanded: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -159,11 +164,16 @@ pub struct NodeViewData {
     pub edit_fields: Vec<EditFieldData>,
 }
 
-/// Builds the scene tree rows: Room first, platforms, and node groups nested.
-pub fn scene_rows(doc: &Document, selection: Option<SelectionTarget>) -> Vec<SceneRowData> {
+/// Builds the scene tree rows: room, platforms (stacked ones under their parent), nodes by
+/// `Parent` chain. `collapsed` holds the `(kind, id)` of rows whose children are hidden.
+pub fn scene_rows(
+    doc: &Document,
+    selection: Option<SelectionTarget>,
+    collapsed: &HashSet<(i32, i32)>,
+) -> Vec<SceneRowData> {
     let mut rows = Vec::new();
-
-    // 1. Room row
+    let room_children = doc.children(Parent::Room).count() + doc.platforms.len();
+    let room_open = !collapsed.contains(&(2, 0));
     rows.push(SceneRowData {
         kind: 2,
         id: 0,
@@ -172,69 +182,90 @@ pub fn scene_rows(doc: &Document, selection: Option<SelectionTarget>) -> Vec<Sce
         depth: 0,
         selected: selection == Some(SelectionTarget::Room),
         is_beam: false,
+        locked: false,
+        expandable: room_children > 0,
+        expanded: room_open,
     });
-
-    // 2. Platforms and nested nodes
+    if !room_open {
+        return rows;
+    }
+    let cx = SceneCx { doc, selection, collapsed };
+    for n in doc.children(Parent::Room) {
+        cx.node_rows(n, 1, &mut rows);
+    }
+    // Roots: platforms not stacked on another existing platform.
     for p in &doc.platforms {
-        let p_nodes: Vec<&Node> = doc.nodes_on(p.id).collect();
-        let p_detail = if !p_nodes.is_empty() {
-            format!("{}", p_nodes.len())
-        } else {
-            "".into()
-        };
+        let stacked = matches!(p.support, Support::OnPlatform { parent, .. } if doc.platform(parent).is_some());
+        if !stacked {
+            cx.platform_rows(p, 1, &mut rows);
+        }
+    }
+    rows
+}
 
+struct SceneCx<'a> {
+    doc: &'a Document,
+    selection: Option<SelectionTarget>,
+    collapsed: &'a HashSet<(i32, i32)>,
+}
+
+impl SceneCx<'_> {
+    fn platform_rows(&self, p: &Platform, depth: i32, rows: &mut Vec<SceneRowData>) {
+        if depth as usize > self.doc.platforms.len() + 1 {
+            return; // cycle in unvalidated data
+        }
+        let stacked = || {
+            self.doc.platforms.iter().filter(move |q| matches!(q.support, Support::OnPlatform { parent, .. } if parent == p.id))
+        };
+        let nodes = || self.doc.children(Parent::Platform(p.id));
+        let count = self.doc.nodes_on(p.id).count();
+        let open = !self.collapsed.contains(&(1, p.id.0 as i32));
         rows.push(SceneRowData {
             kind: 1,
             id: p.id.0 as i32,
             label: p.name.clone(),
-            detail: p_detail,
-            depth: 0,
-            selected: selection == Some(SelectionTarget::Platform(p.id)),
+            detail: if count > 0 { count.to_string() } else { "".into() },
+            depth,
+            selected: self.selection == Some(SelectionTarget::Platform(p.id)),
             is_beam: false,
+            locked: false,
+            expandable: stacked().next().is_some() || nodes().next().is_some(),
+            expanded: open,
         });
-
-        // Group nodes by "M1 · post" -> "M1"
-        let mut groups: Vec<(&str, Vec<&Node>)> = Vec::new();
-        for node in &p_nodes {
-            let key = node.name.split(" · ").next().unwrap_or(&node.name);
-            match groups.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, members)) => members.push(node),
-                None => groups.push((key, vec![node])),
+        if open {
+            for q in stacked() {
+                self.platform_rows(q, depth + 1, rows);
             }
-        }
-
-        for (key, members) in groups {
-            let head = members.iter().find(|n| n.name == key).copied();
-            let is_beam = members.iter().all(|n| matches!(n.finish, Finish::Beam { .. }));
-            let head_id = head.or(members.first().copied()).map(|n| n.id);
-            let head_selected = head.is_some() && head.map(|n| SelectionTarget::Node(n.id)) == selection;
-
-            rows.push(SceneRowData {
-                kind: 0,
-                id: head_id.map_or(-1, |id| id.0 as i32),
-                label: key.into(),
-                detail: if members.len() > 1 { format!("{}", members.len()) } else { "".into() },
-                depth: 1,
-                selected: head_selected,
-                is_beam,
-            });
-
-            for node in members.iter().filter(|n| n.name != key) {
-                let sub_label = node.name.split(" · ").nth(1).unwrap_or(&node.name);
-                rows.push(SceneRowData {
-                    kind: 0,
-                    id: node.id.0 as i32,
-                    label: sub_label.into(),
-                    detail: "".into(),
-                    depth: 2,
-                    selected: selection == Some(SelectionTarget::Node(node.id)),
-                    is_beam: matches!(node.finish, Finish::Beam { .. }),
-                });
+            for n in nodes() {
+                self.node_rows(n, depth + 1, rows);
             }
         }
     }
 
-    rows
+    fn node_rows(&self, n: &Node, depth: i32, rows: &mut Vec<SceneRowData>) {
+        if depth as usize > self.doc.nodes.len() + self.doc.platforms.len() + 2 {
+            return; // cycle in unvalidated data
+        }
+        let kids = || self.doc.children(Parent::Node(n.id));
+        let open = !self.collapsed.contains(&(0, n.id.0 as i32));
+        rows.push(SceneRowData {
+            kind: 0,
+            id: n.id.0 as i32,
+            label: n.name.clone(),
+            detail: "".into(),
+            depth,
+            selected: self.selection == Some(SelectionTarget::Node(n.id)),
+            is_beam: matches!(n.finish, Finish::Beam { .. }),
+            locked: n.locked,
+            expandable: kids().next().is_some(),
+            expanded: open,
+        });
+        if open {
+            for c in kids() {
+                self.node_rows(c, depth + 1, rows);
+            }
+        }
+    }
 }
 
 pub fn platform_view(doc: &Document, p: &Platform, holes: &HoleSet, units: LengthUnit) -> PlatformViewData {
@@ -1135,13 +1166,14 @@ mod tests {
             rotation: DQuat::IDENTITY,
             pickable: true,
         });
-        let rows = scene_rows(&doc, None);
+        let rows = scene_rows(&doc, None, &HashSet::new());
         assert_eq!(rows[0].kind, 2); // Room first
         assert_eq!(rows[0].label, "Room");
         assert_eq!(rows[1].kind, 1); // Platform next
         assert_eq!(rows[1].label, "Table 1");
         assert_eq!(rows[2].kind, 0); // Nested node
-        assert_eq!(rows[2].depth, 1);
+        assert_eq!(rows[1].depth, 1);
+        assert_eq!(rows[2].depth, 2);
     }
 
     // V4: wall_choice_label compass.

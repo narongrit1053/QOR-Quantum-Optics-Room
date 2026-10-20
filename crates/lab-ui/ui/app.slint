@@ -19,6 +19,99 @@ export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, Do
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus } from "fields.slint";
 
+// One scene-tree row: chevron, label (double-click to rename), lock and delete on hover.
+component SceneItem inherits Rectangle {
+    in property <SceneRow> item;
+    callback clicked();
+    callback renamed(string);
+    callback action(string);
+    property <bool> renaming;
+    property <bool> hot: row-touch.has-hover || lock-btn.hovered || del-btn.hovered;
+
+    height: 28px;
+    border-radius: 7px;
+    background: item.selected ? Theme.accent-soft : root.hot ? Theme.control-hover : transparent;
+
+    row-touch := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { if (item.kind != 2) { root.renaming = true; } }
+    }
+    HorizontalLayout {
+        padding-left: 4px + item.depth * 16px;
+        padding-right: 4px;
+        spacing: 4px;
+        Rectangle {
+            width: 16px;
+            if item.expandable: Text {
+                text: item.expanded ? "▾" : "▸";
+                color: Theme.text-tertiary;
+                font-size: Theme.font-caption;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            if item.expandable: TouchArea { clicked => { root.action("toggle"); } }
+        }
+        if item.is-beam: Rectangle {
+            width: 10px;
+            Rectangle { width: 10px; height: 2px; border-radius: 1px; background: Theme.beam; }
+        }
+        if !root.renaming: Text {
+            text: item.label;
+            color: item.depth > 1 ? Theme.text-secondary : Theme.text;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if root.renaming: Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.control-bg;
+            border-radius: 5px;
+            edit := TextInput {
+                x: 4px;
+                width: parent.width - 8px;
+                text: item.label;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                vertical-alignment: center;
+                single-line: true;
+                init => { self.focus(); self.select-all(); EditState.focused-id = "scene.rename"; EditState.text-focused = true; }
+                accepted => { root.renaming = false; root.renamed(self.text); }
+                changed has-focus => {
+                    if (!self.has-focus && root.renaming) { root.renaming = false; root.renamed(self.text); }
+                    if (!self.has-focus) { EditState.focused-id = ""; EditState.text-focused = false; }
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) { self.text = item.label; root.renaming = false; return accept; }
+                    reject
+                }
+            }
+        }
+        if item.detail != "" && !root.hot: Text {
+            text: item.detail;
+            color: Theme.text-tertiary;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+        }
+        lock-btn := IconButton {
+            visible: item.kind == 0 && (root.hot || item.locked);
+            icon: item.locked ? "🔒" : "🔓";
+            size: 22px;
+            icon-size: 12px;
+            active: item.locked;
+            clicked => { root.action(item.locked ? "unlock" : "lock"); }
+        }
+        del-btn := IconButton {
+            visible: item.kind != 2 && root.hot;
+            icon: "✕";
+            size: 22px;
+            icon-size: 11px;
+            destructive: true;
+            clicked => { root.action("delete"); }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     // ── Viewport (M0) ─────────────────────────────────────────────────────────
     in property <image> viewport-texture;
@@ -153,6 +246,8 @@ export component AppWindow inherits Window {
     callback sheet-button(int);
     callback toast-action-clicked();
     callback scene-row-clicked(int /* kind */, int /* id */);
+    callback scene-row-renamed(int /* kind */, int /* id */, string);
+    callback scene-row-action(int /* kind */, int /* id */, string /* "delete" | "lock" | "unlock" | "toggle" */);
     // M0 viewport input. kind: 0 down, 1 up, 2 move, 3 cancel. button: 0 left, 1 right, 2 middle, 3 other.
     callback viewport-pointer(int, int, length, length, bool, bool, bool);
     callback viewport-scroll(length, length, length, length);
@@ -568,13 +663,11 @@ export component AppWindow inherits Window {
                 }
                 ListView {
                     vertical-stretch: 1;
-                    for row in root.scene: ListRow {
-                        label: row.label;
-                        detail: row.detail;
-                        depth: row.depth;
-                        selected: row.selected;
-                        marker: row.is-beam ? Theme.beam : transparent;
+                    for row in root.scene: SceneItem {
+                        item: row;
                         clicked => { root.scene-row-clicked(row.kind, row.id); }
+                        renamed(text) => { root.scene-row-renamed(row.kind, row.id, text); }
+                        action(a) => { root.scene-row-action(row.kind, row.id, a); }
                     }
                 }
             }

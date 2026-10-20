@@ -87,6 +87,8 @@ pub struct AppState {
     pub catalog: Arc<Catalog>,
     pub library: crate::library::LibraryState,
     pub stack: crate::stack::StackState,
+    /// Scene-tree rows (`(kind, id)`) whose children are hidden.
+    pub scene_collapsed: std::collections::HashSet<(i32, i32)>,
 }
 
 impl AppState {
@@ -111,6 +113,7 @@ impl AppState {
             catalog: Arc::new(Catalog::default()),
             library: Default::default(),
             stack: Default::default(),
+            scene_collapsed: Default::default(),
         }
     }
 

@@ -10,6 +10,7 @@ mod library;
 mod place;
 mod transform;
 mod stack;
+mod scene;
 mod ui_models;
 
 use std::cell::{Cell, RefCell};
@@ -78,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     controller::connect(&ui, &app, &models);
     library::connect(&ui, &app, &models);
     stack::connect(&ui, &app);
+    scene::connect(&ui, &app, &models);
     controller::refresh_all(&ui, &app.borrow(), &models);
     library::fill(&app.borrow(), &models);
     stack::fill(&ui, &mut app.borrow_mut());
