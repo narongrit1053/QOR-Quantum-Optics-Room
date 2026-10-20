@@ -159,8 +159,10 @@ export component AppWindow inherits Window {
     in property <string> selection-detail;
     in property <[InspectorField]> inspector;
     in property <[EditField]> node-fields;
-    // Pointer tool: 0 select, 1 move, 2 rotate.
+    // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure.
     in-out property <int> tool;
+    // Measure readout; empty hides the chip.
+    in property <string> measure-text;
 
     // ── Platform inspector ───────────────────────────────────────────────────
     in property <string> platform-name;
@@ -425,6 +427,15 @@ export component AppWindow inherits Window {
                     if (event.text == "p" || event.text == "P" || event.text == "3") {
                         root.view-mode = 0;
                         root.view-mode-requested(0);
+                        return accept;
+                    }
+                    if (event.text == "m" || event.text == "M") {
+                        root.action("tool.measure");
+                        return accept;
+                    }
+                    // Esc in the measure tool re-selects it, which clears the measurement.
+                    if (event.text == Key.Escape && root.tool == 3) {
+                        root.action("tool.measure");
                         return accept;
                     }
                     if (event.text == Key.Escape) {
@@ -912,7 +923,8 @@ export component AppWindow inherits Window {
                 }
                 if !toolbar.compact: ToolButton {
                     label: "Measure";
-                    available: false;
+                    active: root.tool == 3;
+                    clicked => { root.action("tool.measure"); }
                 }
                 Rectangle {
                     width: 9px;
@@ -972,6 +984,28 @@ export component AppWindow inherits Window {
                 Text {
                     text: root.gpu;
                     color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // ── Measure readout (bottom centre, above the toolbar) ───────────────
+        if root.tool == 3 && root.measure-text != "": Rectangle {
+            x: toolbar.x + (toolbar.width - self.width) / 2;
+            y: toolbar.y - self.height - 12px;
+            height: 26px;
+            width: measure-row.preferred-width;
+            border-radius: 13px;
+            background: Theme.panel-bg;
+            border-width: 1px;
+            border-color: Theme.panel-border;
+            measure-row := HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                Text {
+                    text: root.measure-text;
+                    color: Theme.text;
                     font-size: Theme.font-caption;
                     vertical-alignment: center;
                 }

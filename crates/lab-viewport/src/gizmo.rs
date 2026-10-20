@@ -81,7 +81,7 @@ pub(crate) fn handles(doc: &Document, catalog: &Catalog, node: &Node, tool: Tool
     }
     let mate = mate_frames(doc, catalog, node);
     match tool {
-        Tool::Select => Vec::new(),
+        Tool::Select | Tool::Measure => Vec::new(),
         Tool::Move => match node.parent {
             Parent::Node(_) => match (&node.attach, mate) {
                 (Attach::Mate { .. }, Some((parent, _, range))) if range.0 < range.1 && parent.z.length() > 0.0 => {
