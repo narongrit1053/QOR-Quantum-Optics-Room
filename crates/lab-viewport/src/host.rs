@@ -182,6 +182,7 @@ pub fn start(
                 .init_resource::<TargetSize>()
                 .add_systems(First, apply_render_target)
                 .add_systems(Last, count_down_settle_frames);
+            crate::glb::register_sources(&mut app);
             app.add_plugins(
                 DefaultPlugins
                     .build()
@@ -205,7 +206,7 @@ pub fn start(
                     }),
             );
             app.add_plugins((SendFrameToUiPlugin(texture_tx), ExtractResourcePlugin::<BackBuffer>::default()));
-            app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin));
+            app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin));
             app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
             app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin));
             app.run();
@@ -278,6 +279,7 @@ fn run_on_demand(
     let mut animating = false;
     // Set after a reduced-resolution frame: when motion was last seen.
     let mut reduced_since: Option<Instant> = None;
+    let mut loading = false;
 
     loop {
         // Wait for work unless a frame is due and a texture is free to render it into. After a
@@ -288,6 +290,20 @@ fn run_on_demand(
         } else if let Some(since) = reduced_since.filter(|_| !free.is_empty()) {
             match recv_until(requests, since + SETTLE) {
                 Ok(request) => request,
+                Err(()) => return,
+            }
+        } else if loading {
+            // A GLB is loading: tick the main schedule (no rendering) until its events wake a frame.
+            match recv_until(requests, Instant::now() + LOAD_POLL) {
+                Ok(Some(request)) => Some(request),
+                Ok(None) => {
+                    let world = app.world_mut();
+                    world.run_schedule(Main);
+                    world.clear_trackers();
+                    loading = world.resource::<crate::glb::GlbLoading>().0;
+                    dirty = world.resource::<RedrawState>().keep_alive;
+                    None
+                }
                 Err(()) => return,
             }
         } else {
@@ -378,6 +394,7 @@ fn run_on_demand(
         animating = std::mem::take(&mut redraw.moving);
         // A few warm-up frames let GPU resources created at startup settle.
         dirty = keep_alive || animating || frames_rendered < WARMUP_FRAMES;
+        loading = world.resource::<crate::glb::GlbLoading>().0;
         if scale < 1.0 {
             reduced_since = Some(Instant::now());
         }
@@ -385,6 +402,9 @@ fn run_on_demand(
         events.send(ViewportEvent::FrameReady { frames_rendered });
     }
 }
+
+/// How often the main schedule is ticked while a GLB loads.
+const LOAD_POLL: Duration = Duration::from_millis(30);
 
 /// How long motion must stop before a full-resolution frame replaces the reduced one.
 const SETTLE: Duration = Duration::from_millis(120);

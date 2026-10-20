@@ -221,6 +221,18 @@ pub fn user_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("LabSetup").join("library"))
 }
 
+/// The stored GLB for `blake3:<hex>`: the user library first, then the built-in one.
+pub fn mesh_path(asset: &str) -> Option<(Source, PathBuf)> {
+    // The hex check keeps a hand-edited asset id from reaching outside `meshes/`.
+    let hex = asset.strip_prefix("blake3:").filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))?;
+    let file = format!("meshes/{hex}.glb");
+    user_dir()
+        .map(|d| (Source::User, d.join(&file)))
+        .into_iter()
+        .chain([(Source::BuiltIn, builtin_dir().join(&file))])
+        .find(|(_, p)| p.is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

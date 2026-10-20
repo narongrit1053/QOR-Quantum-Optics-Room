@@ -130,6 +130,7 @@ pub(crate) struct SceneAssets<'w> {
     images: ResMut<'w, Assets<Image>>,
     catalog: Res<'w, CatalogRes>,
     part_meshes: ResMut<'w, PartMeshes>,
+    server: Res<'w, AssetServer>,
 }
 
 /// Bevy meshes of generated parts, one handle per piece, keyed by the `Arc<PartMesh>` pointer
@@ -356,6 +357,7 @@ fn spawn_node(
         ..default()
     };
     let meshes = &mut assets.meshes;
+    let mut glb_asset = None;
     let pieces: Vec<(Finish, Handle<Mesh>)> = match &node.shape {
         // Document Y maps to render −Z, so box depth and height swap places.
         Shape::Box { size } => vec![(
@@ -365,6 +367,10 @@ fn spawn_node(
         // Bevy cylinders run along local Y, which is the document's local Z after conversion.
         Shape::Cylinder { radius, length } => {
             vec![(node.finish.clone(), meshes.add(Cylinder::new(*radius as f32 * MM, *length as f32 * MM)))]
+        }
+        Shape::Part if let Some(Geometry::Mesh { asset }) = assets.catalog.0.get(&node.part).map(|d| &d.geometry) => {
+            glb_asset = Some(asset.clone());
+            Vec::new()
         }
         Shape::Part => match part_mesh(&assets.catalog.0, &node.part, &node.params) {
             Ok(part) => assets.part_meshes.pieces(meshes, &part),
@@ -381,6 +387,11 @@ fn spawn_node(
         parent.insert(ChildOf(root));
     }
     let parent = parent.id();
+    if let Some(asset) = glb_asset
+        && let Err(error) = crate::glb::spawn_glb(commands, &assets.server, parent, &asset, node.id, node.pickable)
+    {
+        warn!("“{}” is not drawn: {error}", node.name);
+    }
     for (finish, mesh) in pieces {
         let material = finish_material(&finish);
         let base_color = material.base_color;

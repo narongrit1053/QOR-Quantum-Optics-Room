@@ -51,6 +51,8 @@ bevy = { version = "=0.20.0", default-features = false, features = [
     "bevy_gizmos_render",
     "tonemapping_luts",
     "zstd_rust",
+    "bevy_gltf",
+    "reflect_auto_register",
 ] }
 wgpu = "30"
 async-channel = "2"
