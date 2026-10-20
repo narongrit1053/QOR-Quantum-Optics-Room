@@ -65,11 +65,11 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         }
     });
 
-    // POLA-60 connects this to the connector wizard; until then it only closes the dialog.
-    let w = ui.as_weak();
-    ui.on_import_define_connectors(move |_id| {
+    let (w, a) = (ui.as_weak(), app.clone());
+    ui.on_import_define_connectors(move |id| {
         if let Some(ui) = w.upgrade() {
             ui.set_import_step(0);
+            crate::wizard::open(&ui, &a.borrow(), &id);
         }
     });
 }
@@ -200,6 +200,7 @@ fn finish(ui: &AppWindow, message: Result<(String, String, String), String>) {
                     // Shows the new part: its group expanded.
                     a.library.collapsed.remove(category.split('/').next().unwrap_or(""));
                     library::reload_catalog(&mut a, models);
+                    crate::thumbs::render(&a, &id);
                     controller::show_toast(ui, &a, &format!("Imported {id}"), false);
                 }
             });

@@ -3,7 +3,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use lab_core::glam::DVec3;
 use lab_core::part::{ConnectorDef, ConnectorKind, Frame, Gender, Geometry, OpticalPort, PartDef};
@@ -15,6 +14,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::app_state::AppState;
 use crate::controller::show_toast;
+use crate::{library, thumbs};
 use crate::ui_models::UiModels;
 
 const OPTIC_KINDS: [&str; 8] = ["mirror", "lens", "splitter", "waveplate", "source", "detector", "dump", "fiber"];
@@ -315,17 +315,8 @@ fn save(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
         refresh(&ui.as_weak());
         return;
     }
-    // shortcut: reloads here; switch to `library::reload_catalog` (POLA-59) once merged.
-    {
-        let mut a = app.borrow_mut();
-        let (catalog, warnings) = lab_catalog::Catalog::load_default();
-        for w in &warnings {
-            eprintln!("library: {}: {}", w.path.display(), w.message);
-        }
-        a.catalog = Arc::new(catalog);
-        a.send(ViewportRequest::SetCatalog(a.catalog.clone()));
-        crate::library::fill(&a, models);
-    }
+    library::reload_catalog(&mut app.borrow_mut(), models);
+    thumbs::render(&app.borrow(), &def.id);
     let a = app.borrow();
     close(ui, &a);
     show_toast(ui, &a, &format!("Saved the connectors of {}.", def.name), false);

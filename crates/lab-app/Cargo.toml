@@ -24,7 +24,6 @@ lab-file.workspace = true
 lab-import.workspace = true
 lab-viewport.workspace = true
 lab-ui.workspace = true
-lab-import.workspace = true
 slint.workspace = true
 async-channel.workspace = true
 serde_json.workspace = true
