@@ -9,7 +9,8 @@ export component WizardPanel inherits VerticalLayout {
     in property <string> title;
     // One line per connector or optical port.
     in property <[string]> rows;
-    // 0 = waiting for a click, 1 = "hole or face?", 2 = hole form, 3 = optical face form.
+    // 0 = waiting for a click, 1 = "hole or face?", 2 = hole form, 3 = optical face form,
+    // 4 = laser head form (beam exit clicked).
     in property <int> step;
     in property <string> message;
     in property <int> hole-kind;      // 0 thread, 1 bore, 2 optic bore
@@ -19,6 +20,9 @@ export component WizardPanel inherits VerticalLayout {
     in property <int> optic-kind;     // index into optic-kinds
     in property <[string]> optic-kinds;
     in property <string> aperture;
+    in property <int> template;       // 0 generic, 1 laser head
+    in property <int> direction;      // 0 face normal, 1 +X, 2 -X, 3 +Y, 4 -Y
+    in property <string> wavelength;
     callback choose(int /* 0 hole, 1 optical face */);
     callback pick(string /* id */, int);
     callback field(string /* id */, string /* text */) -> bool;
@@ -37,6 +41,12 @@ export component WizardPanel inherits VerticalLayout {
         font-size: Theme.font-title;
         font-weight: 600;
         overflow: elide;
+    }
+    SegmentedControl {
+        items: ["Generic", "Laser head"];
+        current: root.template;
+        floating: false;
+        selected(i) => { root.pick("template", i); }
     }
     SectionHeader { text: "DEFINED"; }
     if root.rows.length == 0: Text {
@@ -63,9 +73,9 @@ export component WizardPanel inherits VerticalLayout {
         }
     }
 
-    SectionHeader { text: root.step == 0 ? "ADD" : root.step == 1 ? "WHAT IS HERE?" : root.step == 2 ? "HOLE" : "OPTICAL FACE"; }
+    SectionHeader { text: root.step == 0 ? "ADD" : root.step == 1 ? "WHAT IS HERE?" : root.step == 2 ? "HOLE" : root.step == 3 ? "OPTICAL FACE" : "LASER HEAD"; }
     if root.step == 0: Text {
-        text: "Click a hole or an optical face on the part.";
+        text: root.template == 1 ? "Click the beam exit point on the part." : "Click a hole or an optical face on the part.";
         color: Theme.text-secondary;
         font-size: Theme.font-body;
         wrap: word-wrap;
@@ -120,6 +130,24 @@ export component WizardPanel inherits VerticalLayout {
             id: "aperture";
             value: root.aperture;
             unit: "mm";
+            committed(i, t) => { return root.field(i, t); }
+        }
+    }
+    if root.step == 4: VerticalLayout {
+        spacing: 8px;
+        Text { text: "Beam direction"; color: Theme.text-secondary; font-size: Theme.font-body; }
+        SegmentedControl {
+            items: ["Face normal", "+X", "−X", "+Y", "−Y"];
+            current: root.direction;
+            floating: false;
+            compact: true;
+            selected(i) => { root.pick("direction", i); }
+        }
+        LabeledField {
+            label: "Wavelength";
+            id: "wavelength";
+            value: root.wavelength;
+            unit: "nm";
             committed(i, t) => { return root.field(i, t); }
         }
     }

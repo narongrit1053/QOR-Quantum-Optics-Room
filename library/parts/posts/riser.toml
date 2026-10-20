@@ -1,0 +1,14 @@
+id = "generic:riser"
+name = "Riser block"
+category = "posts/risers"
+tags = ["riser", "spacer"]
+
+[geometry]
+kind = "parametric"
+generator = "riser"
+params = { length = 100, width = 75, height = 25 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
