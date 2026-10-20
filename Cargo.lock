@@ -3868,6 +3868,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-import"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "glam",
+ "lab-core",
+ "lab-geom",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
 name = "lab-mates"
 version = "0.1.0"
 dependencies = [
