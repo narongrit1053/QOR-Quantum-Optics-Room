@@ -15,6 +15,7 @@
 //! picked; edits go through `lab_core::Command` on the UI side.
 
 mod camera;
+mod gizmo;
 mod hole_material;
 mod host;
 mod mesh;
@@ -127,6 +128,16 @@ pub enum ViewportRequest {
     SetCatalog(Arc<lab_catalog::Catalog>),
     /// A library drag over the viewport.
     DragPart(PartDrag),
+    /// The pointer tool: selecting, or the move/rotate gizmo on the selected node.
+    SetTool(Tool),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tool {
+    #[default]
+    Select,
+    Move,
+    Rotate,
 }
 
 /// What a library drag carries.
@@ -157,6 +168,15 @@ pub enum ViewportEvent {
     SceneError(String),
     /// A library drag was dropped where the item can go.
     PlaceRequested(PlaceRequest),
+    /// A gizmo drag moved node `id` (relative to its parent, as `Node` stores it). `done` ends the
+    /// gesture: the app closes the undo step.
+    TransformRequested {
+        id: lab_core::NodeId,
+        attach: lab_core::Attach,
+        position: bevy::math::DVec3,
+        rotation: bevy::math::DQuat,
+        done: bool,
+    },
 }
 
 /// Where a dropped item goes. `position`/`rotation` are relative to `parent`, as `Node` stores them.
@@ -182,6 +202,7 @@ pub(crate) enum FrameRequest {
     #[allow(dead_code)] // Read by the wall fade (room.rs, T4c).
     SetWallDisplay(WallDisplay),
     DragPart(PartDrag),
+    SetTool(Tool),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

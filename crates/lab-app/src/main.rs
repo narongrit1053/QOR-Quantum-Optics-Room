@@ -8,6 +8,7 @@ mod dialogs;
 mod files;
 mod library;
 mod place;
+mod transform;
 mod ui_models;
 
 use std::cell::{Cell, RefCell};

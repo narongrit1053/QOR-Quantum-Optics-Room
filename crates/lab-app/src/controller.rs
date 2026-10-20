@@ -18,7 +18,7 @@ use lab_core::{
     WallDisplay,
 };
 use lab_ui::AppWindow;
-use lab_viewport::{FrameTarget, ViewMode, ViewportRequest};
+use lab_viewport::{FrameTarget, Tool, ViewMode, ViewportRequest};
 use slint::{ComponentHandle, SharedString};
 
 use crate::app_state::{AppState, SheetKind};
@@ -149,7 +149,7 @@ fn refresh_inspector(ui: &AppWindow, app: &AppState, models: &UiModels) {
         Some(SelectionTarget::Node(id)) => match doc.node(id) {
             Some(node) => {
                 let holes = doc.root_platform(id).and_then(|p| doc.platform(p)).map(|p| app.holes_for(p));
-                ui_models::fill_node(ui, models, node_view(doc, node, holes.as_deref(), units));
+                ui_models::fill_node(ui, models, node_view(doc, &app.catalog, node, holes.as_deref(), units));
                 1
             }
             None => 0,
@@ -172,7 +172,7 @@ fn refresh_inspector(ui: &AppWindow, app: &AppState, models: &UiModels) {
 }
 
 /// Refreshes everything after a state change (updating the hole cache first).
-fn refresh(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels) {
+pub(crate) fn refresh(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels) {
     app.borrow_mut().update_hole_cache();
     refresh_all(ui, &app.borrow(), models);
 }
@@ -256,7 +256,11 @@ pub fn close_sheet(ui: &AppWindow, app: &mut AppState) {
 fn on_field_committed(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str, text: &str) -> bool {
     let outcome = {
         let a = app.borrow();
-        edit::field_edit(&context(&a), id, text)
+        if id.starts_with("node.") {
+            edit::node_field_edit(&context(&a), &a.catalog, id, text)
+        } else {
+            edit::field_edit(&context(&a), id, text)
+        }
     };
     apply_outcome(ui, app, models, id, outcome)
 }
@@ -292,6 +296,15 @@ fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
             refresh_all(ui, &app.borrow(), models);
         }
         "paste.cancel" => ui.set_paste_target("".into()),
+        "tool.select" | "tool.move" | "tool.rotate" => {
+            let (index, tool) = match id {
+                "tool.move" => (1, Tool::Move),
+                "tool.rotate" => (2, Tool::Rotate),
+                _ => (0, Tool::Select),
+            };
+            ui.set_tool(index);
+            app.borrow().send(ViewportRequest::SetTool(tool));
+        }
         _ if id.starts_with("file.") => files::handle_file_action(ui, app, models, id),
         _ => {
             let outcome = {

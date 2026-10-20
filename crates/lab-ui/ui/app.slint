@@ -55,6 +55,9 @@ export component AppWindow inherits Window {
     in property <string> selection-title;
     in property <string> selection-detail;
     in property <[InspectorField]> inspector;
+    in property <[EditField]> node-fields;
+    // Pointer tool: 0 select, 1 move, 2 rotate.
+    in-out property <int> tool;
 
     // ── Platform inspector ───────────────────────────────────────────────────
     in property <string> platform-name;
@@ -582,8 +585,11 @@ export component AppWindow inherits Window {
                     title: root.selection-title;
                     detail: root.selection-detail;
                     fields: root.inspector;
+                    edit-fields: root.node-fields;
                     error: root.inspector-error;
                     action(id) => { root.action(id); }
+                    field-committed(id, text) => { return root.field-committed(id, text); }
+                    field-edited(id, text) => { root.field-edited(id, text); }
                 }
 
                 platform-inspector := PlatformInspector {
@@ -726,15 +732,18 @@ export component AppWindow inherits Window {
                 }
                 ToolButton {
                     label: "Select";
-                    active: true;
+                    active: root.tool == 0;
+                    clicked => { root.action("tool.select"); }
                 }
                 if !toolbar.compact: ToolButton {
                     label: "Move";
-                    available: false;
+                    active: root.tool == 1;
+                    clicked => { root.action("tool.move"); }
                 }
                 if !toolbar.compact: ToolButton {
                     label: "Rotate";
-                    available: false;
+                    active: root.tool == 2;
+                    clicked => { root.action("tool.rotate"); }
                 }
                 if !toolbar.compact: ToolButton {
                     label: "Measure";

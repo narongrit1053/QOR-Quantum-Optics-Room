@@ -13,6 +13,10 @@ use lab_core::units::{
     LengthUnit, ParseError, format_angle_deg, format_length, parse_angle_deg, parse_length,
 };
 use lab_core::Command;
+use lab_core::glam::{DQuat, DVec3, EulerRot};
+use lab_core::model::{Attach, Node, Parent};
+use lab_core::part::{Frame, Geometry, ParamValue};
+use lab_catalog::Catalog;
 
 pub struct EditContext<'a> {
     pub doc: &'a Document,
@@ -1466,6 +1470,151 @@ pub fn label_for(field_or_choice: &str) -> String {
     }
 }
 
+// ── Node (part) fields (M2-PLAN POLA-45) ───────────────────────────────────────────────────
+
+/// A mated node's parent connector frame (in the parent's part frame), its own connector frame,
+/// and the slide range. `None` when the node is not mated or a connector is not in the library.
+pub fn node_mate(doc: &Document, catalog: &Catalog, node: &Node) -> Option<(Frame, Frame, (f64, f64))> {
+    let (Parent::Node(pid), Attach::Mate { self_conn, parent_conn, .. }) = (&node.parent, &node.attach) else {
+        return None;
+    };
+    let pc = catalog.get(&doc.node(*pid)?.part)?.connector(parent_conn)?;
+    let cc = catalog.get(&node.part)?.connector(self_conn)?;
+    Some((pc.frame, cc.frame, lab_mates::slide_range(&pc.kind)))
+}
+
+/// Rotation of a node about the vertical axis, radians.
+pub fn node_yaw(node: &Node) -> f64 {
+    node.rotation.to_euler(EulerRot::ZYX).0
+}
+
+/// A committed node inspector field: `node.name`, `node.x|y|z`, `node.rotation`, `node.slide`
+/// or `node.param.<name>`.
+pub fn node_field_edit(cx: &EditContext, catalog: &Catalog, field: &str, text: &str) -> Result<EditOutcome, EditError> {
+    let Some(SelectionTarget::Node(id)) = cx.selection else { return Err(EditError::Stale) };
+    let node = cx.doc.node(id).ok_or(EditError::Stale)?;
+    let t = text.trim();
+    let same_length = |a: f64, b: f64| format_length(a, cx.units) == format_length(b, cx.units);
+    let set_attach = |attach: Attach, position: DVec3, rotation: DQuat| Command::SetAttach {
+        id,
+        parent: node.parent,
+        attach,
+        position,
+        rotation,
+    };
+    let command = match field {
+        "node.name" => {
+            if t == node.name {
+                return Ok(EditOutcome::Nothing);
+            }
+            if t.is_empty() {
+                return Err(EditError::Invalid("A part needs a name.".into()));
+            }
+            Command::Rename { id, name: t.to_string() }
+        }
+        "node.x" | "node.y" | "node.z" => {
+            if matches!(node.attach, Attach::Mate { .. }) {
+                return Err(EditError::Invalid("A mated part moves with its slide and rotation.".into()));
+            }
+            let value = parse_length(t, cx.units)?;
+            let mut position = node.position;
+            let axis = match field {
+                "node.x" => &mut position.x,
+                "node.y" => &mut position.y,
+                _ => &mut position.z,
+            };
+            if same_length(*axis, value) {
+                return Ok(EditOutcome::Nothing);
+            }
+            *axis = value;
+            // Typed coordinates leave the hole; height keeps it.
+            let attach = match node.attach {
+                Attach::Hole { .. } if field != "node.z" => Attach::Free,
+                ref attach => attach.clone(),
+            };
+            set_attach(attach, position, node.rotation)
+        }
+        "node.rotation" => {
+            let angle = parse_angle_deg(t)?;
+            match &node.attach {
+                Attach::Mate { self_conn, parent_conn, slide, twist } => {
+                    if format_angle_deg(*twist) == format_angle_deg(angle) {
+                        return Ok(EditOutcome::Nothing);
+                    }
+                    let (parent, child, _) = node_mate(cx.doc, catalog, node)
+                        .ok_or_else(|| EditError::Invalid("This part's connectors are not in the library.".into()))?;
+                    let (position, rotation) = lab_mates::mate_pose(&parent, &child, *slide, angle);
+                    let attach = Attach::Mate {
+                        self_conn: self_conn.clone(),
+                        parent_conn: parent_conn.clone(),
+                        slide: *slide,
+                        twist: angle,
+                    };
+                    set_attach(attach, position, rotation)
+                }
+                _ => {
+                    let yaw = node_yaw(node);
+                    if format_angle_deg(yaw) == format_angle_deg(angle) {
+                        return Ok(EditOutcome::Nothing);
+                    }
+                    let rotation = (DQuat::from_rotation_z(angle - yaw) * node.rotation).normalize();
+                    Command::SetPlacement { id, position: node.position, rotation }
+                }
+            }
+        }
+        "node.slide" => {
+            let Attach::Mate { self_conn, parent_conn, slide, twist } = &node.attach else {
+                return Err(EditError::Invalid("Only a mated part has a slide.".into()));
+            };
+            let value = parse_length(t, cx.units)?;
+            if same_length(*slide, value) {
+                return Ok(EditOutcome::Nothing);
+            }
+            let (parent, _, (lo, hi)) = node_mate(cx.doc, catalog, node)
+                .ok_or_else(|| EditError::Invalid("This part's connectors are not in the library.".into()))?;
+            if value < lo - 1e-9 || value > hi + 1e-9 {
+                let suffix = cx.units.suffix();
+                return Err(EditError::Invalid(format!(
+                    "The slide must be between {} {suffix} and {} {suffix}.",
+                    format_length(lo, cx.units),
+                    format_length(hi, cx.units)
+                )));
+            }
+            let position = node.position + parent.z.normalize_or_zero() * (value - slide);
+            let attach = Attach::Mate {
+                self_conn: self_conn.clone(),
+                parent_conn: parent_conn.clone(),
+                slide: value,
+                twist: *twist,
+            };
+            set_attach(attach, position, node.rotation)
+        }
+        _ => {
+            let Some(name) = field.strip_prefix("node.param.") else {
+                return Err(EditError::UnknownField(field.to_string()));
+            };
+            let value = parse_length(t, LengthUnit::Millimetre)?;
+            let def = catalog
+                .get(&node.part)
+                .ok_or_else(|| EditError::Invalid(format!("The part {} is not in the library.", node.part)))?;
+            let Geometry::Parametric { generator, params } = &def.geometry else {
+                return Err(EditError::Invalid("An imported part has no parameters.".into()));
+            };
+            let current = node.params.get(name).or_else(|| params.get(name)).and_then(ParamValue::as_f64);
+            if current.is_some_and(|c| (c - value).abs() < 1e-9) {
+                return Ok(EditOutcome::Nothing);
+            }
+            let mut overrides = node.params.clone();
+            overrides.insert(name.to_string(), ParamValue::Number(value));
+            let mut all = params.clone();
+            all.extend(overrides.clone());
+            lab_parts::generate(generator, &all).map_err(|e| EditError::Invalid(e.to_string()))?;
+            Command::SetParams { id, params: overrides }
+        }
+    };
+    Ok(EditOutcome::Command { command, label: format!("Edit {}", node.name), select: None, fixes: Vec::new() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1936,6 +2085,36 @@ mod tests {
     }
 
     // E8: Deleting a platform gives RemovePlatform, node gives RemoveNode, room gives Nothing.
+    /// Typing a rotation into the node inspector turns the node about +Z (POLA-45).
+    #[test]
+    fn node_rotation_edit() {
+        let mut doc = test_doc();
+        doc.nodes.push(Node {
+            id: NodeId(101),
+            name: "Post".into(),
+            parent: lab_core::Parent::Platform(PlatformId(1)),
+            attach: lab_core::Attach::Free,
+            params: Default::default(),
+            locked: false,
+            part: "t:none".into(),
+            shape: lab_core::model::Shape::Box { size: DVec3::ONE },
+            finish: lab_core::model::Finish::Stainless,
+            position: DVec3::new(100.0, 50.0, 0.0),
+            rotation: DQuat::IDENTITY,
+            pickable: true,
+        });
+        let catalog = Catalog::from_defs(Vec::new());
+        let cx = EditContext { doc: &doc, selection: Some(SelectionTarget::Node(NodeId(101))), units: LengthUnit::Millimetre };
+        let Ok(EditOutcome::Command { command: Command::SetPlacement { rotation, position, .. }, .. }) =
+            node_field_edit(&cx, &catalog, "node.rotation", "45")
+        else {
+            panic!("expected a SetPlacement");
+        };
+        assert!((rotation.to_euler(EulerRot::ZYX).0.to_degrees() - 45.0).abs() < 1e-9);
+        assert_eq!(position, DVec3::new(100.0, 50.0, 0.0));
+        assert_eq!(node_field_edit(&cx, &catalog, "node.rotation", "0"), Ok(EditOutcome::Nothing));
+    }
+
     #[test]
     fn e8_delete_platform_node_and_room() {
         let mut doc = test_doc();

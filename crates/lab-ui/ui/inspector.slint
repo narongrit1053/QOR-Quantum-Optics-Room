@@ -164,29 +164,37 @@ component Note inherits Text {
     wrap: word-wrap;
 }
 
-// M0 read-only node fields.
+// Node inspector: editable name, placement and part parameters (M2), read-only facts.
 export component NodeInspector inherits Rectangle {
     in property <string> title;
     in property <string> detail;
     in property <[InspectorField]> fields;
+    in property <[EditField]> edit-fields;
     in property <string> error;
     callback action(string /* id */);
+    callback field-committed(string /* id */, string /* text */) -> bool;
+    callback field-edited(string /* id */, string /* text */);
 
     VerticalLayout {
         padding: 16px;
         spacing: 4px;
-        Text {
-            text: root.title;
-            color: Theme.text;
+        TextField {
+            id: "node.name";
+            value: root.title;
+            plain: true;
+            stretch: true;
             font-size: Theme.font-title;
             font-weight: 650;
-            overflow: elide;
+            committed(i, t) => { return root.field-committed(i, t); }
         }
-        Text {
-            text: root.detail;
-            color: Theme.text-secondary;
-            font-size: Theme.font-caption;
-            overflow: elide;
+        HorizontalLayout {
+            padding-left: 9px;
+            Text {
+                text: root.detail;
+                color: Theme.text-secondary;
+                font-size: Theme.font-caption;
+                overflow: elide;
+            }
         }
         if root.error != "": ErrorBanner {
             text: root.error;
@@ -196,6 +204,17 @@ export component NodeInspector inherits Rectangle {
         for field in root.fields: Field {
             label: field.label;
             value: field.value;
+        }
+        if root.edit-fields.length > 0: Divider { }
+        for f in root.edit-fields: LabeledField {
+            label: f.label;
+            id: f.id;
+            value: f.value;
+            unit: f.unit;
+            enabled: f.enabled;
+            invalid: f.invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
         }
     }
 }
