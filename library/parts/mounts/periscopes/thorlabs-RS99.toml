@@ -1,0 +1,28 @@
+id = "thorlabs:RS99"
+vendor = "Thorlabs"
+part_number = "RS99"
+name = "Beam Periscope, 150 mm"
+category = "mounts/periscopes"
+tags = ["periscope", "mirror"]
+
+[geometry]
+kind = "parametric"
+generator = "periscope"
+params = { width = 50, height = 150, axis_height = 50 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "lower"
+kind = "mirror"
+clear_aperture = 22.9
+frame = { origin = [0, 0, 50], z = [0, -0.7071, 0.7071], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "upper"
+kind = "mirror"
+clear_aperture = 22.9
+frame = { origin = [0, 0, 140], z = [0, 0.7071, -0.7071], x = [1, 0, 0] }

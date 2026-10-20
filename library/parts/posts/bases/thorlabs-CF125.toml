@@ -1,0 +1,23 @@
+id = "thorlabs:CF125"
+vendor = "Thorlabs"
+part_number = "CF125"
+name = "Clamping Fork, 1.25\" Long Slot"
+category = "posts/bases"
+tags = ["fork", "clamp", "base"]
+
+[geometry]
+kind = "parametric"
+generator = "clamping_fork"
+params = { length = 50, width = 25, thickness = 10 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "top"
+kind = "thread"
+spec = "1/4-20"
+gender = "male"
+frame = { origin = [0, 0, 10], z = [0, 0, 1], x = [1, 0, 0] }

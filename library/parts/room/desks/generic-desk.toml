@@ -1,0 +1,9 @@
+id = "generic:desk"
+name = "Desk, 1500 x 750 mm"
+category = "room/desks"
+tags = ["desk", "room"]
+
+[geometry]
+kind = "parametric"
+generator = "desk"
+params = { width = 1500, depth = 750, height = 750 }

@@ -1,0 +1,24 @@
+id = "thorlabs:PAF2"
+vendor = "Thorlabs"
+part_number = "PAF2"
+name = "Fiber Coupler, FC/PC, f = 7 mm"
+category = "fiber/couplers"
+tags = ["fiber", "coupler", "imperial"]
+
+[geometry]
+kind = "parametric"
+generator = "fiber_coupler"
+params = { diameter = 25, length = 30, axis_height = 25 }
+
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "8-32"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "free_space"
+kind = "fiber"
+clear_aperture = 10
+frame = { origin = [0, -15, 25], z = [0, 1, 0], x = [1, 0, 0] }

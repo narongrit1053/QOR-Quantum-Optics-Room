@@ -1,0 +1,31 @@
+id = "thorlabs:PH75/M"
+vendor = "Thorlabs"
+part_number = "PH75/M"
+name = "Post Holder, Ø12 mm, L = 75 mm"
+category = "posts/holders"
+tags = ["post holder", "holder", "metric"]
+
+[geometry]
+kind = "parametric"
+generator = "post_holder"
+params = { bore = 12, height = 75, base_diameter = 30 }
+
+[[connectors]]
+name = "bottom"
+kind = "thread"
+spec = "M6"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "bore"
+kind = "bore"
+diameter = 12
+gender = "female"
+range = [-70, -5]
+frame = { origin = [0, 0, 75], z = [0, 0, 1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }

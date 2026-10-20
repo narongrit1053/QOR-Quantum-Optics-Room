@@ -1,0 +1,9 @@
+id = "generic:rack-19in-42u"
+name = "19\" Rack, 42 U"
+category = "room/racks"
+tags = ["rack", "19in", "room"]
+
+[geometry]
+kind = "parametric"
+generator = "rack_19in"
+params = { units = 42, depth = 800 }

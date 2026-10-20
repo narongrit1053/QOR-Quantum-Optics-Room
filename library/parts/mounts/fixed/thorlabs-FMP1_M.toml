@@ -1,0 +1,25 @@
+id = "thorlabs:FMP1/M"
+vendor = "Thorlabs"
+part_number = "FMP1/M"
+name = "Fixed Optic Mount, Ø1\" Optics"
+category = "mounts/fixed"
+tags = ["mount", "fixed", "metric"]
+
+[geometry]
+kind = "parametric"
+generator = "fixed_mount"
+params = { optic_diameter = 25.4, outer_diameter = 38, thickness = 10, axis_height = 20.3 }
+
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "M4"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "optic_seat"
+kind = "optic_bore"
+diameter = 25.4
+gender = "female"
+frame = { origin = [0, 0, 20.3], z = [0, 1, 0], x = [1, 0, 0] }

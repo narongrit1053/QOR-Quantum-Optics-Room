@@ -1,0 +1,24 @@
+id = "thorlabs:ID25"
+vendor = "Thorlabs"
+part_number = "ID25"
+name = "Iris Diaphragm, Ø25 mm"
+category = "beam/irises"
+tags = ["iris", "aperture", "imperial"]
+
+[geometry]
+kind = "parametric"
+generator = "iris"
+params = { outer_diameter = 50, aperture = 25, thickness = 8, axis_height = 30 }
+
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "8-32"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "aperture"
+kind = "iris"
+clear_aperture = 25
+frame = { origin = [0, 0, 30], z = [0, 1, 0], x = [1, 0, 0] }

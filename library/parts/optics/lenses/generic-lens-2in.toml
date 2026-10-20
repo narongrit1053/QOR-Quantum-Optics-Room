@@ -1,0 +1,25 @@
+id = "generic:lens-2in"
+name = "Plano-Convex Lens, Ø2\", f = 150 mm"
+category = "optics/lenses"
+tags = ["lens", "2in"]
+
+[geometry]
+kind = "parametric"
+generator = "lens"
+params = { diameter = 50.8, thickness = 8 }
+
+[[connectors]]
+name = "edge"
+kind = "optic_bore"
+diameter = 50.8
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, -1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "lens"
+kind = "lens"
+clear_aperture = 45.72
+frame = { origin = [0, 0, 0], z = [0, 1, 0], x = [1, 0, 0] }
+
+[meta]
+focal_length_mm = "150"

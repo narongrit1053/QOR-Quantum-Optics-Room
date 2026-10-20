@@ -1,0 +1,25 @@
+id = "generic:lens-0.5in"
+name = "Plano-Convex Lens, Ø1/2\", f = 50 mm"
+category = "optics/lenses"
+tags = ["lens", "0.5in"]
+
+[geometry]
+kind = "parametric"
+generator = "lens"
+params = { diameter = 12.7, thickness = 4 }
+
+[[connectors]]
+name = "edge"
+kind = "optic_bore"
+diameter = 12.7
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, -1, 0], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "lens"
+kind = "lens"
+clear_aperture = 11.43
+frame = { origin = [0, 0, 0], z = [0, 1, 0], x = [1, 0, 0] }
+
+[meta]
+focal_length_mm = "50"

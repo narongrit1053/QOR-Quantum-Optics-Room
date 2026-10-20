@@ -1,0 +1,25 @@
+id = "thorlabs:TR50/M"
+vendor = "Thorlabs"
+part_number = "TR50/M"
+name = "Optical Post, Ø12 mm, L = 50 mm"
+category = "posts/posts"
+tags = ["post", "metric"]
+
+[geometry]
+kind = "parametric"
+generator = "post"
+params = { diameter = 12, length = 50 }
+
+[[connectors]]
+name = "bottom"
+kind = "bore"
+diameter = 12
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "top"
+kind = "thread"
+spec = "M4"
+gender = "male"
+frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }

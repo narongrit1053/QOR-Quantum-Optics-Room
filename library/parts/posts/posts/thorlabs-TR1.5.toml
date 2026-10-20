@@ -1,0 +1,25 @@
+id = "thorlabs:TR1.5"
+vendor = "Thorlabs"
+part_number = "TR1.5"
+name = "Optical Post, Ø1/2\", L = 38.1 mm"
+category = "posts/posts"
+tags = ["post", "imperial"]
+
+[geometry]
+kind = "parametric"
+generator = "post"
+params = { diameter = 12.7, length = 38.1 }
+
+[[connectors]]
+name = "bottom"
+kind = "bore"
+diameter = 12.7
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "top"
+kind = "thread"
+spec = "8-32"
+gender = "male"
+frame = { origin = [0, 0, 38.1], z = [0, 0, 1], x = [1, 0, 0] }

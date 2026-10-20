@@ -1,0 +1,29 @@
+id = "thorlabs:DCC1545M/M"
+vendor = "Thorlabs"
+part_number = "DCC1545M/M"
+name = "USB 2.0 CMOS Camera, 1280 x 1024, Monochrome"
+category = "detectors/cameras"
+tags = ["camera", "detector", "ccd", "metric"]
+
+[geometry]
+kind = "parametric"
+generator = "camera"
+params = { length = 50, width = 30, height = 30, axis_height = 15 }
+
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "M4"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "sensor"
+kind = "detector"
+clear_aperture = 6.7
+frame = { origin = [0, -25, 15], z = [0, 1, 0], x = [1, 0, 0] }
