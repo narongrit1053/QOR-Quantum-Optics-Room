@@ -100,6 +100,26 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         let mode = if mode == 1 { ViewMode::Top } else { ViewMode::Perspective };
         a.borrow().send(ViewportRequest::SetViewMode(mode));
     });
+    app.borrow().send(ViewportRequest::SetReduceMotion(reduce_motion()));
+}
+
+/// Windows "Show animations in Windows" off (`SPI_GETCLIENTAREAANIMATION` false), read once.
+#[cfg(windows)]
+fn reduce_motion() -> bool {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn SystemParametersInfoW(action: u32, param: u32, pv: *mut core::ffi::c_void, win_ini: u32) -> i32;
+    }
+    const SPI_GETCLIENTAREAANIMATION: u32 = 0x1042;
+    let mut on: i32 = 1;
+    // SAFETY: the action writes one BOOL into `on`, which outlives the call.
+    let ok = unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, (&raw mut on).cast(), 0) };
+    ok != 0 && on == 0
+}
+
+#[cfg(not(windows))]
+fn reduce_motion() -> bool {
+    false
 }
 
 /// Copies the whole state into the window: title, undo state, preferences, scene, inspector.
@@ -297,6 +317,18 @@ fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
             app.borrow().send(ViewportRequest::SetBlueprint(on));
         }
         "view.frame_selection" => app.borrow().send(ViewportRequest::Frame(FrameTarget::Selection)),
+        "view.isolate" => {
+            let app = app.borrow();
+            let platform = match app.session.selection {
+                Some(SelectionTarget::Platform(id)) => Some(id),
+                Some(SelectionTarget::Node(id)) => app.session.doc.root_platform(id),
+                _ => None,
+            };
+            if platform.is_some() {
+                app.send(ViewportRequest::Isolate(platform));
+            }
+        }
+        "view.show_all" => app.borrow().send(ViewportRequest::Isolate(None)),
         "view.top" | "view.3d" => {
             let top = id == "view.top";
             ui.set_view_mode(i32::from(top));

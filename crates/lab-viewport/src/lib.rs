@@ -19,6 +19,7 @@ mod camera;
 mod gizmo;
 mod hole_material;
 mod host;
+mod isolate;
 mod mesh;
 mod outline;
 mod picking;
@@ -135,6 +136,11 @@ pub enum ViewportRequest {
     SetTool(Tool),
     /// POLA-49. Flat "blueprint" look; applies only while a camera is in Top mode.
     SetBlueprint(bool),
+    /// POLA-52. Show only this platform, the platforms stacked on it and their nodes; hide room,
+    /// walls, fixtures and everything else. `None` releases. Unknown ids release.
+    Isolate(Option<PlatformId>),
+    /// POLA-52. Windows "reduce animations": camera moves jump instead of animating.
+    SetReduceMotion(bool),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -205,6 +211,9 @@ pub enum ViewportEvent {
         rotation: bevy::math::DQuat,
         done: bool,
     },
+    /// POLA-52. The isolated platform after an `Isolate` request (None = released, also when
+    /// the platform was deleted).
+    IsolationChanged(Option<PlatformId>),
 }
 
 /// Where a dropped item goes. `position`/`rotation` are relative to `parent`, as `Node` stores them.
@@ -232,6 +241,8 @@ pub(crate) enum FrameRequest {
     DragPart(PartDrag),
     SetTool(Tool),
     SetBlueprint(bool),
+    Isolate(Option<PlatformId>),
+    SetReduceMotion(bool),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).
