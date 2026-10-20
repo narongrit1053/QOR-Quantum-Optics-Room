@@ -7,15 +7,15 @@
 
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
-import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu } from "overlays.slint";
+import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } from "overlays.slint";
 import { StackPanel } from "stack.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus } from "fields.slint";
 
@@ -246,6 +246,10 @@ export component AppWindow inherits Window {
     in-out property <int> view-mode: 0;
     // Top-view blueprint look (session setting, POLA-49).
     in-out property <bool> blueprint;
+    // Top-view labels and dimensions (POLA-54): the toggle and the items, in logical px.
+    in-out property <bool> show-labels: true;
+    in property <[OverlayItem]> overlay-labels;
+    in property <[OverlayItem]> overlay-dimensions;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     // Returns true when accepted or a no-op; false keeps the text and marks the field invalid.
@@ -392,6 +396,13 @@ export component AppWindow inherits Window {
                 height: 100%;
                 source: root.viewport-texture;
                 image-fit: fill;
+            }
+
+            if root.view-mode != 0 && root.show-labels: ViewportOverlay {
+                width: 100%;
+                height: 100%;
+                labels: root.overlay-labels;
+                dimensions: root.overlay-dimensions;
             }
 
             // Split view (POLA-51): the seam between the 3D and Top panes.
@@ -855,6 +866,14 @@ export component AppWindow inherits Window {
                     label: "Blueprint";
                     active: root.blueprint;
                     clicked => { root.action("view.blueprint"); }
+                }
+            }
+            if root.view-mode != 0: VerticalLayout {
+                alignment: center;
+                ToolButton {
+                    label: "Labels";
+                    active: root.show-labels;
+                    clicked => { root.show-labels = !root.show-labels; }
                 }
             }
             VerticalLayout {

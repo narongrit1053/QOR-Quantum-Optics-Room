@@ -1,7 +1,7 @@
 // Modal sheets, the toast and the popup menus (spec §6.1, §6.4, §6.5).
 
 import { Theme } from "theme.slint";
-import { PresetRow } from "types.slint";
+import { PresetRow, OverlayItem } from "types.slint";
 import { PillButton, SectionHeader } from "components.slint";
 
 // A modal confirmation sheet. It dims the window, swallows pointer input and owns the
@@ -484,6 +484,50 @@ export component PresetMenu inherits PopupWindow {
                     }
                 }
             }
+        }
+    }
+}
+
+// Top-view name labels and dimension lines (POLA-54), drawn over the viewport image. Not
+// interactive: pointer input passes through to the viewport.
+export component ViewportOverlay inherits Rectangle {
+    in property <[OverlayItem]> labels;
+    in property <[OverlayItem]> dimensions;
+
+    for d in root.dimensions: Rectangle {
+        Path {
+            width: root.width;
+            height: root.height;
+            viewbox-width: root.width / 1px;
+            viewbox-height: root.height / 1px;
+            commands: d.commands;
+            stroke: Theme.text-secondary;
+            stroke-width: 1px;
+        }
+        Rectangle {
+            x: d.x - self.width / 2;
+            y: d.y - self.height / 2;
+            width: dim-text.preferred-width + 8px;
+            height: dim-text.preferred-height + 2px;
+            background: #16181CCC;
+            dim-text := Text {
+                text: d.text;
+                color: Theme.text-secondary;
+                font-size: Theme.font-caption;
+            }
+        }
+    }
+    for l in root.labels: Rectangle {
+        x: l.x + 4px;
+        y: l.y - self.height - 2px;
+        width: label-text.preferred-width + 12px;
+        height: label-text.preferred-height + 4px;
+        border-radius: self.height / 2;
+        background: #1C1C1ECC;
+        label-text := Text {
+            text: l.text;
+            color: Theme.text;
+            font-size: Theme.font-caption;
         }
     }
 }

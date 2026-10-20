@@ -130,6 +130,7 @@ fn reduce_motion() -> bool {
 pub fn refresh_all(ui: &AppWindow, app: &AppState, models: &UiModels) {
     refresh_document(ui, app, models);
     refresh_inspector(ui, app, models);
+    crate::overlay::refresh(ui, app);
     ui.set_busy(app.busy);
 }
 

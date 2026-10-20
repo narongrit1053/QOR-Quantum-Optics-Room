@@ -94,6 +94,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     ui.set_isolated_name(name.unwrap_or_default().into());
                 }
                 ViewportEvent::Measured(m) => crate::measure::on_measured(&ui, &app, m),
+                ViewportEvent::Overlay(items) => crate::overlay::on_overlay(&ui, &app, items),
                 ViewportEvent::PlaceRequested(request) => {
                     crate::place::on_place_requested(&ui, &app, &models, request);
                 }
