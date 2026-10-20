@@ -89,9 +89,9 @@ export component AppWindow inherits Window {
     // "Grid fixed because parts are placed on this platform" or ""
     in property <string> platform-grid-note;
     in property <[ZoneRow]> platform-zones;
-    // 0 legs, 1 none
+    // 0 legs, 1 isolators, 2 none, 3 on platform
     in property <int> platform-support;
-    // platform.support.leg_size|leg_inset
+    // platform.support.leg_size|leg_inset|on.name|standoff
     in property <[EditField]> platform-support-fields;
     in property <int> platform-node-count;
     // "3 parts lie outside the outline" or ""

@@ -492,27 +492,35 @@ pub fn platform_view(doc: &Document, p: &Platform, holes: &HoleSet, units: Lengt
         }).collect()
     }).unwrap_or_default();
 
-    let support = match p.support { Support::Legs { .. } => 0, _ => 1 };
-    let support_fields = match p.support {
-        Support::Legs { size, inset } => vec![
+    let length_field = |id: &str, label: &str, v: f64| EditFieldData {
+        id: id.into(),
+        label: label.into(),
+        value: format_length(v, units),
+        unit: u_suffix.clone(),
+        enabled: true,
+        invalid: false,
+    };
+    let (support, support_fields) = match p.support {
+        Support::Legs { size, inset } => (0, vec![
+            length_field("platform.support.leg_size", "Leg size", size),
+            length_field("platform.support.leg_inset", "Leg inset", inset),
+        ]),
+        Support::Isolators { size, inset } => (1, vec![
+            length_field("platform.support.leg_size", "Isolator size", size),
+            length_field("platform.support.leg_inset", "Isolator inset", inset),
+        ]),
+        Support::Fixed => (2, Vec::new()),
+        Support::OnPlatform { parent, standoff } => (3, vec![
             EditFieldData {
-                id: "platform.support.leg_size".into(),
-                label: "Leg size".into(),
-                value: format_length(size, units),
-                unit: u_suffix.clone(),
+                id: "platform.support.on.name".into(),
+                label: "On platform".into(),
+                value: doc.platform(parent).map(|b| b.name.clone()).unwrap_or_default(),
+                unit: String::new(),
                 enabled: true,
-                invalid: false,
+                invalid: doc.platform(parent).is_none(),
             },
-            EditFieldData {
-                id: "platform.support.leg_inset".into(),
-                label: "Leg inset".into(),
-                value: format_length(inset, units),
-                unit: u_suffix.clone(),
-                enabled: true,
-                invalid: false,
-            },
-        ],
-        _ => Vec::new(),
+            length_field("platform.support.standoff", "Standoff", standoff),
+        ]),
     };
 
     let node_count = doc.nodes_on(p.id).count() as i32;
@@ -879,9 +887,18 @@ pub fn preset_rows(units: LengthUnit) -> Vec<PresetRowData> {
             label: p.label.to_string(),
             hint: p.hint.to_string(),
         };
+        let raised = p.id == "bb-m-300x300";
         match p.group {
             PresetGroup::TableMetric | PresetGroup::BreadboardMetric | PresetGroup::SteelBreadboardMetric => {
                 metric_rows.push(row);
+                if raised {
+                    metric_rows.push(PresetRowData {
+                        id: "raised-bb".into(),
+                        group: group_str.into(),
+                        label: "Raised breadboard".into(),
+                        hint: "300 × 300 mm on 100 mm standoffs, on the selected platform".into(),
+                    });
+                }
             }
             PresetGroup::TableImperial | PresetGroup::BreadboardImperial | PresetGroup::SteelBreadboardImperial => {
                 imperial_rows.push(row);

@@ -8,7 +8,7 @@ use bevy::{
     math::{DQuat, DVec3},
     prelude::*,
 };
-use lab_core::{HoleRef, Platform, PlatformId, SelectionTarget, Support, Surface, ZoneShape, compute_holes};
+use lab_core::{Document, HoleRef, Platform, PlatformId, SelectionTarget, Support, Surface, ZoneShape, compute_holes};
 
 use crate::hole_material::{
     GridGeometry, HoleGridExt, HoleTopMaterial, ZoneParam, build_mask, hole_params, mask_image,
@@ -22,15 +22,20 @@ use crate::scene::{MM, SceneEntity, rotation_to_render, to_render};
 #[derive(Component)]
 pub(crate) struct PlatformRoot(#[allow(dead_code)] pub PlatformId);
 
-/// translation = to_render(position.extend(top_height)),
-/// rotation = rotation_to_render(DQuat::from_rotation_z(rotation_z)).
-pub(crate) fn platform_root_transform(p: &Platform) -> Transform {
+/// The platform frame in the room ([`Document::platform_pose`], which composes `OnPlatform`
+/// chains); falls back to the platform's own fields for a broken chain.
+pub(crate) fn platform_root_transform(doc: &Document, p: &Platform) -> Transform {
+    let (origin, rotation_z) = doc.platform_pose(p.id).unwrap_or((p.position.extend(p.top_height), p.rotation_z));
     Transform {
-        translation: to_render(p.position.extend(p.top_height)),
-        rotation: rotation_to_render(DQuat::from_rotation_z(p.rotation_z)),
+        translation: to_render(origin),
+        rotation: rotation_to_render(DQuat::from_rotation_z(rotation_z)),
         ..default()
     }
 }
+
+/// Standoff posts under an `OnPlatform` platform (Ø25 mm, like Thorlabs RS-series pedestals).
+const STANDOFF_DIAMETER: f64 = 25.0;
+const STANDOFF_INSET: f64 = 40.0;
 
 pub(crate) struct PlatformAssets<'a> {
     pub meshes: &'a mut Assets<Mesh>,
@@ -139,34 +144,39 @@ pub(crate) fn spawn_platform_parts(
             .id(),
     );
 
-    // Legs down to the floor. Not pickable.
-    if let Support::Legs { size, .. } = p.support {
-        let leg_height = p.top_height - p.thickness;
-        let positions = p.leg_positions();
-        if leg_height > 0.0 && !positions.is_empty() {
-            let mesh = assets.meshes.add(Cuboid::new(size as f32 * MM, leg_height as f32 * MM, size as f32 * MM));
-            let material = assets.materials.add(StandardMaterial {
-                base_color: Color::srgb_u8(28, 29, 33),
-                perceptual_roughness: 0.7,
-                ..default()
-            });
-            for leg in positions {
-                parts.push(
-                    commands
-                        .spawn((
-                            SceneEntity,
-                            ChildOf(root),
-                            Mesh3d(mesh.clone()),
-                            MeshMaterial3d(material.clone()),
-                            Transform::from_translation(to_render(DVec3::new(
-                                leg.x,
-                                leg.y,
-                                -p.thickness - leg_height / 2.0,
-                            ))),
-                        ))
-                        .id(),
-                );
-            }
+    // Legs and isolators down to the floor, standoffs down to the parent's top. Not pickable.
+    let floor = p.top_height - p.thickness;
+    let (size, inset, height, round) = match p.support {
+        Support::Legs { size, inset } => (size, inset, floor, false),
+        Support::Isolators { size, inset } => (size, inset, floor, true),
+        Support::OnPlatform { standoff, .. } => (STANDOFF_DIAMETER, STANDOFF_INSET, standoff, true),
+        Support::Fixed => (0.0, 0.0, 0.0, false),
+    };
+    // leg_positions only answers for Legs; isolators and standoffs use the same corner rule.
+    let positions = Platform { support: Support::Legs { size, inset }, ..p.clone() }.leg_positions();
+    if height > 0.0 && !positions.is_empty() {
+        let mesh = if round {
+            assets.meshes.add(Cylinder::new(size as f32 * MM / 2.0, height as f32 * MM))
+        } else {
+            assets.meshes.add(Cuboid::new(size as f32 * MM, height as f32 * MM, size as f32 * MM))
+        };
+        let material = assets.materials.add(StandardMaterial {
+            base_color: Color::srgb_u8(28, 29, 33),
+            perceptual_roughness: 0.7,
+            ..default()
+        });
+        for leg in positions {
+            parts.push(
+                commands
+                    .spawn((
+                        SceneEntity,
+                        ChildOf(root),
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_translation(to_render(DVec3::new(leg.x, leg.y, -p.thickness - height / 2.0))),
+                    ))
+                    .id(),
+            );
         }
     }
     Ok(parts)
