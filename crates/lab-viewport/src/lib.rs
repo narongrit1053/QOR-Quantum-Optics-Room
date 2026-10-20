@@ -17,6 +17,7 @@
 mod blueprint;
 mod camera;
 mod gizmo;
+mod glb;
 mod hole_material;
 mod host;
 mod isolate;
