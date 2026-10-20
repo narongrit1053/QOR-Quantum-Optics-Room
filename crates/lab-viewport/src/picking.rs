@@ -14,7 +14,7 @@ use crate::room::WallState;
 use crate::scene::SceneIndex;
 use crate::{FrameRequest, ViewportEvent, ViewportInput};
 
-const ACCENT: Color = Color::srgb(10.0 / 255.0, 132.0 / 255.0, 1.0);
+pub(crate) const ACCENT: Color = Color::srgb(10.0 / 255.0, 132.0 / 255.0, 1.0);
 
 /// What a click on this entity selects.
 #[derive(Component, Clone, Copy)]
@@ -37,7 +37,8 @@ pub(crate) struct PickingPlugin;
 
 impl Plugin for PickingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Selection>()
+        app.add_plugins(crate::outline::OutlinePlugin)
+            .init_resource::<Selection>()
             .add_systems(Update, (pick.after(handle_input), apply_highlight.after(pick)));
     }
 }
