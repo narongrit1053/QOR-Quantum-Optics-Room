@@ -3921,6 +3921,7 @@ dependencies = [
  "lab-core",
  "lab-file",
  "lab-geom",
+ "lab-import",
  "lab-mates",
  "lab-parts",
  "lab-ui",

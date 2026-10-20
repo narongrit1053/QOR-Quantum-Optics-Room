@@ -13,6 +13,7 @@ import { EditState, TableFocus } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } from "overlays.slint";
 import { StackPanel } from "stack.slint";
+import { ImportDialog } from "import.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
@@ -275,6 +276,23 @@ export component AppWindow inherits Window {
     callback library-search(string);
     callback library-toggle(string /* group */);
     callback library-drag(string /* part id */, int, length, length);
+
+    // Import STEP dialog (POLA-59). Step 0 closed, 1 form, 2 converting, 3 error, 4 done.
+    in property <int> import-step;
+    in property <string> import-file;
+    in-out property <int> import-vendor;
+    in-out property <int> import-up;
+    in-out property <string> import-part-number;
+    in-out property <string> import-name;
+    in-out property <string> import-category;
+    in-out property <int> import-finish;
+    in property <string> import-progress;
+    in property <string> import-error;
+    in property <string> import-done-text;
+    in property <string> import-part-id;
+    callback import-start();
+    callback import-cancel();
+    callback import-define-connectors(string /* part id */);
 
     // Beam-height stack builder (stack.slint); lab-app/src/stack.rs fills and handles it.
     in property <string> stack-optic;
@@ -654,6 +672,11 @@ export component AppWindow inherits Window {
                         font-size: Theme.font-body;
                         vertical-alignment: center;
                     }
+                }
+
+                PillButton {
+                    label: "Import STEP…";
+                    clicked => { root.action("import.step"); }
                 }
 
                 SectionHeader { text: "LIBRARY"; }
@@ -1068,6 +1091,27 @@ export component AppWindow inherits Window {
             default-button: root.sheet-default;
             destructive: root.sheet-destructive;
             button(i) => { root.sheet-button(i); }
+        }
+
+        ImportDialog {
+            width: root.width;
+            height: root.height;
+            step: root.import-step;
+            file-name: root.import-file;
+            vendor <=> root.import-vendor;
+            up-axis <=> root.import-up;
+            part-number <=> root.import-part-number;
+            part-name <=> root.import-name;
+            category <=> root.import-category;
+            finish <=> root.import-finish;
+            progress: root.import-progress;
+            error: root.import-error;
+            done-text: root.import-done-text;
+            part-id: root.import-part-id;
+            start => { root.import-start(); }
+            cancel => { root.import-cancel(); }
+            choose-another => { root.action("import.step"); }
+            define-connectors(id) => { root.import-define-connectors(id); }
         }
 
         PasteSheet {

@@ -6,6 +6,7 @@ mod bridge;
 mod controller;
 mod dialogs;
 mod files;
+mod import;
 mod library;
 mod measure;
 mod overlay;
