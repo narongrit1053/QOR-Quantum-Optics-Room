@@ -342,7 +342,7 @@ fn place_stacked(commands: &mut Commands, index: &SceneIndex, doc: &Document) {
 
 /// A node as a child of its root platform's root (or in the room frame), at its pose in that
 /// frame. The returned entity carries the transform; its children are the mesh pieces.
-fn spawn_node(
+pub(crate) fn spawn_node(
     commands: &mut Commands,
     root: Option<Entity>,
     node: &Node,

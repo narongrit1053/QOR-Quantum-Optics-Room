@@ -13,6 +13,7 @@ import { EditState, TableFocus } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } from "overlays.slint";
 import { StackPanel } from "stack.slint";
+import { WizardPanel } from "wizard.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
@@ -275,6 +276,30 @@ export component AppWindow inherits Window {
     callback library-search(string);
     callback library-toggle(string /* group */);
     callback library-drag(string /* part id */, int, length, length);
+    // POLA-60: right-click on a library part ("Edit connectors…" for user-library parts).
+    callback library-edit(string /* part id */);
+
+    // POLA-60 connector wizard (state in lab-app/src/wizard.rs).
+    in property <bool> wizard-open;
+    in property <string> wizard-title;
+    in property <[string]> wizard-rows;
+    in property <int> wizard-step;
+    in property <string> wizard-message;
+    in property <int> wizard-hole-kind;
+    in property <string> wizard-spec;
+    in property <int> wizard-gender;
+    in property <string> wizard-diameter;
+    in property <int> wizard-optic-kind;
+    in property <[string]> wizard-optic-kinds;
+    in property <string> wizard-aperture;
+    callback wizard-choose(int);
+    callback wizard-pick(string, int);
+    callback wizard-field(string, string) -> bool;
+    callback wizard-confirm();
+    callback wizard-back();
+    callback wizard-remove(int);
+    callback wizard-save();
+    callback wizard-cancel();
 
     // Beam-height stack builder (stack.slint); lab-app/src/stack.rs fills and handles it.
     in property <string> stack-optic;
@@ -692,7 +717,9 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     pointer-event(event) => {
-                                        if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                                        if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
+                                            root.library-edit(item.id);
+                                        } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
                                             root.library-drag(item.id, 1, self.absolute-position.x + self.mouse-x,
                                                 self.absolute-position.y + self.mouse-y);
                                         } else if (event.kind == PointerEventKind.cancel) {
@@ -754,7 +781,7 @@ export component AppWindow inherits Window {
 
         // ── Inspector (slides in when something is selected) ─────────────────
         inspector-panel := Panel {
-            property <bool> shown: root.selection-kind != 0;
+            property <bool> shown: root.selection-kind != 0 && !root.wizard-open;
             property <length> content-height: root.selection-kind == 1 ? node-inspector.preferred-height
                 : root.selection-kind == 2 ? platform-inspector.preferred-height
                 : root.selection-kind == 3 ? room-inspector.preferred-height : 0px;
@@ -849,6 +876,38 @@ export component AppWindow inherits Window {
                     choice-selected(i, c) => { root.choice-selected(i, c); }
                     action(id) => { root.action(id); }
                 }
+            }
+        }
+
+        // ── Connector wizard (POLA-60; replaces the inspector while open) ────
+        wizard-panel := Panel {
+            width: Theme.inspector-width;
+            height: min(root.height - 2 * Theme.inset, 560px);
+            y: Theme.inset;
+            x: root.wizard-open ? root.width - self.width - Theme.inset : root.width + 24px;
+            opacity: root.wizard-open ? 1 : 0;
+            animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
+            animate opacity { duration: Theme.smooth; }
+            WizardPanel {
+                title: root.wizard-title;
+                rows: root.wizard-rows;
+                step: root.wizard-step;
+                message: root.wizard-message;
+                hole-kind: root.wizard-hole-kind;
+                spec: root.wizard-spec;
+                gender: root.wizard-gender;
+                diameter: root.wizard-diameter;
+                optic-kind: root.wizard-optic-kind;
+                optic-kinds: root.wizard-optic-kinds;
+                aperture: root.wizard-aperture;
+                choose(i) => { root.wizard-choose(i); }
+                pick(id, i) => { root.wizard-pick(id, i); }
+                field(id, t) => { return root.wizard-field(id, t); }
+                confirm => { root.wizard-confirm(); }
+                back => { root.wizard-back(); }
+                remove(i) => { root.wizard-remove(i); }
+                save => { root.wizard-save(); }
+                cancel => { root.wizard-cancel(); }
             }
         }
 

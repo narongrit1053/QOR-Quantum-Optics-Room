@@ -1,0 +1,146 @@
+// The connector wizard side panel (M4-PLAN POLA-60). It replaces the inspector while open; the
+// viewport shows only the part. All state lives in Rust (lab-app/src/wizard.rs).
+
+import { Theme } from "theme.slint";
+import { SectionHeader, SegmentedControl, PillButton, IconButton } from "components.slint";
+import { TextField, LabeledField } from "fields.slint";
+
+export component WizardPanel inherits VerticalLayout {
+    in property <string> title;
+    // One line per connector or optical port.
+    in property <[string]> rows;
+    // 0 = waiting for a click, 1 = "hole or face?", 2 = hole form, 3 = optical face form.
+    in property <int> step;
+    in property <string> message;
+    in property <int> hole-kind;      // 0 thread, 1 bore, 2 optic bore
+    in property <string> spec;
+    in property <int> gender;         // 0 male, 1 female
+    in property <string> diameter;
+    in property <int> optic-kind;     // index into optic-kinds
+    in property <[string]> optic-kinds;
+    in property <string> aperture;
+    callback choose(int /* 0 hole, 1 optical face */);
+    callback pick(string /* id */, int);
+    callback field(string /* id */, string /* text */) -> bool;
+    callback confirm();
+    callback back();
+    callback remove(int);
+    callback save();
+    callback cancel();
+
+    padding: 16px;
+    spacing: 8px;
+
+    Text {
+        text: "Connectors · " + root.title;
+        color: Theme.text;
+        font-size: Theme.font-title;
+        font-weight: 600;
+        overflow: elide;
+    }
+    SectionHeader { text: "DEFINED"; }
+    if root.rows.length == 0: Text {
+        text: "None yet.";
+        color: Theme.text-tertiary;
+        font-size: Theme.font-body;
+    }
+    for row[i] in root.rows: HorizontalLayout {
+        height: 28px;
+        spacing: 8px;
+        Text {
+            text: row;
+            color: Theme.text-secondary;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        IconButton {
+            icon: "×";
+            size: 24px;
+            destructive: true;
+            clicked => { root.remove(i); }
+        }
+    }
+
+    SectionHeader { text: root.step == 0 ? "ADD" : root.step == 1 ? "WHAT IS HERE?" : root.step == 2 ? "HOLE" : "OPTICAL FACE"; }
+    if root.step == 0: Text {
+        text: "Click a hole or an optical face on the part.";
+        color: Theme.text-secondary;
+        font-size: Theme.font-body;
+        wrap: word-wrap;
+    }
+    if root.step == 1: HorizontalLayout {
+        spacing: 8px;
+        PillButton { label: "Hole / bore here"; clicked => { root.choose(0); } }
+        PillButton { label: "Optical face here"; clicked => { root.choose(1); } }
+    }
+    if root.step == 2: VerticalLayout {
+        spacing: 8px;
+        SegmentedControl {
+            items: ["Thread", "Bore", "Optic bore"];
+            current: root.hole-kind;
+            floating: false;
+            selected(i) => { root.pick("kind", i); }
+        }
+        if root.hole-kind == 0: HorizontalLayout {
+            spacing: 8px;
+            Text { text: "Thread"; color: Theme.text-secondary; font-size: Theme.font-body; vertical-alignment: center; horizontal-stretch: 1; }
+            TextField {
+                id: "spec";
+                value: root.spec;
+                committed(i, t) => { return root.field(i, t); }
+            }
+        }
+        if root.hole-kind != 0: LabeledField {
+            label: "Diameter";
+            id: "diameter";
+            value: root.diameter;
+            unit: "mm";
+            committed(i, t) => { return root.field(i, t); }
+        }
+        SegmentedControl {
+            items: ["Male", "Female"];
+            current: root.gender;
+            floating: false;
+            selected(i) => { root.pick("gender", i); }
+        }
+    }
+    if root.step == 3: VerticalLayout {
+        spacing: 8px;
+        SegmentedControl {
+            items: root.optic-kinds;
+            current: root.optic-kind;
+            floating: false;
+            compact: true;
+            selected(i) => { root.pick("optic", i); }
+        }
+        LabeledField {
+            label: "Clear aperture (optional)";
+            id: "aperture";
+            value: root.aperture;
+            unit: "mm";
+            committed(i, t) => { return root.field(i, t); }
+        }
+    }
+    if root.step >= 2: HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        PillButton { label: "Back"; clicked => { root.back(); } }
+        PillButton { label: "Add"; primary: true; clicked => { root.confirm(); } }
+    }
+    if root.message != "": Text {
+        text: root.message;
+        color: Theme.warning;
+        font-size: Theme.font-body;
+        wrap: word-wrap;
+    }
+
+    Rectangle { vertical-stretch: 1; }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        PillButton { label: "Cancel"; clicked => { root.cancel(); } }
+        PillButton { label: "Save"; primary: true; clicked => { root.save(); } }
+    }
+}

@@ -14,6 +14,7 @@ mod transform;
 mod stack;
 mod scene;
 mod ui_models;
+mod wizard;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

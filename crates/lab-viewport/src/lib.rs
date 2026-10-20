@@ -20,6 +20,7 @@ mod gizmo;
 mod glb;
 mod hole_material;
 mod host;
+mod inspect;
 mod isolate;
 mod measure;
 mod mesh;
@@ -146,6 +147,11 @@ pub enum ViewportRequest {
     Isolate(Option<PlatformId>),
     /// POLA-52. Windows "reduce animations": camera moves jump instead of animating.
     SetReduceMotion(bool),
+    /// POLA-60. Show only catalog part `id` at the origin, unrotated, framed; the document is
+    /// hidden but kept. `None` returns to the document and restores the camera.
+    InspectPart(Option<String>),
+    /// POLA-60. Connector/port frames (part space, mm) drawn as small axis arrows while inspecting.
+    InspectMarkers(Vec<lab_core::part::Frame>),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -227,6 +233,8 @@ pub enum ViewportEvent {
     /// POLA-54. Overlay items for the Top camera, sent after each frame in which the Top camera or
     /// the document changed. Empty when no camera is in Top mode.
     Overlay(Vec<OverlayItem>),
+    /// POLA-60. A click on the inspected part: hit point and surface normal, part space, mm.
+    PartPoint { point: bevy::math::DVec3, normal: bevy::math::DVec3 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -267,6 +275,8 @@ pub(crate) enum FrameRequest {
     SetBlueprint(bool),
     Isolate(Option<PlatformId>),
     SetReduceMotion(bool),
+    InspectPart(Option<String>),
+    InspectMarkers(Vec<lab_core::part::Frame>),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

@@ -21,6 +21,7 @@ lab-parts.workspace = true
 lab-mates.workspace = true
 lab-geom.workspace = true
 lab-file.workspace = true
+lab-import.workspace = true
 lab-viewport.workspace = true
 lab-ui.workspace = true
 slint.workspace = true

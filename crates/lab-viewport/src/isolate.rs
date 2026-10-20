@@ -40,7 +40,7 @@ pub(crate) fn kept_platforms(doc: &Document, root: PlatformId) -> BTreeSet<Platf
     doc.platforms.iter().map(|p| p.id).filter(|&id| reaches(id)).collect()
 }
 
-fn apply_isolation(
+pub(crate) fn apply_isolation(
     pending: Res<PendingRequests>,
     index: Res<SceneIndex>,
     events: Res<EventSender>,
