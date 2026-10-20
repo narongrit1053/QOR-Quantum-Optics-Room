@@ -46,6 +46,7 @@ bevy = { version = "=0.20.0", default-features = false, features = [
     "bevy_pbr",
     "bevy_picking",
     "mesh_picking",
+    "bevy_gizmos_render",
     "tonemapping_luts",
     "zstd_rust",
 ] }

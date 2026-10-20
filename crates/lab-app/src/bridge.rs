@@ -88,6 +88,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     controller::on_viewport_selection(&ui, &app, &models, target);
                 }
                 ViewportEvent::HoverChanged(_) => {}
+                ViewportEvent::Measured(m) => crate::measure::on_measured(&ui, &app, m),
                 ViewportEvent::PlaceRequested(request) => {
                     crate::place::on_place_requested(&ui, &app, &models, request);
                 }

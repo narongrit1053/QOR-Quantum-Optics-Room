@@ -18,6 +18,7 @@ mod camera;
 mod gizmo;
 mod hole_material;
 mod host;
+mod measure;
 mod mesh;
 mod picking;
 mod place;
@@ -139,6 +140,8 @@ pub enum Tool {
     Select,
     Move,
     Rotate,
+    /// POLA-53
+    Measure,
 }
 
 /// What a library drag carries.
@@ -201,7 +204,13 @@ pub enum ViewportEvent {
         rotation: bevy::math::DQuat,
         done: bool,
     },
+    /// POLA-53. Current measurement in the room frame (mm, +Z up); `b` is None while the second
+    /// point is not picked yet. `None` = cleared.
+    Measured(Option<Measurement>),
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Measurement { pub a: bevy::math::DVec3, pub b: Option<bevy::math::DVec3> }
 
 /// Where a dropped item goes. `position`/`rotation` are relative to `parent`, as `Node` stores them.
 #[derive(Clone, Debug, PartialEq)]
