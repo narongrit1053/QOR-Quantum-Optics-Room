@@ -104,7 +104,7 @@ When woken:
 1. **A build stage (5-8) finished:** read each task's report. If a report shows a failed or missing gate, comment that on the issue @-mentioning its engineer and set it `todo`. Otherwise @-mention **Engineer Sonnet** on the parent with the exact list of branches to merge (Merges, below); it re-runs the gates, merges, and reports back. When its report is clean, set the next stage to `todo`. After stage 8, set all stage-9 reviews to `todo`.
 2. **A build issue finished again during the audit** (a review fix): do nothing; the fix is merged after the audit.
 3. **Stage 9 finished:** @-mention **Engineer Sonnet** to merge every `m1-<ID>-fix` branch the audit produced (Merges) and run the full §8.2 gates; when its report is clean, set T7 to `todo`.
-4. Comment on the parent what you did. If something is blocked, set the parent `blocked` and explain; the board (the user) decides.
+4. Comment on the parent what you did. If something is blocked, decide the way forward yourself (see 'Lead decides alone' in FIRST-DRAFT.md); do not wait for the board.
 
 ## Failed runs and usage limits
 
@@ -129,7 +129,7 @@ When woken by a failure, the triager does only this (no code, no worktree change
 1. Read the error: `multica issue runs <KEY>`, then `multica issue run-messages <run-id>` for the failed run. If the latest run did not fail (it completed, or a later run is queued or running), comment that and stop.
 2. **Usage or rate limit** (429, "quota", "usage limit", "rate limit", "resource exhausted", "try again at ..."):
    - Any agent: **schedule a rerun after the reset** for the same assignee: `multica issue wakeup create <KEY> --kind at --after <wait> --agent-id <assignee id> --instruction "Usage limit has reset. Continue this issue from its worktree and comments; do not start over."` Use the reset time from the error plus 2 minutes; if there is none, `5h`.
-3. **Any other failure:** if the previous run on this issue did not fail the same way, `multica issue rerun <KEY>`. If it did, set the issue `blocked` and @-mention the Lead Engineer (or, if the Lead is the assignee, leave it for the board).
+3. **Any other failure:** if the previous run on this issue did not fail the same way, `multica issue rerun <KEY>`. If it did, set the issue `blocked` and @-mention the Lead Engineer (or, if the Lead is the assignee, rerun it once more after 1h; the Lead's progress check picks it up after that).
 4. Comment once on the issue: the error (one line) and what you did.
 
 Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Engineer Opus `c560211e-a30f-45de-8ed0-80e94df9c26b`, Engineer Opus Low `9bffb221-f102-43a0-a10a-f28e39ed5144`, Engineer Sonnet `1a8be1b5-3ca9-42ca-8e19-02b539b5826d`, QA Reviewer Sonnet `08ecefee-2d76-424c-a1e5-565b9427f347`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688`.
