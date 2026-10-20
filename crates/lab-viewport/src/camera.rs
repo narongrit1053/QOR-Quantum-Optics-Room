@@ -15,6 +15,7 @@ use bevy::{
 };
 use lab_core::{Document, SelectionTarget};
 
+use crate::gizmo::GizmoCapture;
 use crate::host::{MsaaSamples, PendingRequests, RedrawState, ViewportSize};
 use crate::picking::Selection;
 use crate::scene::{SceneIndex, SceneNode, to_render};
@@ -96,6 +97,8 @@ struct Press {
     start: Vec2,
     last: Vec2,
     dragging: bool,
+    /// The press belongs to the gizmo: no orbit, no click.
+    gizmo: bool,
 }
 
 #[derive(Resource, Default)]
@@ -168,6 +171,7 @@ pub(crate) fn handle_input(
     full: Res<ViewportSize>,
     mut pointer: ResMut<PointerState>,
     mut clicks: ResMut<Clicks>,
+    mut capture: ResMut<GizmoCapture>,
     mut cameras: Query<(&mut OrbitCamera, &Camera, &GlobalTransform)>,
     sources: FrameSources,
 ) {
@@ -183,7 +187,7 @@ pub(crate) fn handle_input(
             FrameRequest::Input(input) => match *input {
                 ViewportInput::PointerDown { button, pos, mods } => {
                     pointer.position = Some(pos);
-                    pointer.press = Some(Press { button, mods, start: pos, last: pos, dragging: false });
+                    pointer.press = Some(Press { button, mods, start: pos, last: pos, dragging: false, gizmo: capture.0 });
                 }
                 ViewportInput::PointerMove { pos, .. } => {
                     pointer.position = Some(pos);
@@ -191,7 +195,7 @@ pub(crate) fn handle_input(
                     if !press.dragging && pos.distance(press.start) > DRAG_THRESHOLD_PX {
                         press.dragging = true;
                     }
-                    if press.dragging {
+                    if press.dragging && !press.gizmo {
                         let delta = pos - press.last;
                         let press = *press;
                         drag(&mut orbit, press, delta, viewport_height);
@@ -202,7 +206,10 @@ pub(crate) fn handle_input(
                 }
                 ViewportInput::PointerUp { button, pos, .. } => {
                     pointer.position = Some(pos);
-                    if let Some(press) = pointer.press.take()
+                    let press = pointer.press.take();
+                    if press.is_some_and(|p| p.gizmo) {
+                        capture.0 = false;
+                    } else if let Some(press) = press
                         && press.button == button
                         && button == PointerButton::Left
                         && !press.dragging
@@ -226,7 +233,7 @@ pub(crate) fn handle_input(
             }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
-            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) => {}
+            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) => {}
         }
     }
 }

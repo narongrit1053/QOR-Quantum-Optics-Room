@@ -43,7 +43,7 @@ impl Plugin for PickingPlugin {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pick(
+pub(crate) fn pick(
     pending: Res<PendingRequests>,
     pointer: Res<PointerState>,
     clicks: Res<Clicks>,

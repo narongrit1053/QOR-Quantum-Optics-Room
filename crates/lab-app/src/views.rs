@@ -1,7 +1,7 @@
 //! Pure document -> view models and preview generators (M1-SPEC §7.4).
 //! No Slint types in this library.
 
-use lab_core::glam::{self, DVec2};
+use lab_core::glam::DVec2;
 use lab_core::holes::{ExclusionZone, HoleSet, ZoneShape};
 use lab_core::model::{Document, Finish, Node, Platform, PlatformKind, Shape, Support, Surface};
 use lab_core::outline::Outline;
@@ -12,7 +12,11 @@ use lab_core::units::{
     LengthUnit, format_angle_deg, format_length, format_length_with_unit,
 };
 
-use crate::edit::EditError;
+use lab_catalog::Catalog;
+use lab_core::model::{Attach, Parent};
+use lab_core::part::{Geometry, ParamValue};
+
+use crate::edit::{EditError, node_mate, node_yaw};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneRowData {
@@ -152,6 +156,7 @@ pub struct NodeViewData {
     pub title: String,
     pub detail: String,
     pub fields: Vec<InspectorFieldData>,
+    pub edit_fields: Vec<EditFieldData>,
 }
 
 /// Builds the scene tree rows: Room first, platforms, and node groups nested.
@@ -670,20 +675,34 @@ pub fn room_view(doc: &Document, units: LengthUnit) -> RoomViewData {
     }
 }
 
-pub fn node_view(doc: &Document, node: &Node, holes: Option<&HoleSet>, units: LengthUnit) -> NodeViewData {
+pub fn node_view(
+    doc: &Document,
+    catalog: &Catalog,
+    node: &Node,
+    holes: Option<&HoleSet>,
+    units: LengthUnit,
+) -> NodeViewData {
     let platform = doc.root_platform(node.id).and_then(|p| doc.platform(p));
-    let hole = holes.and_then(|set| {
-        let pt = node.position.truncate();
-        let idx = set.nearest(pt)?;
-        let pos = set.position(idx);
-        if pos.distance(pt) < 0.5 {
-            set.label(idx)
-        } else {
-            None
+    let def = catalog.get(&node.part);
+    let attach = match &node.attach {
+        Attach::Free => "Free".to_string(),
+        Attach::Hole { hole } => match holes.and_then(|set| set.label(*hole)) {
+            Some(label) => format!("Hole {label}"),
+            None => "Hole (outside the grid)".to_string(),
+        },
+        Attach::Mate { slide, .. } => {
+            let on = match node.parent {
+                Parent::Node(pid) => doc.node(pid).map_or("?".to_string(), |p| {
+                    catalog.get(&p.part).map_or(p.name.clone(), |d| {
+                        if d.part_number.is_empty() { d.name.clone() } else { d.part_number.clone() }
+                    })
+                }),
+                _ => "?".to_string(),
+            };
+            format!("On {on} · slide {}", format_length_with_unit(*slide, units))
         }
-    });
+    };
 
-    let (yaw, _, _) = node.rotation.to_euler(glam::EulerRot::ZYX);
     let size = match &node.shape {
         Shape::Box { size } => format!(
             "{} × {} × {} {}",
@@ -698,7 +717,7 @@ pub fn node_view(doc: &Document, node: &Node, holes: Option<&HoleSet>, units: Le
             format_length(*length, units),
             units.suffix()
         ),
-        Shape::Part => node.part.clone(),
+        Shape::Part => String::new(),
     };
 
     let finish = match &node.finish {
@@ -710,21 +729,69 @@ pub fn node_view(doc: &Document, node: &Node, holes: Option<&HoleSet>, units: Le
         Finish::Beam { wavelength_nm } => format!("Beam, {wavelength_nm:.0} nm"),
     };
 
-    let fields = vec![
-        InspectorFieldData { label: "Platform".into(), value: platform.map_or("—".to_string(), |p| p.name.clone()) },
-        InspectorFieldData { label: "Hole".into(), value: hole.map(|h| h.to_string()).unwrap_or_else(|| "—".to_string()) },
-        InspectorFieldData { label: "X".into(), value: format_length_with_unit(node.position.x, units) },
-        InspectorFieldData { label: "Y".into(), value: format_length_with_unit(node.position.y, units) },
-        InspectorFieldData { label: "Height".into(), value: format_length_with_unit(node.position.z, units) },
-        InspectorFieldData { label: "Rotation".into(), value: format!("{:.1}°", yaw.to_degrees()) },
-        InspectorFieldData { label: "Size".into(), value: size },
-        InspectorFieldData { label: "Finish".into(), value: finish },
+    let mut fields = Vec::new();
+    if let Some(def) = def {
+        let number = if def.part_number.is_empty() { def.id.clone() } else { def.part_number.clone() };
+        fields.push(InspectorFieldData { label: "Part number".into(), value: number });
+    }
+    fields.push(InspectorFieldData { label: "Platform".into(), value: platform.map_or("—".to_string(), |p| p.name.clone()) });
+    fields.push(InspectorFieldData { label: "Attach".into(), value: attach });
+    if !size.is_empty() {
+        fields.push(InspectorFieldData { label: "Size".into(), value: size });
+    }
+    fields.push(InspectorFieldData { label: "Finish".into(), value: finish });
+
+    let mated = matches!(node.attach, Attach::Mate { .. });
+    let length = |id: &str, label: &str, value: f64, enabled: bool| EditFieldData {
+        id: id.into(),
+        label: label.into(),
+        value: format_length(value, units),
+        unit: units.suffix().into(),
+        enabled,
+        invalid: false,
+    };
+    let rotation = match &node.attach {
+        Attach::Mate { twist, .. } => *twist,
+        _ => node_yaw(node),
+    };
+    let mut edit_fields = vec![
+        length("node.x", "X", node.position.x, !mated),
+        length("node.y", "Y", node.position.y, !mated),
+        length("node.z", "Height", node.position.z, !mated),
+        EditFieldData {
+            id: "node.rotation".into(),
+            label: "Rotation".into(),
+            value: format_angle_deg(rotation),
+            unit: "°".into(),
+            enabled: true,
+            invalid: false,
+        },
     ];
+    if let Attach::Mate { slide, .. } = &node.attach {
+        let ranged = node_mate(doc, catalog, node).is_some_and(|(_, _, (lo, hi))| lo < hi);
+        edit_fields.push(length("node.slide", "Slide", *slide, ranged));
+    }
+    if let Some(Geometry::Parametric { generator, params }) = def.map(|d| &d.geometry)
+        && let Some(info) = lab_parts::generators().iter().find(|g| g.name == generator)
+    {
+        for (name, default) in info.params {
+            let value = node.params.get(*name).or_else(|| params.get(*name)).and_then(ParamValue::as_f64).unwrap_or(*default);
+            edit_fields.push(EditFieldData {
+                id: format!("node.param.{name}"),
+                label: name.replace('_', " "),
+                value: lab_core::units::format_length(value, LengthUnit::Millimetre),
+                unit: "mm".into(),
+                enabled: true,
+                invalid: false,
+            });
+        }
+    }
 
     NodeViewData {
         title: node.name.clone(),
-        detail: node.part.clone(),
+        detail: def.map_or(node.part.clone(), |d| d.category.clone()),
         fields,
+        edit_fields,
     }
 }
 
