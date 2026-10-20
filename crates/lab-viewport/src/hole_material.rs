@@ -58,6 +58,8 @@ pub(crate) struct HoleGridParams {
     pub zone_count: u32,
     /// Rect: (cx, cy, half_w, half_h); circle: (cx, cy, r, -1).
     pub zones: [Vec4; MAX_ZONES],
+    /// 1 = flat blueprint look: unlit fill, holes drawn as outlines (POLA-49).
+    pub blueprint: u32,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Clone, Debug)]

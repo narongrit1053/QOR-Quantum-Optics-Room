@@ -233,6 +233,8 @@ export component AppWindow inherits Window {
 
     // 0 3D, 1 Top. in-out: the T/P keys assign it (M0).
     in-out property <int> view-mode: 0;
+    // Top-view blueprint look (session setting, POLA-49).
+    in-out property <bool> blueprint;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     // Returns true when accepted or a no-op; false keeps the text and marks the field invalid.
@@ -788,6 +790,14 @@ export component AppWindow inherits Window {
                 selected(i) => {
                     root.view-mode = i;
                     root.view-mode-requested(i);
+                }
+            }
+            if root.view-mode == 1: VerticalLayout {
+                alignment: center;
+                ToolButton {
+                    label: "Blueprint";
+                    active: root.blueprint;
+                    clicked => { root.action("view.blueprint"); }
                 }
             }
             VerticalLayout {
