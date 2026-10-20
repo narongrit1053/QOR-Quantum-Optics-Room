@@ -15,7 +15,7 @@ use lab_catalog::Catalog;
 use lab_core::part::PartDef;
 use lab_core::{Attach, Document, NodeId, Parent, PlatformId, SelectionTarget, Shape, compute_holes};
 
-use crate::camera::{OrbitCamera, to_camera_space};
+use crate::camera::{OrbitCamera, camera_at};
 use crate::host::{EventSender, PendingRequests, SettleFrames, ViewportSize};
 use crate::picking::PickId;
 use crate::scene::{PartMeshes, SceneIndex, from_render, part_mesh, rotation_to_render, to_render};
@@ -187,8 +187,8 @@ fn drag_part(
         let Some(def) = catalog.0.get(item.root()) else { continue };
 
         // Ray from the pointer into the scene; the ghost has no PickId, so it is never hit.
-        let Ok((camera, camera_transform)) = cameras.single() else { continue };
-        let Ok(ray) = camera.viewport_to_world(camera_transform, to_camera_space(camera, &full, pos)) else { continue };
+        let Some(((), camera, camera_transform, p)) = camera_at(cameras.iter().map(|(c, t)| ((), c, t)), &full, pos) else { continue };
+        let Ok(ray) = camera.viewport_to_world(camera_transform, p) else { continue };
         let filter = |entity: Entity| targets.contains(entity);
         let settings = MeshRayCastSettings::default().with_filter(&filter);
         let hit = match ray_cast.cast_ray(ray, &settings).first().map(|(e, h)| (targets.get(*e).ok(), h.point)) {

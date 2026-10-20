@@ -9,7 +9,7 @@
 use bevy::{light::NotShadowCaster, math::DVec2, math::DVec3, prelude::*};
 use lab_core::{Room, SelectionTarget, WallDisplay};
 
-use crate::camera::{OrbitCamera, animate_camera};
+use crate::camera::{OrbitCamera, TopPane, animate_camera};
 use crate::host::{PendingRequests, RedrawState};
 use crate::mesh::trimesh_to_bevy;
 use crate::picking::{HighlightLook, PickId};
@@ -248,7 +248,7 @@ fn update_wall_fade(
     mut fade: ResMut<WallFade>,
     mut redraw: ResMut<RedrawState>,
     index: Res<SceneIndex>,
-    cameras: Query<&OrbitCamera>,
+    cameras: Query<&OrbitCamera, Without<TopPane>>,
     mut walls: Query<(Entity, &WallInfo, Mut<WallState>, &mut Visibility)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {

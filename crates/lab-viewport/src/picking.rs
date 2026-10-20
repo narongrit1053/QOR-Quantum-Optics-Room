@@ -7,7 +7,7 @@ use bevy::{
 };
 use lab_core::SelectionTarget;
 
-use crate::camera::{Clicks, OrbitCamera, PointerState, handle_input, to_camera_space};
+use crate::camera::{Clicks, OrbitCamera, PointerState, camera_at, handle_input};
 use crate::hole_material::HoleTopMaterial;
 use crate::host::{EventSender, PendingRequests, ViewportSize};
 use crate::room::WallState;
@@ -54,9 +54,9 @@ pub(crate) fn pick(
     mut selection: ResMut<Selection>,
     (index, events, full): (Res<SceneIndex>, Res<EventSender>, Res<ViewportSize>),
 ) {
-    let Ok((camera, camera_transform)) = cameras.single() else { return };
     let mut target_at = |pos: Vec2| -> Option<SelectionTarget> {
-        let ray = camera.viewport_to_world(camera_transform, to_camera_space(camera, &full, pos)).ok()?;
+        let ((), camera, camera_transform, p) = camera_at(cameras.iter().map(|(c, t)| ((), c, t)), &full, pos)?;
+        let ray = camera.viewport_to_world(camera_transform, p).ok()?;
         // Faded walls let clicks through; hidden entities are skipped by the default visibility.
         let filter = |entity: Entity| targets.get(entity).is_ok_and(|(_, wall)| wall.is_none_or(|w| w.alpha >= 0.5));
         let settings = MeshRayCastSettings::default().with_filter(&filter);

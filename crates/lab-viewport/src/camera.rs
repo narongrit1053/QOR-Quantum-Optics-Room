@@ -7,7 +7,7 @@
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 use bevy::{
-    camera::{ScalingMode, primitives::Aabb},
+    camera::{ClearColorConfig, ScalingMode, Viewport, primitives::Aabb},
     ecs::system::SystemParam,
     light::ShadowFilteringMethod,
     math::DVec3,
@@ -16,7 +16,7 @@ use bevy::{
 use lab_core::{Document, SelectionTarget};
 
 use crate::gizmo::GizmoCapture;
-use crate::host::{MsaaSamples, PendingRequests, RedrawState, ViewportSize};
+use crate::host::{MsaaSamples, PendingRequests, RedrawState, TargetSize, ViewportSize};
 use crate::picking::Selection;
 use crate::scene::{SceneIndex, SceneNode, to_render};
 use crate::{FrameRequest, FrameTarget, Modifiers, PointerButton, ViewMode, ViewportInput};
@@ -131,6 +131,8 @@ struct Press {
     dragging: bool,
     /// The press belongs to the gizmo: no orbit, no click.
     gizmo: bool,
+    /// The camera of the pane the press started in; the whole drag moves it.
+    camera: Entity,
 }
 
 #[derive(Resource, Default)]
@@ -143,6 +145,11 @@ pub(crate) struct PointerState {
 impl PointerState {
     pub fn is_dragging(&self) -> bool {
         self.press.is_some_and(|p| p.dragging)
+    }
+
+    /// Where the current press started (full-resolution px).
+    pub fn press_start(&self) -> Option<Vec2> {
+        self.press.map(|p| p.start)
     }
 }
 
@@ -157,7 +164,7 @@ impl Plugin for CameraPlugin {
         app.init_resource::<PointerState>()
             .init_resource::<Clicks>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (handle_input, animate_camera).chain());
+            .add_systems(Update, (layout_panes, handle_input, animate_camera).chain());
     }
 }
 
@@ -177,13 +184,69 @@ fn spawn_camera(mut commands: Commands, samples: Res<MsaaSamples>) {
         view.transform(),
         OrbitCamera::new(view),
     ));
+    // POLA-51: the Top pane of the split view (right half), inactive outside Split. It renders
+    // after the main camera into the same texture and keeps the left half (no clear).
+    commands.spawn((
+        Camera3d::default(),
+        Camera { is_active: false, order: 1, clear_color: ClearColorConfig::None, ..default() },
+        msaa,
+        ShadowFilteringMethod::Hardware2x2,
+        Projection::Perspective(PerspectiveProjection { fov: FOV, near: 0.01, far: 100.0, ..default() }),
+        view.transform(),
+        OrbitCamera::new(view),
+        TopPane,
+    ));
+}
+
+/// Marks the second camera, the Top pane of [`ViewMode::Split`]. Systems that need "the" camera
+/// (wall fade, blueprint, outline width) use the main one: `Without<TopPane>`.
+#[derive(Component)]
+pub(crate) struct TopPane;
+
+/// Gives each camera its half of the render target in Split (recomputed every update, since the
+/// adaptive scaler resizes the target), and the whole target otherwise.
+fn layout_panes(size: Res<TargetSize>, mut cameras: Query<(&mut Camera, Has<TopPane>), With<OrbitCamera>>) {
+    let split = cameras.iter().any(|(c, pane)| pane && c.is_active);
+    let left = (size.0.x / 2).max(1);
+    for (mut camera, pane) in &mut cameras {
+        let rect = split.then(|| {
+            let (x, w) = if pane { (left, size.0.x.saturating_sub(left).max(1)) } else { (0, left) };
+            (UVec2::new(x, 0), UVec2::new(w, size.0.y.max(1)))
+        });
+        let current = camera.viewport.as_ref().map(|v| (v.physical_position, v.physical_size));
+        if current != rect {
+            camera.viewport = rect.map(|(physical_position, physical_size)| Viewport { physical_position, physical_size, ..default() });
+        }
+    }
+}
+
+/// The active camera whose pane contains `pos` (full-resolution physical px), with `pos` mapped
+/// into its render target. Outside every pane (the seam, rounding) the first active camera.
+pub(crate) fn camera_at<'a, T>(
+    cameras: impl IntoIterator<Item = (T, &'a Camera, &'a GlobalTransform)>,
+    full: &ViewportSize,
+    pos: Vec2,
+) -> Option<(T, &'a Camera, &'a GlobalTransform, Vec2)> {
+    let mut first = None;
+    for (item, camera, transform) in cameras {
+        if !camera.is_active {
+            continue;
+        }
+        let p = to_camera_space(camera, full, pos);
+        if camera.logical_viewport_rect().is_some_and(|r| r.contains(p)) {
+            return Some((item, camera, transform, p));
+        }
+        first.get_or_insert((item, camera, transform, p));
+    }
+    first
 }
 
 /// Maps a pointer position (full-resolution physical pixels) into the camera's current render
 /// target, which is smaller while frames render at reduced resolution. The camera's size is
-/// the one of the frame on screen, so rays match what the user sees.
+/// the one of the frame on screen, so rays match what the user sees. `viewport_to_world` takes
+/// target space, so this also holds for a pane of the split view.
 pub(crate) fn to_camera_space(camera: &Camera, full: &ViewportSize, pos: Vec2) -> Vec2 {
-    match camera.logical_viewport_size() {
+    match camera.logical_target_size() {
         Some(size) if full.0.x > 0.0 && full.0.y > 0.0 => pos * size / full.0,
         _ => pos,
     }
@@ -198,17 +261,22 @@ pub(crate) struct FrameSources<'w, 's> {
     nodes: Query<'w, 's, (&'static SceneNode, &'static Aabb, &'static GlobalTransform)>,
 }
 
+type CameraItem = (Entity, &'static mut OrbitCamera, &'static mut Camera, &'static GlobalTransform, Has<TopPane>);
+
 pub(crate) fn handle_input(
     pending: Res<PendingRequests>,
     full: Res<ViewportSize>,
     mut pointer: ResMut<PointerState>,
     mut clicks: ResMut<Clicks>,
     mut capture: ResMut<GizmoCapture>,
-    mut cameras: Query<(&mut OrbitCamera, &Camera, &GlobalTransform)>,
+    mut cameras: Query<CameraItem>,
     sources: FrameSources,
 ) {
     clicks.0.clear();
-    let Ok((mut orbit, camera, camera_transform)) = cameras.single_mut() else { return };
+    let Some(main) = cameras.iter().find(|c| !c.4).map(|c| c.0) else { return };
+    let pane_at = |cameras: &Query<CameraItem>, pos: Vec2| {
+        camera_at(cameras.iter().map(|(e, _, c, t, _)| (e, c, t)), &full, pos).map_or(main, |hit| hit.0)
+    };
     // Pointer deltas are in full-resolution pixels, whatever the current render scale.
     let viewport_height = full.0.y;
     // Selection as of each request (picking applies `Select` after this system).
@@ -219,7 +287,8 @@ pub(crate) fn handle_input(
             FrameRequest::Input(input) => match *input {
                 ViewportInput::PointerDown { button, pos, mods } => {
                     pointer.position = Some(pos);
-                    pointer.press = Some(Press { button, mods, start: pos, last: pos, dragging: false, gizmo: capture.0 });
+                    let camera = pane_at(&cameras, pos);
+                    pointer.press = Some(Press { button, mods, start: pos, last: pos, dragging: false, gizmo: capture.0, camera });
                 }
                 ViewportInput::PointerMove { pos, .. } => {
                     pointer.position = Some(pos);
@@ -230,7 +299,9 @@ pub(crate) fn handle_input(
                     if press.dragging && !press.gizmo {
                         let delta = pos - press.last;
                         let press = *press;
-                        drag(&mut orbit, press, delta, viewport_height);
+                        if let Ok((_, mut orbit, ..)) = cameras.get_mut(press.camera) {
+                            drag(&mut orbit, press, delta, viewport_height);
+                        }
                     }
                     if let Some(press) = pointer.press.as_mut() {
                         press.last = pos;
@@ -254,22 +325,33 @@ pub(crate) fn handle_input(
                 }
                 ViewportInput::Scroll { delta, pos, .. } => {
                     pointer.position = Some(pos);
-                    zoom_toward(&mut orbit, camera, camera_transform, to_camera_space(camera, &full, pos), delta.y);
+                    let entity = pane_at(&cameras, pos);
+                    if let Ok((_, mut orbit, camera, camera_transform, _)) = cameras.get_mut(entity) {
+                        zoom_toward(&mut orbit, &camera, camera_transform, to_camera_space(&camera, &full, pos), delta.y);
+                    }
                 }
             },
-            FrameRequest::SetViewMode(mode) => set_mode(&mut orbit, *mode),
+            FrameRequest::SetViewMode(mode) => set_view_mode(&mut cameras, *mode),
             FrameRequest::Frame(target) => {
                 if let Some((min, max)) = frame_bounds(*target, selected, &sources) {
-                    frame_box(&mut orbit, camera, min, max);
+                    for (_, mut orbit, camera, ..) in &mut cameras {
+                        frame_box(&mut orbit, &camera, min, max);
+                    }
                 }
             }
             FrameRequest::Isolate(id) => {
                 let target = id.map_or(FrameTarget::All, FrameTarget::Platform);
                 if let Some((min, max)) = frame_bounds(target, selected, &sources) {
-                    frame_box(&mut orbit, camera, min, max);
+                    for (_, mut orbit, camera, ..) in &mut cameras {
+                        frame_box(&mut orbit, &camera, min, max);
+                    }
                 }
             }
-            FrameRequest::SetReduceMotion(on) => orbit.reduce_motion = *on,
+            FrameRequest::SetReduceMotion(on) => {
+                for (_, mut orbit, ..) in &mut cameras {
+                    orbit.reduce_motion = *on;
+                }
+            }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
             FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) => {}
@@ -309,6 +391,45 @@ fn zoom_toward(orbit: &mut OrbitCamera, camera: &Camera, camera_transform: &Glob
     target.distance = new_distance;
 }
 
+/// 3D and Top drive the main camera at full size; Split keeps it in 3D on the left and turns the
+/// Top pane on, which starts at the main view and animates to straight down.
+fn set_view_mode(cameras: &mut Query<CameraItem>, mode: ViewMode) {
+    let mut main_view = None;
+    let mut pane_view = None;
+    for (_, orbit, camera, _, pane) in cameras.iter() {
+        if !pane {
+            main_view = Some((orbit.current, orbit.target));
+        } else if camera.is_active {
+            pane_view = Some((orbit.current, orbit.target));
+        }
+    }
+    let Some((main_current, main_target)) = main_view else { return };
+    for (_, mut orbit, mut camera, _, pane) in cameras.iter_mut() {
+        match (pane, mode) {
+            (true, ViewMode::Split) => {
+                if !camera.is_active {
+                    camera.is_active = true;
+                    orbit.current = main_current;
+                    orbit.target = main_target;
+                    orbit.mode = ViewMode::Perspective;
+                }
+                set_mode(&mut orbit, ViewMode::Top);
+            }
+            (true, _) => camera.is_active = false,
+            (false, ViewMode::Split) => set_mode(&mut orbit, ViewMode::Perspective),
+            (false, ViewMode::Top) if pane_view.is_some() => {
+                // Leaving Split for Top: the full view continues from the Top pane.
+                let (current, target) = pane_view.unwrap_or((main_current, main_target));
+                orbit.current = current;
+                orbit.target = target;
+                orbit.mode = ViewMode::Top;
+                orbit.tween = None;
+            }
+            (false, mode) => set_mode(&mut orbit, mode),
+        }
+    }
+}
+
 fn set_mode(orbit: &mut OrbitCamera, mode: ViewMode) {
     if orbit.mode == mode {
         return;
@@ -325,6 +446,8 @@ fn set_mode(orbit: &mut OrbitCamera, mode: ViewMode) {
             orbit.target.yaw = orbit.current.yaw + 0.65;
             orbit.target.pitch = 0.55;
         }
+        // Split is per camera: `set_view_mode` gives each camera Perspective or Top.
+        ViewMode::Split => {}
     }
 }
 
@@ -408,10 +531,16 @@ fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max: Vec3) {
 pub(crate) fn animate_camera(
     time: Res<Time>,
     mut redraw: ResMut<RedrawState>,
-    mut cameras: Query<(&mut OrbitCamera, &mut Transform, &mut Projection)>,
+    mut cameras: Query<(&mut OrbitCamera, &Camera, &mut Transform, &mut Projection)>,
 ) {
-    let Ok((mut orbit, mut transform, mut projection)) = cameras.single_mut() else { return };
-    let orbit = &mut *orbit;
+    for (mut orbit, camera, transform, projection) in &mut cameras {
+        if camera.is_active {
+            animate_one(&time, &mut redraw, &mut orbit, transform, projection);
+        }
+    }
+}
+
+fn animate_one(time: &Time, redraw: &mut RedrawState, orbit: &mut OrbitCamera, mut transform: Mut<Transform>, mut projection: Mut<Projection>) {
 
     // After an idle period the frame delta is huge; cap it so animations still play.
     let dt = time.delta_secs().min(1.0 / 30.0);

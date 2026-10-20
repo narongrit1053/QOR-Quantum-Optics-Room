@@ -9,7 +9,7 @@ use bevy::{
 };
 use lab_core::SelectionTarget;
 
-use crate::camera::OrbitCamera;
+use crate::camera::{OrbitCamera, TopPane};
 use crate::picking::{ACCENT, Selection};
 use crate::scene::{SceneIndex, SceneNode};
 
@@ -45,7 +45,7 @@ fn rebuild_outline(
     added: Query<(), (With<SceneNode>, Added<Aabb>)>,
     pieces: Query<(Entity, &SceneNode, &Mesh3d, &Aabb, &GlobalTransform)>,
     outlines: Query<Entity, With<Outline>>,
-    camera: Query<CameraView, With<OrbitCamera>>,
+    camera: Query<CameraView, (With<OrbitCamera>, Without<TopPane>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut material: Local<Option<Handle<StandardMaterial>>>,
 ) {
@@ -87,7 +87,7 @@ fn rebuild_outline(
 /// Keeps the hull about `OUTLINE_PX` wide while the camera moves (the camera only moves on
 /// input or easing, so this costs nothing when idle).
 fn resize_outline(
-    camera: Query<CameraView, (With<OrbitCamera>, Changed<GlobalTransform>)>,
+    camera: Query<CameraView, (With<OrbitCamera>, Without<TopPane>, Changed<GlobalTransform>)>,
     mut outlines: Query<(&ChildOf, &mut Transform), With<Outline>>,
     pieces: Query<(&Aabb, &GlobalTransform), With<SceneNode>>,
 ) {

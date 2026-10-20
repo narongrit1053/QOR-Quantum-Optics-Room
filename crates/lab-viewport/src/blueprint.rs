@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use lab_core::SelectionTarget;
 
 use crate::FrameRequest;
-use crate::camera::{OrbitCamera, handle_input};
+use crate::camera::{OrbitCamera, TopPane, handle_input};
 use crate::hole_material::HoleTopMaterial;
 use crate::host::PendingRequests;
 use crate::picking::{HighlightLook, Selection, pick};
@@ -42,7 +42,7 @@ impl Plugin for BlueprintPlugin {
 fn apply_blueprint(
     mut commands: Commands,
     pending: Res<PendingRequests>,
-    cameras: Query<&OrbitCamera>,
+    cameras: Query<&OrbitCamera, Without<TopPane>>,
     mut state: ResMut<Blueprint>,
     mut looks: Query<(Entity, &mut HighlightLook, Option<&Saved>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
