@@ -32,6 +32,7 @@ pub use lab_core::{SelectionTarget, WallDisplay};
 
 pub use bevy::math::Vec2;
 pub use host::{ViewportHandle, start};
+pub use place::stack_chain;
 pub use wgpu;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +135,29 @@ pub enum ViewportRequest {
 pub enum DragItem {
     /// Catalog id.
     Part(String),
+    /// A solved post stack (M2-PLAN POLA-46).
+    Stack(StackSpec),
+}
+
+impl DragItem {
+    /// The catalog id of the part that stands on the platform.
+    pub fn root(&self) -> &str {
+        match self {
+            DragItem::Part(id) => id,
+            DragItem::Stack(s) => s.base.as_deref().unwrap_or(&s.holder),
+        }
+    }
+}
+
+/// Catalog ids of a beam-height stack, bottom to top, and the post's slide in the holder.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StackSpec {
+    pub optic: Option<String>,
+    pub mount: String,
+    pub base: Option<String>,
+    pub holder: String,
+    pub post: String,
+    pub slide: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]

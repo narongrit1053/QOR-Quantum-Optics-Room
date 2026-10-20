@@ -8,6 +8,7 @@ mod dialogs;
 mod files;
 mod library;
 mod place;
+mod stack;
 mod ui_models;
 
 use std::cell::{Cell, RefCell};
@@ -75,8 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     bridge::connect_input(&ui, &app);
     controller::connect(&ui, &app, &models);
     library::connect(&ui, &app, &models);
+    stack::connect(&ui, &app);
     controller::refresh_all(&ui, &app.borrow(), &models);
     library::fill(&app.borrow(), &models);
+    stack::fill(&ui, &mut app.borrow_mut());
     if !warnings.is_empty() {
         let text = format!("{} library files could not be read; see the log.", warnings.len());
         controller::show_toast(&ui, &app.borrow(), &text, false);
