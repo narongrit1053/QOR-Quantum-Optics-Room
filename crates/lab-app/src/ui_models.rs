@@ -59,7 +59,6 @@ impl UiModels {
         ui.set_room_walls(ModelRc::from(m.room_walls.clone()));
         ui.set_sheet_buttons(ModelRc::from(m.sheet_buttons.clone()));
         ui.set_library(ModelRc::from(m.library.clone()));
-        fill_library(m);
         models
     }
 }
@@ -214,20 +213,4 @@ pub fn fill_room(ui: &AppWindow, models: &UiModels, v: RoomViewData) {
 pub fn fill_room_preview(ui: &AppWindow, models: &UiModels, preview: OutlinePreviewData, labels: Vec<PreviewLabelData>) {
     ui.set_room_preview(outline_preview(preview));
     sync(&models.room_preview_labels, labels.into_iter().map(preview_label));
-}
-
-/// The M0 part library (static).
-pub fn fill_library(models: &UiModels) {
-    let accent = |r, g, b| slint::Color::from_rgb_u8(r, g, b);
-    let library = [
-        ("Tables & breadboards", "T", accent(100, 210, 255)),
-        ("Posts & holders", "P", accent(191, 90, 242)),
-        ("Mounts", "M", accent(10, 132, 255)),
-        ("Optics", "O", accent(48, 209, 88)),
-        ("Lasers", "L", accent(255, 55, 95)),
-        ("Detectors", "D", accent(255, 159, 10)),
-    ]
-    .into_iter()
-    .map(|(label, letter, tint)| LibraryRow { label: label.into(), letter: letter.into(), tint });
-    sync(&models.library, library);
 }

@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 lab-core.workspace = true
+lab-catalog.workspace = true
 lab-geom.workspace = true
 bevy.workspace = true
 wgpu.workspace = true
