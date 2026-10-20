@@ -236,9 +236,9 @@ fn common(ui: &AppWindow, m: &Models) {
     sync_vec(
         &m.library,
         vec![
-            LibraryRow { label: s("Mirror mounts"), letter: s("M"), tint: tint(10, 132, 255) },
-            LibraryRow { label: s("Lenses"), letter: s("L"), tint: tint(48, 209, 88) },
-            LibraryRow { label: s("Lasers"), letter: s("B"), tint: tint(255, 55, 95) },
+            LibraryRow { label: s("Mirror mounts"), letter: s("M"), tint: tint(10, 132, 255), ..Default::default() },
+            LibraryRow { label: s("Lenses"), letter: s("L"), tint: tint(48, 209, 88), ..Default::default() },
+            LibraryRow { label: s("Lasers"), letter: s("B"), tint: tint(255, 55, 95), ..Default::default() },
         ],
     );
     sync_vec(
@@ -974,7 +974,7 @@ fn selftest_steps() -> Vec<Step> {
         t.check("corner-commit-updates-model", x == "7", || format!("corner 2 x = {x}"));
         t.tap_key(Key::Escape);
     }));
-    // 5. Shift+F frames the selection, F frames all (viewport keys).
+    // 5. F frames the selection, Shift+F frames all (viewport keys).
     step(Box::new(|t| {
         t.check("escape-returns-to-viewport", t.focused_id().is_empty(), || t.log_text());
         t.clear_log();
@@ -983,7 +983,7 @@ fn selftest_steps() -> Vec<Step> {
         let log = t.log.borrow().clone();
         t.check(
             "shift-f-then-f",
-            log == ["action(view.frame_selection)", "action(view.frame_all)"],
+            log == ["action(view.frame_all)", "action(view.frame_selection)"],
             || format!("{log:?}"),
         );
         // Document undo/redo and delete with the viewport focused.
@@ -1036,7 +1036,7 @@ fn selftest_steps() -> Vec<Step> {
     step(Box::new(|t| {
         t.clear_log();
         t.tap("f");
-        t.check("sheet-close-returns-focus-to-viewport", t.logged("action(view.frame_all)"), || t.log_text());
+        t.check("sheet-close-returns-focus-to-viewport", t.logged("action(view.frame_selection)"), || t.log_text());
         t.focus_field("platform.outline.depth");
     }));
     step(Box::new(|t| {
@@ -1089,7 +1089,7 @@ fn selftest_steps() -> Vec<Step> {
     step(Box::new(|t| {
         t.clear_log();
         t.tap("f");
-        t.check("paste-close-returns-focus-to-viewport", t.logged("action(view.frame_all)"), || t.log_text());
+        t.check("paste-close-returns-focus-to-viewport", t.logged("action(view.frame_selection)"), || t.log_text());
         // 8. Controlled SegmentedControl: refused choice leaves property unchanged; key 9 sets it from Rust.
         t.ui.invoke_choice_selected(s("platform.surface"), 1);
         t.check("refused-choice-keeps-surface", t.ui.get_platform_surface() == 0, || t.log_text());

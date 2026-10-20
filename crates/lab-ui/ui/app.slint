@@ -398,11 +398,20 @@ export component AppWindow inherits Window {
                 image-fit: fill;
             }
 
-            if root.view-mode != 0 && root.show-labels: ViewportOverlay {
-                width: 100%;
+            // In Split the overlay belongs to the Top pane (right half) and is clipped to it;
+            // its coordinates stay in full-viewport space.
+            if root.view-mode != 0 && root.show-labels: Rectangle {
+                x: root.view-mode == 2 ? parent.width / 2 : 0;
+                width: root.view-mode == 2 ? parent.width / 2 : parent.width;
                 height: 100%;
-                labels: root.overlay-labels;
-                dimensions: root.overlay-dimensions;
+                clip: true;
+                ViewportOverlay {
+                    x: -parent.x;
+                    width: viewport.width;
+                    height: 100%;
+                    labels: root.overlay-labels;
+                    dimensions: root.overlay-dimensions;
+                }
             }
 
             // Split view (POLA-51): the seam between the 3D and Top panes.
@@ -431,11 +440,11 @@ export component AppWindow inherits Window {
                     // Shift+F first: with Shift held the text is "F", which would otherwise
                     // also match plain F.
                     if (event.modifiers.shift && (event.text == "f" || event.text == "F")) {
-                        root.action("view.frame_selection");
+                        root.action("view.frame_all");
                         return accept;
                     }
                     if (event.text == "f" || event.text == "F") {
-                        root.action("view.frame_all");
+                        root.action("view.frame_selection");
                         return accept;
                     }
                     if (event.text == "t" || event.text == "T") {

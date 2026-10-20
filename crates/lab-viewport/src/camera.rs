@@ -440,6 +440,9 @@ fn set_view_mode(cameras: &mut Query<CameraItem>, mode: ViewMode) {
                     orbit.current = main_current;
                     orbit.target = main_target;
                     orbit.mode = ViewMode::Perspective;
+                    // The main view was framed for the full width; the pane gets half of it.
+                    let aspect = camera.logical_viewport_size().map_or(1.0, |s| s.x / s.y.max(1.0));
+                    orbit.target.distance *= half_fov(aspect).sin() / half_fov(aspect / 2.0).sin();
                 }
                 set_mode(&mut orbit, ViewMode::Top);
             }
@@ -524,6 +527,8 @@ fn frame_bounds(target: FrameTarget, selected: Option<SelectionTarget>, sources:
     match target {
         FrameTarget::Platform(id) => platform_box(doc, id),
         FrameTarget::Room => Some(room_box(doc)),
+        // Nothing selected: frame everything.
+        FrameTarget::Selection if selected.is_none() => frame_bounds(FrameTarget::All, None, sources),
         FrameTarget::Selection => match selected? {
             SelectionTarget::Node(id) => node_box(sources, id),
             SelectionTarget::Platform(id) => platform_box(doc, id),
@@ -544,15 +549,19 @@ fn frame_bounds(target: FrameTarget, selected: Option<SelectionTarget>, sources:
 }
 
 /// Eases the camera so the box `min..max` (render space) fits the view.
+/// The smaller of the vertical and horizontal half field of view for `aspect`.
+fn half_fov(aspect: f32) -> f32 {
+    (FOV / 2.0).min(((FOV / 2.0).tan() * aspect).atan())
+}
+
 fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max: Vec3) {
     if !min.is_finite() || !max.is_finite() {
         return;
     }
     let aspect = camera.logical_viewport_size().map_or(1.0, |s| s.x / s.y.max(1.0));
-    let half_fov = (FOV / 2.0).min(((FOV / 2.0).tan() * aspect).atan());
     let radius = ((max - min).length() / 2.0).max(0.01);
     orbit.target.focus = (min + max) / 2.0;
-    orbit.target.distance = (radius / half_fov.sin() * 1.02).max(0.05);
+    orbit.target.distance = (radius / half_fov(aspect).sin() * 1.02).max(0.05);
     orbit.start_tween();
 }
 

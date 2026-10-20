@@ -116,17 +116,21 @@ fn apply_highlight(
                     let t = if matches!(owner, SelectionTarget::Node(_)) { 0.65 } else { 0.25 };
                     mix(*base_color, ACCENT, t)
                 } else if selection.hovered == Some(*owner) {
-                    mix(*base_color, Color::WHITE, 0.22)
+                    mix(*base_color, Color::WHITE, 0.4)
                 } else {
                     *base_color
                 };
+                // Hover also lifts emission, so it shows on dark parts where a white mix barely does.
+                let hovered = selection.hovered == Some(*owner) && selection.selected != Some(*owner);
+                let emissive = if hovered { LinearRgba::rgb(0.12, 0.12, 0.12) } else { LinearRgba::BLACK };
                 let Some(current) = materials.get(material) else { continue };
                 // The alpha belongs to the material (walls fade it); highlights only change colour.
                 let color = color.with_alpha(current.base_color.alpha());
-                if current.base_color != color
+                if (current.base_color != color || current.emissive != emissive)
                     && let Some(mut m) = materials.get_mut(material)
                 {
                     m.base_color = color;
+                    m.emissive = emissive;
                 }
             }
             HighlightLook::HoleTop { material, owner } => {
