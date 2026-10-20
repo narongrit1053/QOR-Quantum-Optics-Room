@@ -36,7 +36,7 @@ const EASE_RATE: f32 = 12.0;
 const TRANSITION_SECS: f32 = 0.35;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct View {
+pub(crate) struct View {
     focus: Vec3,
     yaw: f32,
     pitch: f32,
@@ -101,6 +101,16 @@ impl OrbitCamera {
     /// Starts a timed transition from the current view to `target`.
     fn start_tween(&mut self) {
         self.tween = Some(Tween { from: self.current, elapsed: 0.0 });
+    }
+
+    /// POLA-60: the view the camera is heading to, to restore it later with [`Self::ease_to`].
+    pub(crate) fn target_view(&self) -> View {
+        self.target
+    }
+
+    pub(crate) fn ease_to(&mut self, view: View) {
+        self.target = view;
+        self.start_tween();
     }
 }
 
@@ -370,7 +380,7 @@ pub(crate) fn handle_input(
             }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
-            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) => {}
+            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) => {}
         }
     }
 }
@@ -554,7 +564,7 @@ fn half_fov(aspect: f32) -> f32 {
     (FOV / 2.0).min(((FOV / 2.0).tan() * aspect).atan())
 }
 
-fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max: Vec3) {
+pub(crate) fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max: Vec3) {
     if !min.is_finite() || !max.is_finite() {
         return;
     }

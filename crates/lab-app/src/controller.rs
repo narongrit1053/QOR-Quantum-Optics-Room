@@ -27,6 +27,7 @@ use crate::ui_models::{self, UiModels};
 
 /// Wires every AppWindow callback except the viewport input ones (`bridge::connect_input`).
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
+    crate::wizard::connect(ui, app, models);
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
     ui.on_field_committed(move |id, text| {
         let Some(ui) = w.upgrade() else { return false };

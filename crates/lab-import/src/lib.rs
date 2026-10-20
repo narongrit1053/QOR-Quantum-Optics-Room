@@ -1,6 +1,7 @@
 //! Vendor STEP import (DESIGN.md §5, §13): runs the step2glb sidecar, merges and re-bases the
 //! mesh, builds three LODs and stores the GLB under the library by its BLAKE3 content hash.
 
+pub mod fit;
 mod glb;
 mod lod;
 
