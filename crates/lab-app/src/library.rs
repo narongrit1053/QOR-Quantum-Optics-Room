@@ -110,30 +110,35 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     let ui_weak = ui.as_weak();
     let a = app.clone();
     ui.on_library_drag(move |id, kind, x, y| {
-        let Some(ui) = ui_weak.upgrade() else { return };
-        let scale = ui.window().scale_factor();
-        // The viewport fills the window; the sidebar floats over its left part.
-        let inside = x > ui.get_sidebar_right()
-            && x < ui.get_viewport_width()
-            && y >= 0.0
-            && y < ui.get_viewport_height();
-        let pos = Vec2::new(x * scale, y * scale);
-        // shortcut: Slint gives no modifiers to a TouchArea move, so drags carry none; Shift-free placement needs them later.
-        let mods = Modifiers::default();
-        let mut app = a.borrow_mut();
-        let was_inside = app.library.drag_inside;
-        let drag = match (kind, inside) {
-            (0, true) => Some(PartDrag::Move { item: DragItem::Part(id.to_string()), pos, mods }),
-            (1, true) if was_inside => Some(PartDrag::Drop { pos, mods }),
-            (0 | 1, false) | (1, true) if was_inside => Some(PartDrag::Cancel),
-            (2, _) if was_inside => Some(PartDrag::Cancel),
-            _ => None,
-        };
-        app.library.drag_inside = kind == 0 && inside;
-        if let Some(drag) = drag {
-            app.send(ViewportRequest::DragPart(drag));
+        if let Some(ui) = ui_weak.upgrade() {
+            drag(&ui, &a, DragItem::Part(id.to_string()), kind, x, y);
         }
     });
+}
+
+/// One step of a sidebar drag (kind 0 move, 1 drop, 2 cancel; window coordinates): sends
+/// `DragPart` only while the pointer is over the viewport.
+pub fn drag(ui: &AppWindow, app: &Rc<RefCell<AppState>>, item: DragItem, kind: i32, x: f32, y: f32) {
+    let scale = ui.window().scale_factor();
+    // The viewport fills the window; the sidebar floats over its left part.
+    let inside =
+        x > ui.get_sidebar_right() && x < ui.get_viewport_width() && y >= 0.0 && y < ui.get_viewport_height();
+    let pos = Vec2::new(x * scale, y * scale);
+    // shortcut: Slint gives no modifiers to a TouchArea move, so drags carry none; Shift-free placement needs them later.
+    let mods = Modifiers::default();
+    let mut app = app.borrow_mut();
+    let was_inside = app.library.drag_inside;
+    let drag = match (kind, inside) {
+        (0, true) => Some(PartDrag::Move { item, pos, mods }),
+        (1, true) if was_inside => Some(PartDrag::Drop { pos, mods }),
+        (0 | 1, false) | (1, true) if was_inside => Some(PartDrag::Cancel),
+        (2, _) if was_inside => Some(PartDrag::Cancel),
+        _ => None,
+    };
+    app.library.drag_inside = kind == 0 && inside;
+    if let Some(drag) = drag {
+        app.send(ViewportRequest::DragPart(drag));
+    }
 }
 
 #[cfg(test)]

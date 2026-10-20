@@ -19,7 +19,33 @@ use crate::camera::{OrbitCamera, to_camera_space};
 use crate::host::{EventSender, PendingRequests, SettleFrames, ViewportSize};
 use crate::picking::PickId;
 use crate::scene::{PartMeshes, SceneIndex, from_render, part_mesh, rotation_to_render, to_render};
-use crate::{CatalogRes, DragItem, FrameRequest, PartDrag, PlaceRequest, ViewportEvent};
+use crate::{CatalogRes, DragItem, FrameRequest, PartDrag, PlaceRequest, StackSpec, ViewportEvent};
+
+/// The parts above the root of `spec`, bottom to top: catalog id, how it mates to the part below,
+/// and its pose relative to that part. `None` when a part or a stack connector is missing.
+pub fn stack_chain(catalog: &Catalog, spec: &StackSpec) -> Option<Vec<(String, Attach, DVec3, DQuat)>> {
+    // (part, its connector, the connector of the part below, slide)
+    let mut links: Vec<(&str, &str, &str, f64)> = Vec::new();
+    if spec.base.is_some() {
+        links.push((&spec.holder, "bottom", "top", 0.0));
+    }
+    links.push((&spec.post, "bottom", "bore", spec.slide));
+    links.push((&spec.mount, "base_tap", "top", 0.0));
+    if let Some(optic) = &spec.optic {
+        links.push((optic, "edge", "optic_seat", 0.0));
+    }
+    let mut below = spec.base.as_deref().unwrap_or(&spec.holder);
+    let mut out = Vec::new();
+    for (part, own, parent, slide) in links {
+        let child = catalog.get(part)?.connector(own)?;
+        let parent_conn = catalog.get(below)?.connector(parent)?;
+        let (position, rotation) = lab_mates::mate_pose(&parent_conn.frame, &child.frame, slide, 0.0);
+        let attach = Attach::Mate { self_conn: own.into(), parent_conn: parent.into(), slide, twist: 0.0 };
+        out.push((part.to_string(), attach, position, rotation));
+        below = part;
+    }
+    Some(out)
+}
 
 /// What the pointer is over, in room coordinates (mm, +Z up).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,7 +68,8 @@ pub(crate) fn placement(
     match hit {
         Hit::Node(id, point) => {
             let root = doc.root_platform(id);
-            if let Some(found) = mate_on_node(doc, catalog, item, def, id, point) {
+            if let DragItem::Part(_) = item
+                && let Some(found) = mate_on_node(doc, catalog, item, def, id, point) {
                 return Some(found);
             }
             // No compatible connector: place on whatever the part stands on.
@@ -157,8 +184,7 @@ fn drag_part(
             }
         };
         let Some(doc) = &index.snapshot else { continue };
-        let DragItem::Part(id) = &item;
-        let Some(def) = catalog.0.get(id) else { continue };
+        let Some(def) = catalog.0.get(item.root()) else { continue };
 
         // Ray from the pointer into the scene; the ghost has no PickId, so it is never hit.
         let Ok((camera, camera_transform)) = cameras.single() else { continue };
@@ -205,7 +231,7 @@ fn update_ghost(
 ) {
     let Some(pose) = ghost.pose.take() else { return };
     if std::mem::take(&mut ghost.rebuild)
-        && let Some(DragItem::Part(id)) = ghost.item.clone()
+        && let Some(item) = ghost.item.clone()
     {
         let material = ghost
             .material
@@ -219,19 +245,31 @@ fn update_ghost(
             })
             .clone();
         let root = commands.spawn((Transform::default(), Visibility::Hidden)).id();
-        match part_mesh(&catalog.0, &id, &Default::default()) {
-            Ok(part) => {
-                for (_, mesh) in part_meshes.pieces(&mut meshes, &part) {
-                    commands.spawn((
-                        ChildOf(root),
-                        Mesh3d(mesh),
-                        MeshMaterial3d(material.clone()),
-                        NotShadowCaster,
-                        Transform::default(),
-                    ));
-                }
+        // Every part of the item with its pose relative to the root part.
+        let mut parts = vec![(item.root().to_string(), DVec3::ZERO, DQuat::IDENTITY)];
+        if let DragItem::Stack(spec) = &item {
+            for (id, _, position, rotation) in stack_chain(&catalog.0, spec).unwrap_or_default() {
+                let &(_, p, r) = parts.last().unwrap();
+                parts.push((id, p + r * position, r * rotation));
             }
-            Err(error) => events.send(ViewportEvent::SceneError(format!("{id} has no preview: {error}."))),
+        }
+        for (id, position, rotation) in parts {
+            match part_mesh(&catalog.0, &id, &Default::default()) {
+                Ok(part) => {
+                    let transform =
+                        Transform { translation: to_render(position), rotation: rotation_to_render(rotation), ..default() };
+                    for (_, mesh) in part_meshes.pieces(&mut meshes, &part) {
+                        commands.spawn((
+                            ChildOf(root),
+                            Mesh3d(mesh),
+                            MeshMaterial3d(material.clone()),
+                            NotShadowCaster,
+                            transform,
+                        ));
+                    }
+                }
+                Err(error) => events.send(ViewportEvent::SceneError(format!("{id} has no preview: {error}."))),
+            }
         }
         ghost.entity = Some(root);
         settle.0 = settle.0.max(2);

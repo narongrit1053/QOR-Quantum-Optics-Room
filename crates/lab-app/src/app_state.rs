@@ -86,6 +86,7 @@ pub struct AppState {
     pub timers: Timers,
     pub catalog: Arc<Catalog>,
     pub library: crate::library::LibraryState,
+    pub stack: crate::stack::StackState,
 }
 
 impl AppState {
@@ -109,6 +110,7 @@ impl AppState {
             timers: Timers::default(),
             catalog: Arc::new(Catalog::default()),
             library: Default::default(),
+            stack: Default::default(),
         }
     }
 

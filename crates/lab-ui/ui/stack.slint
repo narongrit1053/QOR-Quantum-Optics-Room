@@ -1,0 +1,90 @@
+// The beam-height stack builder under the library (M2-PLAN POLA-46). The app solves the stack;
+// this panel shows the pickers, the beam height and the result, which is dragged into the scene.
+
+import { Theme } from "theme.slint";
+import { SectionHeader, IconButton } from "components.slint";
+import { LabeledField } from "fields.slint";
+
+// "Label   ‹ value ›": steps through the choices the app owns.
+component Picker inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    callback step(int);
+
+    height: 28px;
+    spacing: 4px;
+    Text {
+        text: root.label;
+        width: 52px;
+        color: Theme.text-secondary;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+    }
+    IconButton { icon: "‹"; size: 24px; y: 2px; clicked => { root.step(-1); } }
+    Text {
+        text: root.value;
+        horizontal-stretch: 1;
+        color: Theme.text;
+        font-size: Theme.font-body;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    IconButton { icon: "›"; size: 24px; y: 2px; clicked => { root.step(1); } }
+}
+
+export component StackPanel inherits VerticalLayout {
+    in property <string> optic;
+    in property <string> mount;
+    in property <string> height-text;
+    in property <string> unit;
+    in property <string> result;
+    in property <bool> fits;
+    callback pick(string /* "optic" | "mount" */, int /* step */);
+    callback height-committed(string) -> bool;
+    // kind: 0 move, 1 drop, 2 cancel; x/y in window coordinates.
+    callback drag(int, length, length);
+
+    spacing: 4px;
+    SectionHeader { text: "POST STACK"; }
+    Picker { label: "Optic"; value: root.optic; step(s) => { root.pick("optic", s); } }
+    Picker { label: "Mount"; value: root.mount; step(s) => { root.pick("mount", s); } }
+    LabeledField {
+        label: "Beam height";
+        id: "stack.height";
+        value: root.height-text;
+        unit: root.unit;
+        committed(i, t) => { return root.height-committed(t); }
+    }
+    // The drag handle; without a fit, the reason instead.
+    Rectangle {
+        height: max(36px, result-text.preferred-height + 12px);
+        border-radius: Theme.radius-control;
+        background: root.fits ? (touch.has-hover ? Theme.accent-soft : Theme.control-bg) : transparent;
+        result-text := Text {
+            x: 10px;
+            width: parent.width - 20px;
+            text: root.fits ? "⠿ " + root.result : root.result;
+            color: root.fits ? Theme.text : Theme.text-secondary;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        touch := TouchArea {
+            enabled: root.fits;
+            mouse-cursor: root.fits ? grab : default;
+            moved => {
+                if (self.pressed) {
+                    root.drag(0, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                    root.drag(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                } else if (event.kind == PointerEventKind.cancel) {
+                    root.drag(2, 0, 0);
+                }
+            }
+        }
+    }
+}
