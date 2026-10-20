@@ -20,6 +20,7 @@ mod gizmo;
 mod hole_material;
 mod host;
 mod mesh;
+mod outline;
 mod picking;
 mod place;
 mod platform;
