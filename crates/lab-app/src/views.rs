@@ -1033,14 +1033,18 @@ pub fn window_title(name: &str, dirty: bool) -> String {
 }
 
 pub fn project_detail(doc: &Document) -> String {
-    let table_count = doc.platforms.iter().filter(|p| p.kind == PlatformKind::OpticalTable).count();
-    let platform_str = if table_count == 1 && doc.platforms.len() == 1 {
-        "1 table".to_string()
-    } else if doc.platforms.len() == 1 {
-        "1 platform".to_string()
-    } else {
-        format!("{} tables", doc.platforms.len())
-    };
+    let count = |kind| doc.platforms.iter().filter(|p| p.kind == kind).count();
+    let platform_str = [
+        (count(PlatformKind::OpticalTable), "table", "tables"),
+        (count(PlatformKind::Breadboard), "breadboard", "breadboards"),
+        (count(PlatformKind::Custom), "custom platform", "custom platforms"),
+    ]
+    .into_iter()
+    .filter(|(n, ..)| *n > 0)
+    .map(|(n, one, many)| format!("{n} {}", if n == 1 { one } else { many }))
+    .collect::<Vec<_>>()
+    .join(", ");
+    let platform_str = if platform_str.is_empty() { "0 tables".to_string() } else { platform_str };
 
     let part_count = doc.nodes.len();
     let part_str = if part_count == 1 {
