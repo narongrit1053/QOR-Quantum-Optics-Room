@@ -477,6 +477,10 @@ export component PlatformInspector inherits Rectangle {
             spacing: 10px;
             alignment: start;
             PillButton {
+                label: "Isolate";
+                clicked => { root.action("view.isolate"); }
+            }
+            PillButton {
                 label: "Delete platform";
                 destructive: true;
                 clicked => { root.action("platform.delete"); }

@@ -29,8 +29,10 @@ const MAX_PITCH: f32 = FRAC_PI_2 - 0.01;
 const ORBIT_RADIANS_PER_PX: f32 = 0.006;
 const DRAG_THRESHOLD_PX: f32 = 4.0;
 const ZOOM_PER_PX: f32 = 0.0025;
-/// Exponential easing rate (1/s) for animated camera moves.
+/// Exponential easing rate (1/s) for wheel zoom.
 const EASE_RATE: f32 = 12.0;
+/// Duration of view-mode changes and framing (DESIGN §7 Motion), cubic ease-out.
+const TRANSITION_SECS: f32 = 0.35;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct View {
@@ -62,6 +64,23 @@ impl View {
             && (self.pitch - target.pitch).abs() < 1e-4
             && (self.distance / target.distance - 1.0).abs() < 1e-4
     }
+
+    /// `k` of the way from `self` to `to`; distance in log space so zoom feels even.
+    fn lerp(&self, to: &View, k: f32) -> View {
+        View {
+            focus: self.focus.lerp(to.focus, k),
+            yaw: self.yaw + (to.yaw - self.yaw) * k,
+            pitch: self.pitch + (to.pitch - self.pitch) * k,
+            distance: (self.distance.ln() + (to.distance.ln() - self.distance.ln()) * k).exp(),
+        }
+    }
+}
+
+/// A timed move from `from` to the (possibly still changing) target.
+#[derive(Clone, Copy)]
+struct Tween {
+    from: View,
+    elapsed: f32,
 }
 
 #[derive(Component)]
@@ -69,6 +88,19 @@ pub(crate) struct OrbitCamera {
     current: View,
     target: View,
     mode: ViewMode,
+    tween: Option<Tween>,
+    reduce_motion: bool,
+}
+
+impl OrbitCamera {
+    fn new(view: View) -> Self {
+        Self { current: view, target: view, mode: ViewMode::Perspective, tween: None, reduce_motion: false }
+    }
+
+    /// Starts a timed transition from the current view to `target`.
+    fn start_tween(&mut self) {
+        self.tween = Some(Tween { from: self.current, elapsed: 0.0 });
+    }
 }
 
 // The getters are read by the wall fade (room.rs, T4c).
@@ -143,7 +175,7 @@ fn spawn_camera(mut commands: Commands, samples: Res<MsaaSamples>) {
         ShadowFilteringMethod::Hardware2x2,
         Projection::Perspective(PerspectiveProjection { fov: FOV, near: 0.01, far: 100.0, ..default() }),
         view.transform(),
-        OrbitCamera { current: view, target: view, mode: ViewMode::Perspective },
+        OrbitCamera::new(view),
     ));
 }
 
@@ -231,6 +263,13 @@ pub(crate) fn handle_input(
                     frame_box(&mut orbit, camera, min, max);
                 }
             }
+            FrameRequest::Isolate(id) => {
+                let target = id.map_or(FrameTarget::All, FrameTarget::Platform);
+                if let Some((min, max)) = frame_bounds(target, selected, &sources) {
+                    frame_box(&mut orbit, camera, min, max);
+                }
+            }
+            FrameRequest::SetReduceMotion(on) => orbit.reduce_motion = *on,
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
             FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) => {}
@@ -251,6 +290,7 @@ fn drag(orbit: &mut OrbitCamera, press: Press, delta: Vec2, viewport_height: f32
     }
     // Direct manipulation: no easing while the pointer is down.
     orbit.target = orbit.current;
+    orbit.tween = None;
 }
 
 fn zoom_toward(orbit: &mut OrbitCamera, camera: &Camera, camera_transform: &GlobalTransform, pos: Vec2, scroll: f32) {
@@ -274,6 +314,7 @@ fn set_mode(orbit: &mut OrbitCamera, mode: ViewMode) {
         return;
     }
     orbit.mode = mode;
+    orbit.start_tween();
     match mode {
         ViewMode::Top => {
             // Turn the shortest way to "north up".
@@ -361,6 +402,7 @@ fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max: Vec3) {
     let radius = ((max - min).length() / 2.0).max(0.01);
     orbit.target.focus = (min + max) / 2.0;
     orbit.target.distance = (radius / half_fov.sin() * 1.02).max(0.05);
+    orbit.start_tween();
 }
 
 pub(crate) fn animate_camera(
@@ -371,17 +413,24 @@ pub(crate) fn animate_camera(
     let Ok((mut orbit, mut transform, mut projection)) = cameras.single_mut() else { return };
     let orbit = &mut *orbit;
 
-    if orbit.current.settled_at(&orbit.target) {
+    // After an idle period the frame delta is huge; cap it so animations still play.
+    let dt = time.delta_secs().min(1.0 / 30.0);
+    if let Some(tween) = orbit.tween.as_mut() {
+        tween.elapsed += dt;
+        let t = tween.elapsed / TRANSITION_SECS;
+        if orbit.reduce_motion || t >= 1.0 {
+            orbit.current = orbit.target;
+            orbit.tween = None;
+        } else {
+            orbit.current = tween.from.lerp(&orbit.target, 1.0 - (1.0 - t).powi(3));
+        }
+        redraw.keep_alive = true;
+        redraw.moving = true;
+    } else if orbit.current.settled_at(&orbit.target) {
         orbit.current = orbit.target;
     } else {
-        // After an idle period the frame delta is huge; cap it so animations still play.
-        let dt = time.delta_secs().min(1.0 / 30.0);
         let k = 1.0 - (-dt * EASE_RATE).exp();
-        let (c, t) = (&mut orbit.current, &orbit.target);
-        c.focus = c.focus.lerp(t.focus, k);
-        c.yaw += (t.yaw - c.yaw) * k;
-        c.pitch += (t.pitch - c.pitch) * k;
-        c.distance = (c.distance.ln() + (t.distance.ln() - c.distance.ln()) * k).exp();
+        orbit.current = orbit.current.lerp(&orbit.target, k);
         redraw.keep_alive = true;
         redraw.moving = true;
     }
@@ -429,9 +478,10 @@ mod tests {
     #[test]
     fn top_view_turns_shortest_way_north() {
         let view = View { focus: Vec3::ZERO, yaw: TAU + 0.4, pitch: 0.5, distance: 2.0 };
-        let mut orbit = OrbitCamera { current: view, target: view, mode: ViewMode::Perspective };
+        let mut orbit = OrbitCamera::new(view);
         set_mode(&mut orbit, ViewMode::Top);
         assert_eq!(orbit.target.yaw, TAU);
         assert_eq!(orbit.target.pitch, TOP_PITCH);
+        assert!(orbit.tween.is_some());
     }
 }

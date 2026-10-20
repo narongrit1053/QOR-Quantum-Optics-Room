@@ -52,6 +52,10 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
                 controller::refresh_all(&ui, &app, &m);
                 return;
             }
+            (1, "isolate") => {
+                a.borrow().send(lab_viewport::ViewportRequest::Isolate(Some(PlatformId(id as u64))));
+                return;
+            }
             (0, "delete") => (Command::RemoveNodes(vec![NodeId(id as u64)]), "Delete"),
             (1, "delete") => (Command::RemovePlatform(PlatformId(id as u64)), "Delete Platform"),
             (0, "lock") => (Command::SetLocked { id: NodeId(id as u64), locked: true }, "Lock"),
