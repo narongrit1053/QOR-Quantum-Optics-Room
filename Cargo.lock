@@ -4023,6 +4023,7 @@ dependencies = [
  "lab-geom",
  "lab-mates",
  "lab-parts",
+ "png",
  "serde_json",
  "wgpu",
 ]

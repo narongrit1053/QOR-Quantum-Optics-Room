@@ -32,6 +32,7 @@ mod platform;
 mod room;
 mod scene;
 mod sync;
+mod thumbnail;
 
 use std::sync::Arc;
 
@@ -152,6 +153,9 @@ pub enum ViewportRequest {
     InspectPart(Option<String>),
     /// POLA-60. Connector/port frames (part space, mm) drawn as small axis arrows while inspecting.
     InspectMarkers(Vec<lab_core::part::Frame>),
+    /// POLA-61. Render catalog part `part` offscreen (256×256, transparent background, 3/4 view)
+    /// and write a PNG to `path`. Queued; one at a time.
+    RenderThumbnail { part: String, path: std::path::PathBuf },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -235,6 +239,8 @@ pub enum ViewportEvent {
     Overlay(Vec<OverlayItem>),
     /// POLA-60. A click on the inspected part: hit point and surface normal, part space, mm.
     PartPoint { point: bevy::math::DVec3, normal: bevy::math::DVec3 },
+    /// POLA-61. The PNG for `part` is written (`ok` false on failure; the app skips it then).
+    ThumbnailReady { part: String, path: std::path::PathBuf, ok: bool },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -277,6 +283,7 @@ pub(crate) enum FrameRequest {
     SetReduceMotion(bool),
     InspectPart(Option<String>),
     InspectMarkers(Vec<lab_core::part::Frame>),
+    RenderThumbnail(String, std::path::PathBuf),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

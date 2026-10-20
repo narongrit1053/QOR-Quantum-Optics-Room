@@ -102,6 +102,11 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     crate::transform::on_transform_requested(&ui, &app, &models, id, attach, position, rotation, done);
                 }
                 ViewportEvent::PartPoint { point, normal } => crate::wizard::on_part_point(&ui, point, normal),
+                ViewportEvent::ThumbnailReady { ok, .. } => {
+                    if ok {
+                        crate::library::fill(&app.borrow(), &models);
+                    }
+                }
                 ViewportEvent::SceneError(message) => {
                     eprintln!("viewport: {message}");
                     controller::show_toast(&ui, &app.borrow(), &message, false);

@@ -13,6 +13,7 @@ mod overlay;
 mod place;
 mod transform;
 mod stack;
+mod thumbs;
 mod scene;
 mod ui_models;
 mod wizard;
@@ -135,6 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 a.borrow().send(ViewportRequest::SetWallDisplay(wall_display));
                 let catalog = a.borrow().catalog.clone();
                 a.borrow().send(ViewportRequest::SetCatalog(catalog));
+                crate::thumbs::render_missing(&a.borrow());
                 bridge::listen_to_viewport(&ui, &a, &m, handle);
             }
             slint::RenderingState::BeforeRendering => {

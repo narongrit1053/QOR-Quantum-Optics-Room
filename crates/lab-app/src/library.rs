@@ -69,9 +69,13 @@ pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>) -> Vec
             tint,
             header: true,
             expanded,
+            thumb: Default::default(),
+            has_thumb: false,
         });
         if expanded {
-            out.extend(members.iter().map(|p| LibraryRow {
+            out.extend(members.iter().map(|p| {
+                let thumb = crate::thumbs::image(&p.id);
+                LibraryRow {
                 id: p.id.as_str().into(),
                 label: p.name.as_str().into(),
                 detail: p.part_number.as_str().into(),
@@ -79,7 +83,9 @@ pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>) -> Vec
                 tint: slint::Color::from_argb_u8(0, 0, 0, 0),
                 header: false,
                 expanded: false,
-            }));
+                has_thumb: thumb.is_some(),
+                thumb: thumb.unwrap_or_default(),
+            }}));
         }
     }
     out
