@@ -11,13 +11,14 @@ use bevy::{
     ecs::system::SystemParam,
     light::ShadowFilteringMethod,
     math::DVec3,
+    picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
     prelude::*,
 };
 use lab_core::{Document, SelectionTarget};
 
 use crate::gizmo::GizmoCapture;
 use crate::host::{MsaaSamples, PendingRequests, RedrawState, TargetSize, ViewportSize};
-use crate::picking::Selection;
+use crate::picking::{PickId, Selection};
 use crate::scene::{SceneIndex, SceneNode, to_render};
 use crate::{FrameRequest, FrameTarget, Modifiers, PointerButton, ViewMode, ViewportInput};
 
@@ -271,6 +272,8 @@ pub(crate) fn handle_input(
     mut capture: ResMut<GizmoCapture>,
     mut cameras: Query<CameraItem>,
     sources: FrameSources,
+    mut ray_cast: MeshRayCast,
+    picks: Query<(), With<PickId>>,
 ) {
     clicks.0.clear();
     let Some(main) = cameras.iter().find(|c| !c.4).map(|c| c.0) else { return };
@@ -326,8 +329,21 @@ pub(crate) fn handle_input(
                 ViewportInput::Scroll { delta, pos, .. } => {
                     pointer.position = Some(pos);
                     let entity = pane_at(&cameras, pos);
+                    // Zooming in aims at what is under the cursor: the scene, else the floor.
+                    let hit = (delta.y > 0.0)
+                        .then(|| cameras.get(entity).ok())
+                        .flatten()
+                        .and_then(|(_, _, camera, camera_transform, _)| camera.viewport_to_world(camera_transform, to_camera_space(camera, &full, pos)).ok())
+                        .and_then(|ray| {
+                            let filter = |e: Entity| picks.contains(e);
+                            let settings = MeshRayCastSettings::default().with_filter(&filter);
+                            match ray_cast.cast_ray(ray, &settings).first() {
+                                Some((_, h)) => Some(h.point),
+                                None => ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)).map(|t| ray.get_point(t)),
+                            }
+                        });
                     if let Ok((_, mut orbit, camera, camera_transform, _)) = cameras.get_mut(entity) {
-                        zoom_toward(&mut orbit, &camera, camera_transform, to_camera_space(&camera, &full, pos), delta.y);
+                        zoom_toward(&mut orbit, &camera, camera_transform, to_camera_space(&camera, &full, pos), delta.y, hit);
                     }
                 }
             },
@@ -375,9 +391,21 @@ fn drag(orbit: &mut OrbitCamera, press: Press, delta: Vec2, viewport_height: f32
     orbit.tween = None;
 }
 
-fn zoom_toward(orbit: &mut OrbitCamera, camera: &Camera, camera_transform: &GlobalTransform, pos: Vec2, scroll: f32) {
+fn zoom_toward(orbit: &mut OrbitCamera, camera: &Camera, camera_transform: &GlobalTransform, pos: Vec2, scroll: f32, hit: Option<Vec3>) {
     let factor = (-scroll * ZOOM_PER_PX).exp();
+    let top = orbit.mode == ViewMode::Top;
     let target = &mut orbit.target;
+    // Move the focal plane onto the surface under the cursor (eye fixed) so the distance can
+    // shrink toward it. Orthographic Top uses the distance as scale, so it keeps its plane.
+    if let Some(hit) = hit.filter(|_| factor < 1.0 && !top) {
+        let eye = target.eye();
+        let forward = (target.focus - eye).normalize_or_zero();
+        let depth = (hit - eye).dot(forward);
+        if depth > 1e-3 {
+            target.focus = eye + forward * depth;
+            target.distance = depth;
+        }
+    }
     let new_distance = (target.distance * factor).clamp(0.05, 40.0);
     let factor = new_distance / target.distance;
     // Keep the point under the cursor (on the focal plane) fixed while zooming.
