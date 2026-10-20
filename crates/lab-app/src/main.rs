@@ -7,6 +7,7 @@ mod controller;
 mod dialogs;
 mod files;
 mod library;
+mod place;
 mod ui_models;
 
 use std::cell::{Cell, RefCell};

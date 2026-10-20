@@ -4,8 +4,9 @@
 //! Render space is Bevy's: metres, +Y up. Document space is millimetres, +Z up. Convert only
 //! through [`to_render`], [`rotation_to_render`], [`normal_to_render`] and [`from_render`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::f32::consts::FRAC_PI_2;
+use std::sync::Arc;
 
 use bevy::{
     ecs::system::SystemParam,
@@ -13,7 +14,10 @@ use bevy::{
     math::{DQuat, DVec3},
     prelude::*,
 };
+use lab_catalog::Catalog;
+use lab_core::part::{Geometry, Params};
 use lab_core::{Document, Finish, Node, NodeId, PlatformId, SelectionTarget, Shape};
+use lab_parts::PartMesh;
 
 use crate::hole_material::HoleTopMaterial;
 use crate::host::{EventSender, PendingRequests, SettleFrames};
@@ -21,7 +25,8 @@ use crate::picking::{HighlightLook, PickId, Selection};
 use crate::platform::{PlatformAssets, PlatformRoot, platform_root_transform, spawn_platform_parts};
 use crate::room::spawn_room;
 use crate::sync::{SyncOp, plan_changes, plan_full};
-use crate::{FrameRequest, Quality, ViewportEvent};
+use crate::mesh::trimesh_to_bevy;
+use crate::{CatalogRes, FrameRequest, Quality, ViewportEvent};
 
 /// Render units per millimetre.
 pub(crate) const MM: f32 = 0.001;
@@ -85,6 +90,8 @@ impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(InitialDocument(Some(self.document.clone())))
             .init_resource::<SceneIndex>()
+            .init_resource::<CatalogRes>()
+            .init_resource::<PartMeshes>()
             // Transparent, so the UI's background gradient shows behind the scene.
             .insert_resource(ClearColor(Color::NONE))
             .insert_resource(GlobalAmbientLight { color: Color::srgb(0.85, 0.9, 1.0), brightness: 160.0, ..default() })
@@ -121,6 +128,37 @@ pub(crate) struct SceneAssets<'w> {
     materials: ResMut<'w, Assets<StandardMaterial>>,
     hole_materials: ResMut<'w, Assets<HoleTopMaterial>>,
     images: ResMut<'w, Assets<Image>>,
+    catalog: Res<'w, CatalogRes>,
+    part_meshes: ResMut<'w, PartMeshes>,
+}
+
+/// Bevy meshes of generated parts, one handle per piece, keyed by the `Arc<PartMesh>` pointer
+/// (lab-parts returns the same `Arc` for the same generator and params). The `Arc` is kept so
+/// the pointer stays unique.
+#[derive(Resource, Default)]
+pub(crate) struct PartMeshes(HashMap<usize, (Arc<PartMesh>, Vec<Handle<Mesh>>)>);
+
+impl PartMeshes {
+    /// (finish, mesh) per piece of `part`.
+    pub fn pieces(&mut self, meshes: &mut Assets<Mesh>, part: &Arc<PartMesh>) -> Vec<(Finish, Handle<Mesh>)> {
+        let (_, handles) = self.0.entry(Arc::as_ptr(part) as usize).or_insert_with(|| {
+            (part.clone(), part.pieces.iter().map(|(_, m)| meshes.add(trimesh_to_bevy(m))).collect())
+        });
+        part.pieces.iter().map(|(f, _)| f.clone()).zip(handles.iter().cloned()).collect()
+    }
+}
+
+/// The generated mesh of catalog part `id`, with `overrides` on top of the def's params.
+pub(crate) fn part_mesh(catalog: &Catalog, id: &str, overrides: &Params) -> Result<Arc<PartMesh>, String> {
+    let def = catalog.get(id).ok_or_else(|| format!("the part {id} is not in the library"))?;
+    match &def.geometry {
+        Geometry::Parametric { generator, params } => {
+            let mut params = params.clone();
+            params.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+            lab_parts::generate(generator, &params).map_err(|e| e.to_string())
+        }
+        Geometry::Mesh { .. } => Err(format!("{id} uses an imported mesh, which arrives in M4")),
+    }
 }
 
 /// Carries out `LoadDocument` (full rebuild) and `ApplyChanges` (incremental) requests in order.
@@ -136,9 +174,14 @@ fn apply_scene_requests(
     mut selection: ResMut<Selection>,
     events: Res<EventSender>,
 ) {
+    // A new catalog redraws the current document so its parts get their meshes.
+    let reload = (assets.catalog.is_changed()
+        && !pending.0.iter().any(|r| matches!(r, FrameRequest::LoadDocument(_))))
+    .then(|| index.snapshot.clone().map(|doc| FrameRequest::LoadDocument(Box::new(doc))))
+    .flatten();
     let start = pending.0.iter().rposition(|r| matches!(r, FrameRequest::LoadDocument(_))).unwrap_or(0);
     let mut touched = false;
-    for request in &pending.0[start..] {
+    for request in reload.iter().chain(&pending.0[start..]) {
         let (doc, ops) = match request {
             FrameRequest::LoadDocument(doc) => {
                 for entity in &existing {
@@ -261,65 +304,92 @@ fn apply_op(
         }
         SyncOp::SpawnNode(id) => {
             let Some(node) = doc.node(id) else { return };
-            // shortcut: room-rooted nodes (Parent::Room) are not drawn yet; POLA-43 adds them.
-            let Some(root) = doc.root_platform(id).and_then(|p| index.platforms.get(&p)).map(|p| p.root) else {
-                events.send(ViewportEvent::SceneError(format!("“{}” could not be drawn: its platform is missing.", node.name)));
-                return;
+            // Room-rooted chains are drawn in the room frame (no root entity).
+            let root = match doc.root_platform(id) {
+                Some(p) => match index.platforms.get(&p) {
+                    Some(platform) => Some(platform.root),
+                    None => {
+                        events.send(ViewportEvent::SceneError(format!(
+                            "“{}” could not be drawn: its platform is missing.",
+                            node.name
+                        )));
+                        return;
+                    }
+                },
+                None => None,
             };
             if let Some(old) = index.nodes.remove(&id) {
                 commands.entity(old).try_despawn();
             }
             let (position, rotation) = doc.node_pose(id).unwrap_or((node.position, node.rotation));
-            let entity = spawn_node(commands, root, node, position, rotation, &mut assets.meshes, &mut assets.materials);
+            let entity = spawn_node(commands, root, node, position, rotation, assets, events);
             index.nodes.insert(id, entity);
         }
     }
 }
 
-/// A node as a child of its root platform's root, at its pose in that platform's frame.
+/// A node as a child of its root platform's root (or in the room frame), at its pose in that
+/// frame. The returned entity carries the transform; its children are the mesh pieces.
 fn spawn_node(
     commands: &mut Commands,
-    root: Entity,
+    root: Option<Entity>,
     node: &Node,
     position: DVec3,
     rotation: DQuat,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    assets: &mut SceneAssets,
+    events: &EventSender,
 ) -> Entity {
     let transform = Transform {
         translation: to_render(position),
         rotation: rotation_to_render(rotation),
         ..default()
     };
-    let mesh = match &node.shape {
+    let meshes = &mut assets.meshes;
+    let pieces: Vec<(Finish, Handle<Mesh>)> = match &node.shape {
         // Document Y maps to render −Z, so box depth and height swap places.
-        Shape::Box { size } => meshes.add(Cuboid::new(size.x as f32 * MM, size.z as f32 * MM, size.y as f32 * MM)),
+        Shape::Box { size } => vec![(
+            node.finish.clone(),
+            meshes.add(Cuboid::new(size.x as f32 * MM, size.z as f32 * MM, size.y as f32 * MM)),
+        )],
         // Bevy cylinders run along local Y, which is the document's local Z after conversion.
-        Shape::Cylinder { radius, length } => meshes.add(Cylinder::new(*radius as f32 * MM, *length as f32 * MM)),
-        // shortcut: a 10 mm placeholder cube until POLA-43 draws catalog meshes.
-        Shape::Part => meshes.add(Cuboid::new(10.0 * MM, 10.0 * MM, 10.0 * MM)),
+        Shape::Cylinder { radius, length } => {
+            vec![(node.finish.clone(), meshes.add(Cylinder::new(*radius as f32 * MM, *length as f32 * MM)))]
+        }
+        Shape::Part => match part_mesh(&assets.catalog.0, &node.part, &node.params) {
+            Ok(part) => assets.part_meshes.pieces(meshes, &part),
+            Err(error) => {
+                events.send(ViewportEvent::SceneError(format!("“{}” is drawn as a box: {error}.", node.name)));
+                vec![(node.finish.clone(), meshes.add(Cuboid::new(10.0 * MM, 10.0 * MM, 10.0 * MM)))]
+            }
+        },
     };
-    let material = finish_material(&node.finish);
-    let base_color = material.base_color;
-    let handle = materials.add(material);
     let owner = SelectionTarget::Node(node.id);
 
-    let mut entity = commands.spawn((
-        SceneEntity,
-        SceneNode(node.id),
-        ChildOf(root),
-        Mesh3d(mesh),
-        MeshMaterial3d(handle.clone()),
-        HighlightLook::Standard { material: handle, base_color, owner },
-        transform,
-    ));
-    if node.pickable {
-        entity.insert(PickId(owner));
+    let mut parent = commands.spawn((SceneEntity, transform, Visibility::default()));
+    if let Some(root) = root {
+        parent.insert(ChildOf(root));
     }
-    if matches!(node.finish, Finish::Glass | Finish::Beam { .. }) {
-        entity.insert(NotShadowCaster);
+    let parent = parent.id();
+    for (finish, mesh) in pieces {
+        let material = finish_material(&finish);
+        let base_color = material.base_color;
+        let handle = assets.materials.add(material);
+        let mut entity = commands.spawn((
+            SceneNode(node.id),
+            ChildOf(parent),
+            Mesh3d(mesh),
+            MeshMaterial3d(handle.clone()),
+            HighlightLook::Standard { material: handle, base_color, owner },
+            Transform::default(),
+        ));
+        if node.pickable {
+            entity.insert(PickId(owner));
+        }
+        if matches!(finish, Finish::Glass | Finish::Beam { .. }) {
+            entity.insert(NotShadowCaster);
+        }
     }
-    entity.id()
+    parent
 }
 
 fn finish_material(finish: &Finish) -> StandardMaterial {
