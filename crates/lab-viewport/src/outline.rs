@@ -42,6 +42,7 @@ type CameraView<'a> = (&'a Camera, &'a GlobalTransform, &'a Projection);
 fn rebuild_outline(
     mut commands: Commands,
     selection: Res<Selection>,
+    capturing: Res<crate::export::Capturing>,
     index: Res<SceneIndex>,
     added: Query<(), (With<SceneNode>, Added<Aabb>)>,
     pieces: Query<(Entity, &SceneNode, &Mesh3d, &Aabb, &GlobalTransform)>,
@@ -50,11 +51,14 @@ fn rebuild_outline(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut material: Local<Option<Handle<StandardMaterial>>>,
 ) {
-    if !selection.is_changed() && added.is_empty() {
+    if !selection.is_changed() && !capturing.is_changed() && added.is_empty() {
         return;
     }
     for e in &outlines {
         commands.entity(e).despawn();
+    }
+    if capturing.0 {
+        return;
     }
     let Some(SelectionTarget::Node(id)) = selection.selected else { return };
     let Some(doc) = index.snapshot.as_ref() else { return };

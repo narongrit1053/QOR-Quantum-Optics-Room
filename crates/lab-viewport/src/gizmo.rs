@@ -355,11 +355,13 @@ fn update_gizmo(
     mut commands: Commands,
     pending: Res<PendingRequests>,
     selection: Res<Selection>,
+    capturing: Res<crate::export::Capturing>,
     mut gizmo: ResMut<Gizmo>,
     (index, catalog): (Res<SceneIndex>, Res<CatalogRes>),
     (mut meshes, mut materials, mut settle): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, ResMut<SettleFrames>),
 ) {
     let changed = selection.is_changed()
+        || capturing.is_changed()
         || pending.0.iter().any(|r| {
             matches!(r, FrameRequest::SetTool(_) | FrameRequest::LoadDocument(_) | FrameRequest::ApplyChanges(..))
         });
@@ -370,6 +372,9 @@ fn update_gizmo(
         commands.entity(root).try_despawn();
     }
     gizmo.shown = None;
+    if capturing.0 {
+        return;
+    }
     let Some(SelectionTarget::Node(id)) = selection.selected else { return };
     let Some(doc) = &index.snapshot else { return };
     let Some(node) = doc.node(id) else { return };

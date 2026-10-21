@@ -139,7 +139,10 @@ fn measure_input(
     }
 }
 
-fn draw_measure(measure: Res<Measure>, mut gizmos: Gizmos) {
+fn draw_measure(measure: Res<Measure>, mut gizmos: Gizmos, capturing: Res<crate::export::Capturing>) {
+    if capturing.0 {
+        return;
+    }
     if !measure.active {
         return;
     }

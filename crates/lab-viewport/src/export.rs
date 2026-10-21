@@ -19,7 +19,7 @@ use crate::host::{EventSender, PendingRequests, RedrawState};
 use crate::{FrameRequest, ViewportEvent};
 
 /// Frames rendered before the capture.
-const SETTLE: u32 = 2;
+const SETTLE: u32 = 3;
 /// Opaque background: the middle stop of the UI's viewport gradient (`Theme.viewport-bg`).
 const BACKGROUND: Color = Color::srgb(0x16 as f32 / 255.0, 0x18 as f32 / 255.0, 0x1C as f32 / 255.0);
 
@@ -36,6 +36,11 @@ struct InFlight {
     frames: u32,
 }
 
+/// True while an export (or project thumbnail) renders: selection and hover tints, the outline,
+/// the gizmo and measure/inspect markers are hidden so they stay out of the image.
+#[derive(Resource, Default, PartialEq)]
+pub(crate) struct Capturing(pub bool);
+
 #[derive(Resource, Default)]
 struct Exports {
     queue: VecDeque<(PathBuf, u32, u32)>,
@@ -46,7 +51,7 @@ pub(crate) struct ExportPlugin;
 
 impl Plugin for ExportPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Exports>().add_systems(Update, step);
+        app.init_resource::<Exports>().init_resource::<Capturing>().add_systems(Update, step);
     }
 }
 
@@ -58,6 +63,7 @@ fn step(
     mut images: ResMut<Assets<Image>>,
     mut redraw: ResMut<RedrawState>,
     events: Res<EventSender>,
+    mut capturing: ResMut<Capturing>,
     main: Query<MainCamera, (With<OrbitCamera>, Without<TopPane>)>,
 ) {
     for request in &pending.0 {
@@ -89,6 +95,7 @@ fn step(
         exports.current = Some(InFlight { path, camera, image, frames: 0 });
     }
     redraw.keep_alive |= exports.current.is_some() || !exports.queue.is_empty();
+    capturing.set_if_neq(Capturing(exports.current.is_some()));
     let Some(job) = exports.current.as_mut() else { return };
     job.frames += 1;
     if job.frames == SETTLE {
@@ -96,9 +103,16 @@ fn step(
     }
 }
 
-fn captured(shot: On<ScreenshotCaptured>, mut commands: Commands, mut exports: ResMut<Exports>, events: Res<EventSender>) {
+fn captured(
+    shot: On<ScreenshotCaptured>,
+    mut commands: Commands,
+    mut exports: ResMut<Exports>,
+    mut capturing: ResMut<Capturing>,
+    events: Res<EventSender>,
+) {
     commands.entity(shot.entity).try_despawn();
     let Some(job) = exports.current.take() else { return };
+    capturing.set_if_neq(Capturing(false));
     commands.entity(job.camera).try_despawn();
     let ok = match crate::thumbnail::write_png(&job.path, &shot.image) {
         Ok(()) => true,

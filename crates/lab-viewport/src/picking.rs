@@ -101,14 +101,17 @@ pub(crate) fn pick(
 /// new looks were spawned (a rebuilt platform keeps its highlight); writes only changed values.
 fn apply_highlight(
     selection: Res<Selection>,
+    capturing: Res<crate::export::Capturing>,
     looks: Query<&HighlightLook>,
     added: Query<(), Added<HighlightLook>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hole_materials: ResMut<Assets<HoleTopMaterial>>,
 ) {
-    if !selection.is_changed() && added.is_empty() {
+    if !selection.is_changed() && !capturing.is_changed() && added.is_empty() {
         return;
     }
+    let none = Selection::default();
+    let selection = if capturing.0 { &none } else { &*selection };
     for look in &looks {
         match look {
             HighlightLook::Standard { material, base_color, owner } => {
