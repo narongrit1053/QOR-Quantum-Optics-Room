@@ -7,6 +7,7 @@ mod bom;
 mod bridge;
 mod controller;
 mod dialogs;
+mod embed;
 mod export_png;
 mod files;
 mod import;
