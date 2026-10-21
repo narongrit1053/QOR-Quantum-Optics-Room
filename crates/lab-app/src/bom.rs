@@ -40,27 +40,53 @@ pub fn rows(doc: &Document, catalog: &Catalog) -> Vec<BomRow> {
             .quantity += 1;
     };
     for node in &doc.nodes {
+        // Beams are drawn, not bought.
+        let def = catalog.get(&node.part).or_else(|| legacy(&node.part).and_then(|id| catalog.get(id)));
+        if node.part == "beam" || def.is_some_and(|d| d.category.starts_with("beam")) {
+            continue;
+        }
         let spec = node.params.iter().map(|(k, v)| format!("{k}={}", fmt_param(v))).collect::<Vec<_>>().join("; ");
-        match catalog.get(&node.part) {
+        let id = node.part.split_once(':').map_or(node.part.as_str(), |(_, id)| id);
+        match def {
             Some(def) => {
                 let vendor = if def.vendor.is_empty() { "Generic".to_string() } else { def.vendor.clone() };
                 let number = if def.part_number.is_empty() {
-                    node.part.split_once(':').map_or(node.part.as_str(), |(_, id)| id).to_string()
+                    def.id.split_once(':').map_or(def.id.as_str(), |(_, id)| id).to_string()
                 } else {
                     def.part_number.clone()
                 };
                 add(vendor, number, def.name.clone(), spec);
             }
-            None => add("Unknown".into(), node.part.clone(), node.part.clone(), spec),
+            None => add("Generic".into(), id.to_string(), readable(id), spec),
         }
     }
     for platform in &doc.platforms {
         let (min, max) = platform.outline.bounds();
-        let spec = format!("{}×{}×{} mm", max.x - min.x, max.y - min.y, platform.thickness);
+        let size = format!("{}×{}", max.x - min.x, max.y - min.y);
+        let spec = format!("{size}×{} mm", platform.thickness);
         // Platforms carry no preset id or vendor in the model.
-        add("Generic".into(), "custom".into(), platform.name.clone(), spec);
+        add("Generic".into(), String::new(), format!("{} {size}", platform.name), spec);
     }
     map.into_values().collect()
+}
+
+/// Built-in parts for the `generic:*` ids of older documents (the demo).
+fn legacy(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "generic:post-holder-40" => "thorlabs:PH40/M",
+        "generic:base-25x75" => "thorlabs:BA1/M",
+        "generic:kinematic-mount-1in" => "thorlabs:KM100/M",
+        "generic:half-wave-plate-1in" => "generic:hwp-1in",
+        "generic:lens-1in-f100" => "generic:lens-1in",
+        _ => return None,
+    })
+}
+
+/// `post-holder-40` → `Post holder 40`.
+fn readable(id: &str) -> String {
+    let text = id.replace(['-', '_'], " ");
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
 }
 
 fn field(text: &str) -> String {
@@ -169,9 +195,25 @@ mod tests {
         add("mystery:x", None);
         let r = rows(&doc, &catalog);
         assert_eq!(r.len(), 4);
+        assert!(r.iter().any(|r| r.vendor == "Generic" && r.name == "X"));
         assert_eq!(r.iter().find(|r| r.part_number == "KM100").unwrap().quantity, 2);
         let csv = to_csv(&r);
         assert!(csv.contains("\"Post, 1\"\"\""));
         assert!(csv.starts_with("\u{feff}Vendor,"));
+    }
+
+    #[test]
+    fn demo_has_no_beams_or_unknowns() {
+        let catalog = Catalog::load_default().0;
+        let mut doc = lab_core::sample::demo_document();
+        let mut ph3 = doc.nodes.iter().find(|n| n.part != "beam").unwrap().clone();
+        ph3.part = "thorlabs:PH3".into();
+        ph3.params.clear();
+        doc.nodes.push(ph3);
+        let r = rows(&doc, &catalog);
+        let seen: Vec<_> = r.iter().map(|r| (&r.vendor, &r.part_number, &r.name)).collect();
+        assert!(r.iter().all(|r| r.vendor != "Unknown" && r.part_number != "beam"), "{seen:?}");
+        assert!(r.iter().any(|r| r.vendor == "Thorlabs" && r.part_number == "PH3"), "{seen:?}");
+        assert!(r.iter().any(|r| r.vendor == "Thorlabs" && r.part_number == "PH40/M"), "{seen:?}");
     }
 }

@@ -173,7 +173,10 @@ fn hide_document(
     }
 }
 
-fn draw_markers(state: Res<Inspect>, mut gizmos: Gizmos) {
+fn draw_markers(state: Res<Inspect>, mut gizmos: Gizmos, capturing: Res<crate::export::Capturing>) {
+    if capturing.0 {
+        return;
+    }
     if state.root.is_none() {
         return;
     }
