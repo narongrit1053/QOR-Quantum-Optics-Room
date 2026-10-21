@@ -34,6 +34,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("view.isolate", "Isolate Plate", "View", "platform hide others", ""),
     a("view.show_all", "Show All", "View", "unisolate exit isolation", "Esc"),
     a("view.blueprint", "Toggle Blueprint", "View", "drawing lines style", ""),
+    a("view.beams", "Show beams", "View", "laser beam path optics trace", ""),
     a("view.theme.dark", "Dark Theme", "View", "appearance colour color", ""),
     a("view.theme.light", "Light Theme", "View", "appearance colour color", ""),
     a("view.theme.contrast", "High Contrast Theme", "View", "appearance accessibility colour color", ""),

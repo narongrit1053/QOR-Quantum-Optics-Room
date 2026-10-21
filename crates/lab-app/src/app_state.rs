@@ -98,6 +98,8 @@ pub struct AppState {
     pub viewport_ready: bool,
     /// POLA-66. `ExportImage` requests waiting for `ImageExported`, matched by path.
     pub pending_exports: Vec<PendingExport>,
+    /// M6: the beam trace of `session.doc`, refreshed by `beams::retrace`.
+    pub beams: lab_optics::Trace,
 }
 
 impl AppState {
@@ -126,6 +128,7 @@ impl AppState {
             scene_collapsed: Default::default(),
             viewport_ready: false,
             pending_exports: Vec::new(),
+            beams: Default::default(),
         }
     }
 

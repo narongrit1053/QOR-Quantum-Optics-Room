@@ -22,6 +22,7 @@ pub struct UiModels {
     pub inspector: Rc<VecModel<InspectorField>>,
     pub node_fields: Rc<VecModel<EditField>>,
     pub set_rows: Rc<VecModel<SetRow>>,
+    pub beam_fields: Rc<VecModel<EditField>>,
     pub platform_outline_fields: Rc<VecModel<EditField>>,
     pub platform_corners: Rc<VecModel<CornerRow>>,
     pub platform_preview_labels: Rc<VecModel<PreviewLabel>>,
@@ -48,6 +49,7 @@ impl UiModels {
         ui.set_inspector(ModelRc::from(m.inspector.clone()));
         ui.set_node_fields(ModelRc::from(m.node_fields.clone()));
         ui.set_set_rows(ModelRc::from(m.set_rows.clone()));
+        ui.set_beam_fields(ModelRc::from(m.beam_fields.clone()));
         ui.set_platform_outline_fields(ModelRc::from(m.platform_outline_fields.clone()));
         ui.set_platform_corners(ModelRc::from(m.platform_corners.clone()));
         ui.set_platform_preview_labels(ModelRc::from(m.platform_preview_labels.clone()));

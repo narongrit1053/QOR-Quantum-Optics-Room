@@ -176,6 +176,12 @@ export component AppWindow inherits Window {
     in property <[InspectorField]> inspector;
     in property <[EditField]> node-fields;
     in property <[SetRow]> set-rows;
+    in property <[EditField]> beam-fields;
+    in property <string> beam-text;
+    in property <bool> beam-laser;
+    in property <bool> beam-on;
+    // M6 `view.beams` (saved in Settings).
+    in property <bool> show-beams: true;
     // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure.
     in-out property <int> tool;
     // Measure readout; empty hides the chip.
@@ -955,6 +961,10 @@ export component AppWindow inherits Window {
                     fields: root.inspector;
                     edit-fields: root.node-fields;
                     set-rows: root.set-rows;
+                    beam-fields: root.beam-fields;
+                    beam-text: root.beam-text;
+                    beam-laser: root.beam-laser;
+                    beam-on: root.beam-on;
                     error: root.inspector-error;
                     action(id) => { root.action(id); }
                     field-committed(id, text) => { return root.field-committed(id, text); }
@@ -1085,6 +1095,14 @@ export component AppWindow inherits Window {
                 selected(i) => {
                     root.view-mode = i;
                     root.view-mode-requested(i);
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                ToolButton {
+                    label: "Beams";
+                    active: root.show-beams;
+                    clicked => { root.action("view.beams"); }
                 }
             }
             // Hidden rather than removed, so the bar keeps its width and does not shift.

@@ -14,6 +14,7 @@
 //! The viewport never edits the document. It renders a snapshot and reports what the user
 //! picked; edits go through `lab_core::Command` on the UI side.
 
+mod beams;
 mod blueprint;
 mod export;
 mod camera;
@@ -162,6 +163,8 @@ pub enum ViewportRequest {
     /// offscreen at `width`×`height` (clamped to 16..=8192), opaque background, MSAA 4, and
     /// write a PNG to `path`. In Split mode the 3D pane is exported.
     ExportImage { path: std::path::PathBuf, width: u32, height: u32 },
+    /// M6. Show or hide the traced laser beams (default shown).
+    SetBeams(bool),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -293,6 +296,7 @@ pub(crate) enum FrameRequest {
     InspectMarkers(Vec<lab_core::part::Frame>),
     RenderThumbnail(String, std::path::PathBuf),
     ExportImage(std::path::PathBuf, u32, u32),
+    SetBeams(bool),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

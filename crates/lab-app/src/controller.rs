@@ -173,6 +173,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
 
     ui.set_display_unit(unit_index(app.units()));
     ui.set_wall_display(wall_index(app.settings.wall_display));
+    ui.set_show_beams(app.settings.show_beams);
     ui_models::fill_presets(models, preset_rows(app.units()));
     ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &app.scene_collapsed));
 }
@@ -186,6 +187,7 @@ fn refresh_inspector(ui: &AppWindow, app: &AppState, models: &UiModels) {
             Some(node) => {
                 let holes = doc.root_platform(id).and_then(|p| doc.platform(p)).map(|p| app.holes_for(p));
                 ui_models::fill_node(ui, models, node_view(doc, &app.catalog, node, holes.as_deref(), units));
+                crate::beams::fill(ui, app, models, id);
                 1
             }
             None => 0,
@@ -210,6 +212,7 @@ fn refresh_inspector(ui: &AppWindow, app: &AppState, models: &UiModels) {
 /// Refreshes everything after a state change (updating the hole cache first).
 pub(crate) fn refresh(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels) {
     app.borrow_mut().update_hole_cache();
+    crate::beams::retrace(&mut app.borrow_mut());
     refresh_all(ui, &app.borrow(), models);
 }
 
@@ -295,6 +298,8 @@ fn on_field_committed(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<U
         if let Some((node, field)) = set_field(id) {
             let cx = EditContext { selection: Some(SelectionTarget::Node(node)), ..context(&a) };
             edit::node_field_edit(&cx, &a.catalog, field, text)
+        } else if id.starts_with("beam.") {
+            crate::beams::field_edit(&a, id, text)
         } else if id.starts_with("node.") {
             edit::node_field_edit(&context(&a), &a.catalog, id, text)
         } else {
@@ -340,6 +345,22 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             let on = !ui.get_blueprint();
             ui.set_blueprint(on);
             app.borrow().send(ViewportRequest::SetBlueprint(on));
+        }
+        "view.beams" => {
+            let settings = {
+                let mut a = app.borrow_mut();
+                a.settings.show_beams = !a.settings.show_beams;
+                a.send(ViewportRequest::SetBeams(a.settings.show_beams));
+                a.settings.clone()
+            };
+            ui.set_show_beams(settings.show_beams);
+            if let Err(error) = lab_file::save_settings(&settings) {
+                eprintln!("settings not saved: {error}");
+            }
+        }
+        "beam.toggle" => {
+            let outcome = crate::beams::toggle(&app.borrow());
+            apply_outcome(ui, app, models, id, outcome);
         }
         "view.frame_selection" => app.borrow().send(ViewportRequest::Frame(FrameTarget::Selection)),
         "view.isolate" => {

@@ -12,6 +12,7 @@ lab-catalog.workspace = true
 lab-parts.workspace = true
 lab-mates.workspace = true
 lab-geom.workspace = true
+lab-optics.workspace = true
 bevy.workspace = true
 wgpu.workspace = true
 async-channel.workspace = true
