@@ -99,6 +99,7 @@ fn run_file_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiMo
         "file.save" => save(ui, app, models, AfterSave::Nothing),
         "file.save_as" => save_as(ui, app, models, ProjectFormat::Archive, AfterSave::Nothing),
         "file.save_folder" => save_as(ui, app, models, ProjectFormat::Folder, AfterSave::Nothing),
+        "file.export_bom" => crate::bom::export(ui, app),
         "file.new" => request(ui, app, models, PendingAction::New),
         "file.open" => request(ui, app, models, PendingAction::Open),
         "file.open_demo" => request(ui, app, models, PendingAction::OpenDemo),
