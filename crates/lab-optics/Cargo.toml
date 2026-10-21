@@ -1,0 +1,11 @@
+[package]
+name = "lab-optics"
+description = "Beam trace and Gaussian beam size for LabSetup (docs/M6-PLAN.md section A). Pure, no Bevy."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-core.workspace = true
+glam.workspace = true

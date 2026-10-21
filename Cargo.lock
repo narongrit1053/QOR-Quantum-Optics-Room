@@ -3997,6 +3997,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-optics"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "lab-core",
+]
+
+[[package]]
 name = "lab-parts"
 version = "0.1.0"
 dependencies = [
