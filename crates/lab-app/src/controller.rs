@@ -138,6 +138,12 @@ pub fn refresh_all(ui: &AppWindow, app: &AppState, models: &UiModels) {
     ui.set_busy(app.busy);
 }
 
+/// The isolate banner's platform name.
+pub fn refresh_isolated(ui: &AppWindow, app: &AppState) {
+    let name = app.isolated.and_then(|id| app.session.doc.platform(id)).map(|p| p.name.clone());
+    ui.set_isolated_name(name.unwrap_or_default().into());
+}
+
 /// Title, dirty state, notes, undo/redo, preferences and scene rows (everything but the inspector).
 fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
     let session = &app.session;
@@ -157,6 +163,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
         ""
     };
     ui.set_document_note(note.into());
+    refresh_isolated(ui, app);
 
     let history = &session.history;
     ui.set_can_undo(history.can_undo());

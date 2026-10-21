@@ -85,6 +85,8 @@ pub struct AppState {
     pub busy: bool,
     /// Document note while `busy` ("Saving…", "Opening…"); shown instead of the session's note.
     pub busy_note: String,
+    /// The isolated platform (POLA-52), so the banner follows renames.
+    pub isolated: Option<PlatformId>,
     pub toast_undo: bool,
     pub timers: Timers,
     pub catalog: Arc<Catalog>,
@@ -115,6 +117,7 @@ impl AppState {
             recovery: Vec::new(),
             busy: false,
             busy_note: String::new(),
+            isolated: None,
             toast_undo: false,
             timers: Timers::default(),
             catalog: Arc::new(Catalog::default()),

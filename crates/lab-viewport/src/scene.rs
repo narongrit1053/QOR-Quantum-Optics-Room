@@ -102,8 +102,13 @@ impl Plugin for ScenePlugin {
     }
 }
 
+/// The shadow-casting light; the Top view turns its shadows off (`camera.rs`).
+#[derive(Component)]
+pub(crate) struct KeyLight;
+
 fn spawn_lighting(mut commands: Commands, quality: Res<Quality>) {
     commands.spawn((
+        KeyLight,
         DirectionalLight { illuminance: 9_000.0, shadow_maps_enabled: quality.shadows(), ..default() },
         Transform::from_xyz(2.5, 6.0, 3.5).looking_at(Vec3::new(0.0, 0.8, 0.0), Vec3::Y),
         // One cascade over the working area keeps shadows affordable on integrated GPUs.

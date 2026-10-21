@@ -33,7 +33,8 @@ pub fn on_transform_requested(
         // SetAttach even when only the placement changes: its inverse restores the attach too,
         // and a drag may snap on and off holes before it ends.
         let command = Command::SetAttach { id, parent: node.parent, attach, position, rotation };
-        let label = format!("Move {}", node.name);
+        let verb = if rotation.angle_between(node.rotation) > 1e-9 { "Rotate" } else { "Move" };
+        let label = format!("{verb} {}", node.name);
         let result = session.history.execute_coalescing(&mut session.doc, command, label, GESTURE);
         if done {
             session.history.end_gesture();
