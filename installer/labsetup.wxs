@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiX 4+ schema. Built by build.ps1: wix build labsetup.wxs -d Version=<x.y.z> -d StageDir=<target/package/LabSetup> -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="LabSetup" Manufacturer="LabSetup" Version="$(Version)" Scope="perMachine"
+           UpgradeCode="6F1B7A52-3C0E-4D8B-9E47-2A5D8C1F0B93">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of LabSetup is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="LabSetup" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- Same layout as the portable zip: exe, dlls, library/, step2glb/ harvested from StageDir. -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(StageDir)\**">
+        <Exclude Files="$(StageDir)\labsetup.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <Component Id="MainExe" Directory="INSTALLFOLDER" Guid="B3D9E1C4-7A62-4F0B-8E15-9C4A7D2E6F38">
+      <File Id="LabSetupExe" Source="$(StageDir)\labsetup.exe" KeyPath="yes">
+        <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="LabSetup"
+                  WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+      </File>
+      <ProgId Id="LabSetup.Project" Description="LabSetup project" Advertise="no">
+        <Extension Id="labsetup" ContentType="application/x-labsetup">
+          <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" TargetFile="LabSetupExe" />
+        </Extension>
+      </ProgId>
+    </Component>
+
+    <Feature Id="Main" Level="1">
+      <ComponentRef Id="MainExe" />
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+  </Package>
+</Wix>

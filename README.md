@@ -67,6 +67,14 @@ The project menu (click the project name) has New, Open…, Open Demo, Save, Sav
 | `LABSETUP_AUTOSAVE_DIR` | Autosave folder (default `%LOCALAPPDATA%\LabSetuputosave`) |
 | `LABSETUP_SETTINGS` | Settings file (default `%APPDATA%\LabSetup\settings.json`): display units, wall display, last folder |
 
+## Packaging
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer/build.ps1
+```
+
+Builds the release app (long on a cold target dir) and writes `target/package/LabSetup/` and `target/package/LabSetup-<version>-portable.zip` (exe, `dxcompiler.dll`, `library/`, `step2glb/`). Unzip anywhere and run `labsetup.exe`; it needs no network. The sidecar is taken from `tools/step2glb/build/Release` (override with `LABSETUP_STEP2GLB_DIR`). If WiX 4+ (`wix.exe`) is on `PATH` or named by `LABSETUP_WIX`, it also builds `LabSetup-<version>.msi` from `installer/labsetup.wxs` (per-machine, Start-menu shortcut, `.labsetup` association); otherwise it prints "MSI skipped: WiX not found". `LABSETUP_SKIP_BUILD=1` reuses an existing `target/release/labsetup.exe`.
+
 ## Layout
 
 | Crate | Purpose |
