@@ -10,11 +10,13 @@ use bevy::{
 use lab_core::SelectionTarget;
 
 use crate::camera::{OrbitCamera, TopPane};
-use crate::picking::{ACCENT, Selection};
+use crate::picking::Selection;
 use crate::scene::{SceneIndex, SceneNode};
 
 /// Outline width in physical pixels.
 const OUTLINE_PX: f32 = 2.0;
+/// Distinct from the accent tint of the selected part, so the outline reads over it (POLA-50).
+const OUTLINE: Color = Color::srgb(1.0, 0.62, 0.1);
 
 #[derive(Component)]
 struct Outline;
@@ -63,7 +65,7 @@ fn rebuild_outline(
     let material = material
         .get_or_insert_with(|| {
             materials.add(StandardMaterial {
-                base_color: ACCENT,
+                base_color: OUTLINE,
                 unlit: true,
                 cull_mode: Some(Face::Front),
                 ..default()

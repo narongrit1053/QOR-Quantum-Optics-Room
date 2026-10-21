@@ -62,7 +62,13 @@ struct Gizmo {
     shown: Option<NodeId>,
     drag: Option<Drag>,
     materials: Option<(Handle<StandardMaterial>, Handle<StandardMaterial>)>,
+    /// Handle radius in render units, for the on-top outline.
+    radius: f32,
 }
+
+/// Line gizmos drawn without depth test, so handles inside large parts stay visible (POLA-45).
+#[derive(Default, Reflect, GizmoConfigGroup)]
+struct OnTop;
 
 pub(crate) struct GizmoPlugin;
 
@@ -70,7 +76,12 @@ impl Plugin for GizmoPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Gizmo>()
             .init_resource::<GizmoCapture>()
-            .add_systems(Update, (gizmo_input.before(handle_input), update_gizmo.after(crate::picking::pick)));
+            .init_gizmo_group::<OnTop>()
+            .add_systems(Startup, |mut store: ResMut<GizmoConfigStore>| store.config_mut::<OnTop>().0.depth_bias = -1.0)
+            .add_systems(
+                Update,
+                (gizmo_input.before(handle_input), update_gizmo.after(crate::picking::pick), draw_on_top.after(update_gizmo)),
+            );
     }
 }
 
@@ -397,6 +408,7 @@ fn update_gizmo(
         .clone();
     let root = commands.spawn((Transform::from_translation(to_render(anchor)), Visibility::Inherited)).id();
     let r = radius as f32 * crate::scene::MM;
+    gizmo.radius = r;
     for handle in available {
         let (mesh, material, transform) = match handle {
             GizmoHandle::Plane => (
@@ -421,6 +433,32 @@ fn update_gizmo(
     }
     gizmo.root = Some(root);
     settle.0 = settle.0.max(2);
+}
+
+/// Outlines of the spawned handles, drawn on top of everything.
+fn draw_on_top(gizmo: Res<Gizmo>, handles: Query<(&GizmoHandle, &GlobalTransform)>, mut lines: Gizmos<OnTop>) {
+    if gizmo.root.is_none() {
+        return;
+    }
+    let color = Color::srgb(10.0 / 255.0, 132.0 / 255.0, 1.0);
+    let r = gizmo.radius;
+    let flat = |g: &GlobalTransform| Isometry3d::new(g.translation(), Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+    for (handle, global) in &handles {
+        match handle {
+            GizmoHandle::Plane => {
+                lines.circle(flat(global), r * 0.8, color);
+                lines.circle(flat(global), r * 1.2, color);
+            }
+            GizmoHandle::Ring => {
+                lines.circle(flat(global), r * 1.1, color);
+                lines.circle(flat(global), r * 1.3, color);
+            }
+            GizmoHandle::Slide => {
+                let half = Vec3::Y * 0.75 * r / global.scale().y.max(1e-6);
+                lines.line(global.transform_point(-half), global.transform_point(half), color);
+            }
+        }
+    }
 }
 
 /// Render-space direction of a mated node's slide axis.

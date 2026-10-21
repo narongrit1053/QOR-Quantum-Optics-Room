@@ -132,6 +132,7 @@ export component AppWindow inherits Window {
     in property <bool> viewport-preparing: true;
     // Name of the isolated platform (POLA-52); empty when nothing is isolated.
     in property <string> isolated-name;
+    out property <length> viewport-x: viewport.x;
     out property <length> viewport-width: viewport.width;
     out property <length> viewport-height: viewport.height;
 
@@ -460,6 +461,9 @@ export component AppWindow inherits Window {
 
         // ── 3D viewport (full bleed) ─────────────────────────────────────────
         viewport := Rectangle {
+            // Split: both panes start right of the sidebar instead of behind it (POLA-70).
+            x: root.view-mode == 2 ? root.sidebar-right : 0;
+            width: parent.width - self.x;
             background: Theme.viewport-bg;
 
             Image {
@@ -1002,15 +1006,17 @@ export component AppWindow inherits Window {
         }
 
         // ── View switcher and units (top centre) ─────────────────────────────
+        // Centred on the 3D/Top/Split control alone, so Blueprint and Labels appearing in Top do
+        // not shift it.
         HorizontalLayout {
             x: min(
-                sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - self.preferred-width) / 2,
+                sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - view-switch.preferred-width) / 2,
                 (inspector-panel.shown ? inspector-panel.x : root.width) - self.preferred-width - Theme.inset);
             y: Theme.inset;
             width: self.preferred-width;
             height: self.preferred-height;
             spacing: Theme.gap;
-            SegmentedControl {
+            view-switch := SegmentedControl {
                 items: ["3D", "Top", "Split"];
                 current: root.view-mode;
                 selected(i) => {
@@ -1018,16 +1024,19 @@ export component AppWindow inherits Window {
                     root.view-mode-requested(i);
                 }
             }
-            if root.view-mode == 1: VerticalLayout {
+            // Hidden rather than removed, so the bar keeps its width and does not shift.
+            VerticalLayout {
                 alignment: center;
+                visible: root.view-mode == 1;
                 ToolButton {
                     label: "Blueprint";
                     active: root.blueprint;
                     clicked => { root.action("view.blueprint"); }
                 }
             }
-            if root.view-mode != 0: VerticalLayout {
+            VerticalLayout {
                 alignment: center;
+                visible: root.view-mode != 0;
                 ToolButton {
                     label: "Labels";
                     active: root.show-labels;

@@ -33,6 +33,9 @@ pub(crate) struct GlbLod {
     node: NodeId,
     owner: SelectionTarget,
     pickable: bool,
+    /// LOD0: the only LOD that carries `SceneNode`/`PickId`, so outline, picking and framing
+    /// see one copy of the part (POLA-58).
+    primary: bool,
     ready: bool,
 }
 
@@ -82,7 +85,7 @@ pub(crate) fn spawn_glb(
         let path = format!("{src}://meshes/{hex}.glb");
         commands.spawn((
             ChildOf(parent),
-            GlbLod { node, owner: SelectionTarget::Node(node), pickable, ready: false },
+            GlbLod { node, owner: SelectionTarget::Node(node), pickable, primary: i == 0, ready: false },
             WorldAssetRoot(assets.load(GltfAssetLabel::Scene(i).from_asset(path))),
             // GLB vertices are part space (mm, +Z up); glTF coordinate conversion is off.
             Transform { rotation: Quat::from_rotation_x(-FRAC_PI_2), scale: Vec3::splat(MM), ..default() },
@@ -113,11 +116,13 @@ fn tag_instance(
         let mut piece = commands.entity(entity);
         piece.insert((
             SceneEntity,
-            SceneNode(lod.node),
             MeshMaterial3d(handle.clone()),
             HighlightLook::Standard { material: handle, base_color, owner: lod.owner },
         ));
-        if lod.pickable {
+        if lod.primary {
+            piece.insert(SceneNode(lod.node));
+        }
+        if lod.pickable && lod.primary {
             piece.insert(PickId(lod.owner));
         }
     }

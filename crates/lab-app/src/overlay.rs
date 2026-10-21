@@ -30,7 +30,7 @@ pub fn refresh(ui: &AppWindow, app: &AppState) {
     let scale = ui.window().scale_factor();
     let unit = app.units();
     let doc = &app.session.doc;
-    let (mut labels, mut dims) = (Vec::new(), Vec::new());
+    let (mut candidates, mut dims) = (Vec::new(), Vec::new());
     LAST.with(|l| {
         for item in l.borrow().iter() {
             match item {
@@ -41,7 +41,14 @@ pub fn refresh(ui: &AppWindow, app: &AppState) {
                         _ => None,
                     };
                     let Some(text) = name else { continue };
-                    labels.push(UiItem { x: pos.x / scale, y: pos.y / scale, text: text.into(), commands: "".into() });
+                    let rank = if Some(*target) == app.session.selection {
+                        0
+                    } else if matches!(target, SelectionTarget::Platform(_)) {
+                        1
+                    } else {
+                        2
+                    };
+                    candidates.push((rank, *pos / scale, text));
                 }
                 OverlayItem::Dimension { a, b, length_mm } => {
                     let (a, b) = (*a / scale, *b / scale);
@@ -58,6 +65,45 @@ pub fn refresh(ui: &AppWindow, app: &AppState) {
             }
         }
     });
+    let labels = place_labels(candidates);
     ui.set_overlay_labels(ModelRc::new(VecModel::from(labels)));
     ui.set_overlay_dimensions(ModelRc::new(VecModel::from(dims)));
+}
+
+/// Greedy collision avoidance: selected first, then platforms, then parts; a label whose
+/// estimated rectangle overlaps one already placed is skipped.
+fn place_labels(mut candidates: Vec<(u8, lab_viewport::Vec2, String)>) -> Vec<UiItem> {
+    // shortcut: label size estimated from the character count (caption font); measure the text
+    // if labels with wide glyphs still overlap.
+    const CHAR_W: f32 = 7.0;
+    const H: f32 = 18.0;
+    candidates.sort_by_key(|c| c.0);
+    let mut placed: Vec<(f32, f32, f32, f32)> = Vec::new();
+    let mut out = Vec::new();
+    for (_, pos, text) in candidates {
+        let r = (pos.x, pos.y, pos.x + CHAR_W * text.chars().count() as f32 + 12.0, pos.y + H);
+        if placed.iter().any(|p| r.0 < p.2 && p.0 < r.2 && r.1 < p.3 && p.1 < r.3) {
+            continue;
+        }
+        placed.push(r);
+        out.push(UiItem { x: pos.x, y: pos.y, text: text.into(), commands: "".into() });
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlapping_labels_keep_the_higher_rank() {
+        let v = lab_viewport::Vec2::new;
+        let out = place_labels(vec![
+            (2, v(10.0, 10.0), "Beam".into()),
+            (0, v(14.0, 12.0), "L1".into()),
+            (2, v(200.0, 10.0), "HWP".into()),
+        ]);
+        let names: Vec<_> = out.iter().map(|i| i.text.to_string()).collect();
+        assert_eq!(names, ["L1", "HWP"]);
+    }
 }

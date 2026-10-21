@@ -90,9 +90,8 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 }
                 ViewportEvent::HoverChanged(_) => {}
                 ViewportEvent::IsolationChanged(id) => {
-                    let app = app.borrow();
-                    let name = id.and_then(|id| app.session.doc.platform(id)).map(|p| p.name.clone());
-                    ui.set_isolated_name(name.unwrap_or_default().into());
+                    app.borrow_mut().isolated = id;
+                    controller::refresh_isolated(&ui, &app.borrow());
                 }
                 ViewportEvent::Measured(m) => crate::measure::on_measured(&ui, &app, m),
                 ViewportEvent::Overlay(items) => crate::overlay::on_overlay(&ui, &app, items),

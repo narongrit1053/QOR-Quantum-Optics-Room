@@ -175,7 +175,7 @@ impl Plugin for CameraPlugin {
         app.init_resource::<PointerState>()
             .init_resource::<Clicks>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (layout_panes, handle_input, animate_camera).chain());
+            .add_systems(Update, (layout_panes, handle_input, animate_camera, top_shadows).chain());
     }
 }
 
@@ -576,6 +576,21 @@ pub(crate) fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max
     orbit.start_tween();
 }
 
+/// No shadow blobs in the Top projection: the key light casts shadows only while the main camera
+/// is not in Top.
+pub(crate) fn top_shadows(
+    quality: Res<crate::Quality>,
+    cameras: Query<&OrbitCamera, Without<TopPane>>,
+    mut lights: Query<&mut DirectionalLight, With<crate::scene::KeyLight>>,
+) {
+    let want = quality.shadows() && cameras.iter().all(|c| c.mode() != ViewMode::Top);
+    for mut light in &mut lights {
+        if light.shadow_maps_enabled != want {
+            light.shadow_maps_enabled = want;
+        }
+    }
+}
+
 pub(crate) fn animate_camera(
     time: Res<Time>,
     mut redraw: ResMut<RedrawState>,
@@ -619,7 +634,9 @@ fn animate_one(time: &Time, redraw: &mut RedrawState, orbit: &mut OrbitCamera, m
 
     // The top view switches to orthographic once the camera is (almost) straight down, scaled
     // so the focal plane keeps its size.
-    let orthographic = orbit.mode == ViewMode::Top && orbit.current.pitch > FRAC_PI_2 - 0.02;
+    // Also while a tween leaves Top, so the projection switches at the end of the turn, not on its
+    // first frame (POLA-52). Orbiting is clamped below this pitch, so 3D stays perspective.
+    let orthographic = (orbit.mode == ViewMode::Top || orbit.tween.is_some()) && orbit.current.pitch > FRAC_PI_2 - 0.02;
     if orthographic {
         let viewport_height = 2.0 * orbit.current.distance * (FOV / 2.0).tan();
         let up_to_date = matches!(
