@@ -1,6 +1,8 @@
 //! Hover and click selection by ray casting against scene meshes, and selection highlights
 //! (M1-SPEC §5.7).
 
+use std::collections::HashMap;
+
 use bevy::{
     picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
     prelude::*,
@@ -26,6 +28,11 @@ pub(crate) enum HighlightLook {
     Standard { material: Handle<StandardMaterial>, base_color: Color, owner: SelectionTarget },
     HoleTop { material: Handle<HoleTopMaterial>, owner: SelectionTarget },
 }
+
+/// The look's material is shared with other entities (one per finish or GLB material), so
+/// highlights swap the entity to a tinted copy instead of changing the material.
+#[derive(Component)]
+pub(crate) struct SharedMaterial;
 
 #[derive(Resource, Default)]
 pub(crate) struct Selection {
@@ -97,19 +104,25 @@ pub(crate) fn pick(
     }
 }
 
+/// Tinted copies of shared materials: (base, colour, emissive, unlit) → copy.
+type Variants = HashMap<(AssetId<StandardMaterial>, [u32; 4], [u32; 4], bool), Handle<StandardMaterial>>;
+
 /// Applies the current selection and hover to every look. Runs when the selection changed or
 /// new looks were spawned (a rebuilt platform keeps its highlight); writes only changed values.
+#[allow(clippy::too_many_arguments)]
 fn apply_highlight(
+    mut commands: Commands,
     selection: Res<Selection>,
-    looks: Query<&HighlightLook>,
+    looks: Query<(Entity, &HighlightLook, Has<SharedMaterial>, Option<&MeshMaterial3d<StandardMaterial>>)>,
     added: Query<(), Added<HighlightLook>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hole_materials: ResMut<Assets<HoleTopMaterial>>,
+    mut variants: Local<Variants>,
 ) {
     if !selection.is_changed() && added.is_empty() {
         return;
     }
-    for look in &looks {
+    for (entity, look, shared, shown) in &looks {
         match look {
             HighlightLook::Standard { material, base_color, owner } => {
                 let color = if selection.selected == Some(*owner) {
@@ -122,10 +135,34 @@ fn apply_highlight(
                 };
                 // Hover also lifts emission, so it shows on dark parts where a white mix barely does.
                 let hovered = selection.hovered == Some(*owner) && selection.selected != Some(*owner);
-                let emissive = if hovered { LinearRgba::rgb(0.12, 0.12, 0.12) } else { LinearRgba::BLACK };
+                let lift = LinearRgba::rgb(0.12, 0.12, 0.12);
                 let Some(current) = materials.get(material) else { continue };
                 // The alpha belongs to the material (walls fade it); highlights only change colour.
                 let color = color.with_alpha(current.base_color.alpha());
+                if shared {
+                    let want = if current.base_color == color && !hovered {
+                        material.clone()
+                    } else {
+                        let emissive = if hovered { lift } else { current.emissive };
+                        let key = (material.id(), bits(color.to_linear()), bits(emissive), current.unlit);
+                        match variants.get(&key) {
+                            Some(handle) => handle.clone(),
+                            None => {
+                                let mut m = current.clone();
+                                m.base_color = color;
+                                m.emissive = emissive;
+                                let handle = materials.add(m);
+                                variants.insert(key, handle.clone());
+                                handle
+                            }
+                        }
+                    };
+                    if shown.is_none_or(|m| m.0 != want) {
+                        commands.entity(entity).insert(MeshMaterial3d(want));
+                    }
+                    continue;
+                }
+                let emissive = if hovered { lift } else { LinearRgba::BLACK };
                 if (current.base_color != color || current.emissive != emissive)
                     && let Some(mut m) = materials.get_mut(material)
                 {
@@ -146,6 +183,10 @@ fn apply_highlight(
             }
         }
     }
+}
+
+fn bits(c: LinearRgba) -> [u32; 4] {
+    c.to_f32_array().map(f32::to_bits)
 }
 
 /// Linear-space blend that keeps `a`'s alpha.

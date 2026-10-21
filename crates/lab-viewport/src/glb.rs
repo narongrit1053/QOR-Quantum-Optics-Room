@@ -17,7 +17,7 @@ use lab_catalog::Source;
 use lab_core::{NodeId, SelectionTarget};
 
 use crate::host::SettleFrames;
-use crate::picking::{HighlightLook, PickId};
+use crate::picking::{HighlightLook, PickId, SharedMaterial};
 use crate::scene::{MM, SceneEntity, SceneNode};
 
 /// Distance bands (render metres) per LOD, with crossfade margins.
@@ -93,29 +93,27 @@ pub(crate) fn spawn_glb(
 }
 
 /// Tags the spawned meshes like generated pieces so picking, highlight, outline and isolate
-/// treat them alike. Each mesh gets its own material copy so the highlight tints only it.
+/// treat them alike. Instances of one GLB share its materials; highlights swap to tinted copies.
 fn tag_instance(
     ready: On<WorldInstanceReady>,
     mut commands: Commands,
     mut lods: Query<&mut GlbLod>,
     children: Query<&Children>,
     pieces: Query<&MeshMaterial3d<StandardMaterial>, With<Mesh3d>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    materials: Res<Assets<StandardMaterial>>,
     mut settle: ResMut<SettleFrames>,
 ) {
     let Ok(mut lod) = lods.get_mut(ready.entity) else { return };
     lod.ready = true;
     for entity in children.iter_descendants(ready.entity) {
         let Ok(material) = pieces.get(entity) else { continue };
-        let Some(copy) = materials.get(&material.0).cloned() else { continue };
-        let base_color = copy.base_color;
-        let handle = materials.add(copy);
+        let Some(base_color) = materials.get(&material.0).map(|m| m.base_color) else { continue };
         let mut piece = commands.entity(entity);
         piece.insert((
             SceneEntity,
             SceneNode(lod.node),
-            MeshMaterial3d(handle.clone()),
-            HighlightLook::Standard { material: handle, base_color, owner: lod.owner },
+            HighlightLook::Standard { material: material.0.clone(), base_color, owner: lod.owner },
+            SharedMaterial,
         ));
         if lod.pickable {
             piece.insert(PickId(lod.owner));

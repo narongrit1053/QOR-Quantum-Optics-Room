@@ -3,6 +3,8 @@
 //! original looks are kept and restored; meshes are not rebuilt. Highlights still apply on top
 //! because `HighlightLook::base_color` is what the highlight system tints.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use lab_core::SelectionTarget;
 
@@ -23,11 +25,10 @@ struct Blueprint {
     active: bool,
 }
 
-/// A look's own colour and lighting before the blueprint swap.
+/// A look's own colour before the blueprint swap.
 #[derive(Component)]
 struct Saved {
     base_color: Color,
-    unlit: bool,
 }
 
 pub(crate) struct BlueprintPlugin;
@@ -48,6 +49,8 @@ fn apply_blueprint(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hole_materials: ResMut<Assets<HoleTopMaterial>>,
     mut selection: ResMut<Selection>,
+    // Each material's own `unlit`, kept per material because node materials are shared.
+    mut unlit: Local<HashMap<AssetId<StandardMaterial>, bool>>,
 ) {
     for request in &pending.0 {
         if let FrameRequest::SetBlueprint(on) = request {
@@ -71,17 +74,21 @@ fn apply_blueprint(
                 };
                 match (active, saved) {
                     (true, None) => {
-                        let unlit = materials.get(&*material).is_some_and(|m| m.unlit);
-                        commands.entity(entity).insert(Saved { base_color: *base_color, unlit });
+                        commands.entity(entity).insert(Saved { base_color: *base_color });
                         *base_color = fill;
-                        if let Some(mut m) = materials.get_mut(&*material) {
+                        if !unlit.contains_key(&material.id())
+                            && let Some(mut m) = materials.get_mut(&*material)
+                        {
+                            unlit.insert(material.id(), m.unlit);
                             m.unlit = true;
                         }
                     }
                     (false, Some(saved)) => {
                         *base_color = saved.base_color;
-                        if let Some(mut m) = materials.get_mut(&*material) {
-                            m.unlit = saved.unlit;
+                        if let Some(own) = unlit.remove(&material.id())
+                            && let Some(mut m) = materials.get_mut(&*material)
+                        {
+                            m.unlit = own;
                         }
                         commands.entity(entity).remove::<Saved>();
                     }

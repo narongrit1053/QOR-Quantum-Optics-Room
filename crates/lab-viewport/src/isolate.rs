@@ -91,6 +91,10 @@ pub(crate) fn apply_isolation(
     for &entity in &index.room {
         set(entity, kept.is_none());
     }
+    // Nodes and platforms change only with the requests above; walking 10k nodes per frame does not.
+    if !dirty {
+        return;
+    }
     for (&id, platform) in &index.platforms {
         set(platform.root, show(Some(id)));
     }

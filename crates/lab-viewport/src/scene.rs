@@ -21,7 +21,7 @@ use lab_parts::PartMesh;
 
 use crate::hole_material::HoleTopMaterial;
 use crate::host::{EventSender, PendingRequests, SettleFrames};
-use crate::picking::{HighlightLook, PickId, Selection};
+use crate::picking::{HighlightLook, PickId, Selection, SharedMaterial};
 use crate::platform::{PlatformAssets, PlatformRoot, platform_root_transform, spawn_platform_parts};
 use crate::room::spawn_room;
 use crate::sync::{SyncOp, plan_changes, plan_full};
@@ -92,6 +92,7 @@ impl Plugin for ScenePlugin {
             .init_resource::<SceneIndex>()
             .init_resource::<CatalogRes>()
             .init_resource::<PartMeshes>()
+            .init_resource::<FinishMaterials>()
             // Transparent, so the UI's background gradient shows behind the scene.
             .insert_resource(ClearColor(Color::NONE))
             .insert_resource(GlobalAmbientLight { color: Color::srgb(0.85, 0.9, 1.0), brightness: 160.0, ..default() })
@@ -130,7 +131,20 @@ pub(crate) struct SceneAssets<'w> {
     images: ResMut<'w, Assets<Image>>,
     catalog: Res<'w, CatalogRes>,
     part_meshes: ResMut<'w, PartMeshes>,
+    finishes: ResMut<'w, FinishMaterials>,
     server: Res<'w, AssetServer>,
+}
+
+/// One material per finish, shared by every node piece so Bevy can batch them. Highlights swap
+/// a piece to a tinted copy instead of changing these (see `picking::apply_highlight`).
+#[derive(Resource, Default)]
+pub(crate) struct FinishMaterials(HashMap<String, Handle<StandardMaterial>>);
+
+impl FinishMaterials {
+    pub fn get(&mut self, materials: &mut Assets<StandardMaterial>, finish: &Finish) -> Handle<StandardMaterial> {
+        // Debug text as the key: `Finish` holds floats, so it is not `Hash`.
+        self.0.entry(format!("{finish:?}")).or_insert_with(|| materials.add(finish_material(finish))).clone()
+    }
 }
 
 /// Bevy meshes of generated parts, one handle per piece, keyed by the `Arc<PartMesh>` pointer
@@ -393,15 +407,15 @@ pub(crate) fn spawn_node(
         warn!("“{}” is not drawn: {error}", node.name);
     }
     for (finish, mesh) in pieces {
-        let material = finish_material(&finish);
-        let base_color = material.base_color;
-        let handle = assets.materials.add(material);
+        let handle = assets.finishes.get(&mut assets.materials, &finish);
+        let base_color = finish_material(&finish).base_color;
         let mut entity = commands.spawn((
             SceneNode(node.id),
             ChildOf(parent),
             Mesh3d(mesh),
             MeshMaterial3d(handle.clone()),
             HighlightLook::Standard { material: handle, base_color, owner },
+            SharedMaterial,
             Transform::default(),
         ));
         if node.pickable {
