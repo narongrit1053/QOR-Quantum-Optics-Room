@@ -218,6 +218,7 @@ fn add_scene_plugins(app: &mut App, document: Document) {
     app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin, crate::thumbnail::ThumbnailPlugin, crate::export::ExportPlugin));
     app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
     app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin));
+    app.add_plugins(crate::beams::BeamsPlugin);
 }
 
 /// Startup test hook: the viewport's resources and plugins on a render-less Bevy app, with every schedule
@@ -401,6 +402,7 @@ fn run_on_demand(
                 ViewportRequest::SetReduceMotion(on) => pending.push(FrameRequest::SetReduceMotion(on)),
                 ViewportRequest::InspectPart(id) => pending.push(FrameRequest::InspectPart(id)),
                 ViewportRequest::InspectMarkers(frames) => pending.push(FrameRequest::InspectMarkers(frames)),
+                ViewportRequest::SetBeams(on) => pending.push(FrameRequest::SetBeams(on)),
                 ViewportRequest::RenderThumbnail { part, path } => {
                     pending.push(FrameRequest::RenderThumbnail(part, path))
                 }

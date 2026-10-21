@@ -3,6 +3,7 @@
 
 mod actions;
 mod app_state;
+mod beams;
 mod bom;
 mod bridge;
 mod controller;
@@ -141,6 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 a.borrow_mut().requests = Some(handle.requests.clone());
                 a.borrow().send(ViewportRequest::SetWallDisplay(wall_display));
+                a.borrow().send(ViewportRequest::SetBeams(a.borrow().settings.show_beams));
                 let catalog = a.borrow().catalog.clone();
                 a.borrow().send(ViewportRequest::SetCatalog(catalog));
                 crate::thumbs::render_missing(&a.borrow());

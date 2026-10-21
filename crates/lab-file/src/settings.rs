@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::FileError;
 use crate::atomic::atomic_write;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
     #[serde(default)]
     pub display_unit: LengthUnit,
@@ -19,6 +19,25 @@ pub struct Settings {
     pub last_dir: Option<PathBuf>,
     #[serde(default)]
     pub theme: ThemeMode,
+    /// M6: laser beams drawn in the viewport (`view.beams`).
+    #[serde(default = "yes")]
+    pub show_beams: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            display_unit: LengthUnit::default(),
+            wall_display: WallDisplay::default(),
+            last_dir: None,
+            theme: ThemeMode::default(),
+            show_beams: true,
+        }
+    }
 }
 
 /// `$LABSETUP_SETTINGS`, else `%APPDATA%\LabSetup\settings.json`, else the temp dir.

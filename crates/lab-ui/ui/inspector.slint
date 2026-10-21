@@ -171,6 +171,11 @@ export component NodeInspector inherits Rectangle {
     in property <[InspectorField]> fields;
     in property <[EditField]> edit-fields;
     in property <[SetRow]> set-rows;
+    // M6 Beam section: laser fields (laser nodes) or the beam at this optic (`beam-text`).
+    in property <[EditField]> beam-fields;
+    in property <string> beam-text;
+    in property <bool> beam-laser;
+    in property <bool> beam-on;
     in property <string> error;
     callback action(string /* id */);
     callback field-committed(string /* id */, string /* text */) -> bool;
@@ -216,6 +221,35 @@ export component NodeInspector inherits Rectangle {
             invalid: f.invalid;
             committed(i, t) => { return root.field-committed(i, t); }
             edited(i, t) => { root.field-edited(i, t); }
+        }
+        if root.beam-laser || root.beam-text != "": Divider { }
+        if root.beam-laser || root.beam-text != "": HorizontalLayout {
+            padding-left: 9px;
+            Text {
+                text: "Beam";
+                color: Theme.text;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Rectangle { }
+            if root.beam-laser: PillButton {
+                label: root.beam-on ? "On" : "Off";
+                clicked => { root.action("beam.toggle"); }
+            }
+        }
+        for f in root.beam-fields: LabeledField {
+            label: f.label;
+            id: f.id;
+            value: f.value;
+            unit: f.unit;
+            enabled: f.enabled;
+            invalid: f.invalid;
+            committed(i, t) => { return root.field-committed(i, t); }
+            edited(i, t) => { root.field-edited(i, t); }
+        }
+        if root.beam-text != "": HorizontalLayout {
+            padding-left: 9px;
+            Note { text: root.beam-text; }
         }
         if root.set-rows.length > 0: Divider { }
         if root.set-rows.length > 0: HorizontalLayout {
