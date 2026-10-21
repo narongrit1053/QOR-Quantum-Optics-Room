@@ -273,9 +273,9 @@ export component Toast inherits Rectangle {
     height: 36px;
     width: row.preferred-width;
     border-radius: 18px;
-    background: Theme.menu-bg;
+    background: Theme.toast-bg;
     border-width: Theme.border-width;
-    border-color: Theme.panel-border;
+    border-color: Theme.sheet-border;
     drop-shadow-blur: 24px;
     drop-shadow-offset-y: 8px;
     drop-shadow-color: Theme.shadow;
@@ -303,7 +303,7 @@ export component Toast inherits Rectangle {
                 animate background { duration: Theme.quick; }
                 action-text := Text {
                     text: root.shown-action;
-                    color: action-touch.has-hover ? white : Theme.accent.brighter(0.4);
+                    color: action-touch.has-hover ? white : Theme.accent-text;
                     font-size: 12px;
                     font-weight: 600;
                     horizontal-alignment: center;

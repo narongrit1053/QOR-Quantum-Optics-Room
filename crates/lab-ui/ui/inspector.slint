@@ -3,7 +3,7 @@
 
 import { Theme } from "theme.slint";
 import { InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
-import { SectionHeader, SegmentedControl, PillButton, IconButton, Field } from "components.slint";
+import { SectionHeader, SegmentedControl, PillButton, IconButton, Field, ListRow } from "components.slint";
 import { TextField, LabeledField, CornerTable, ZoneList, DoorList } from "fields.slint";
 import { PresetMenu } from "overlays.slint";
 
@@ -243,6 +243,7 @@ export component PlatformInspector inherits Rectangle {
     in property <[ZoneRow]> zones;
     in property <int> support;
     in property <[EditField]> support-fields;
+    in property <[string]> support-bases;
     in property <int> node-count;
     in property <string> warning;
     in property <[PresetRow]> presets;
@@ -442,15 +443,38 @@ export component PlatformInspector inherits Rectangle {
             floating: false;
             selected(i) => { root.choice-selected("platform.support", i); }
         }
-        for f in root.support-fields: LabeledField {
-            label: f.label;
-            id: f.id;
-            value: f.value;
-            unit: f.unit;
-            enabled: f.enabled;
-            invalid: f.invalid;
-            committed(i, t) => { return root.field-committed(i, t); }
-            edited(i, t) => { root.field-edited(i, t); }
+        for f in root.support-fields: VerticalLayout {
+            if f.id != "platform.support.on.name": LabeledField {
+                label: f.label;
+                id: f.id;
+                value: f.value;
+                unit: f.unit;
+                enabled: f.enabled;
+                invalid: f.invalid;
+                committed(i, t) => { return root.field-committed(i, t); }
+                edited(i, t) => { root.field-edited(i, t); }
+            }
+            // A picker of the existing platforms, not a typed name.
+            if f.id == "platform.support.on.name": VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: f.label;
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-body;
+                    height: 24px;
+                    vertical-alignment: center;
+                }
+                if root.support-bases.length == 0: Text {
+                    text: "No other platform in the scene";
+                    color: Theme.warning;
+                    font-size: Theme.font-caption;
+                }
+                for name in root.support-bases: ListRow {
+                    label: name;
+                    selected: name == f.value;
+                    clicked => { root.field-committed(f.id, name); }
+                }
+            }
         }
         ControlRow {
             label: "Surface";

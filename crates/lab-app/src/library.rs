@@ -144,8 +144,8 @@ pub fn drag(ui: &AppWindow, app: &Rc<RefCell<AppState>>, item: DragItem, kind: i
     let inside =
         x > ui.get_sidebar_right() && x < ui.get_viewport_width() && y >= 0.0 && y < ui.get_viewport_height();
     let pos = Vec2::new(x * scale, y * scale);
-    // shortcut: Slint gives no modifiers to a TouchArea move, so drags carry none; Shift-free placement needs them later.
-    let mods = Modifiers::default();
+    let ds = ui.global::<lab_ui::DragState>();
+    let mods = Modifiers { shift: ds.get_shift(), ctrl: ds.get_ctrl(), alt: false };
     let mut app = app.borrow_mut();
     let was_inside = app.library.drag_inside;
     let drag = match (kind, inside) {

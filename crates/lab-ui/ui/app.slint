@@ -10,7 +10,7 @@ import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
 import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
-import { EditState, TableFocus } from "fields.slint";
+import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } from "overlays.slint";
 import { StackPanel } from "stack.slint";
@@ -23,7 +23,7 @@ import { ExportSheet } from "export.slint";
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
-export { EditState, TableFocus } from "fields.slint";
+export { EditState, TableFocus, DragState } from "fields.slint";
 
 // One scene-tree row: chevron, label (double-click to rename), lock and delete on hover.
 component SceneItem inherits Rectangle {
@@ -37,6 +37,14 @@ component SceneItem inherits Rectangle {
     height: 28px;
     border-radius: 7px;
     background: item.selected ? Theme.accent-soft : root.hot ? Theme.control-hover : transparent;
+    if item.selected: Rectangle {
+        x: 0px;
+        width: 3px;
+        height: 16px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 1.5px;
+        background: Theme.accent;
+    }
 
     row-touch := TouchArea {
         clicked => { root.clicked(); }
@@ -48,12 +56,13 @@ component SceneItem inherits Rectangle {
         spacing: 4px;
         Rectangle {
             width: 16px;
-            if item.expandable: Text {
-                text: item.expanded ? "▾" : "▸";
-                color: Theme.text-tertiary;
-                font-size: Theme.font-caption;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            if item.expandable: Icon {
+                name: item.expanded ? "chevron-down" : "chevron-right";
+                tint: Theme.text-tertiary;
+                width: 12px;
+                height: 12px;
+                x: 2px;
+                y: (parent.height - self.height) / 2;
             }
             if item.expandable: TouchArea { clicked => { root.action("toggle"); } }
         }
@@ -207,6 +216,8 @@ export component AppWindow inherits Window {
     in property <int> platform-support;
     // platform.support.leg_size|leg_inset|on.name|standoff
     in property <[EditField]> platform-support-fields;
+    // Names of the other platforms, for the "On platform" picker.
+    in property <[string]> platform-support-bases;
     in property <int> platform-node-count;
     // "3 parts lie outside the outline" or ""
     in property <string> platform-warning;
@@ -402,6 +413,13 @@ export component AppWindow inherits Window {
             // Ctrl+K opens the palette, also while a field is focused.
             if (event.modifiers.control && !event.modifiers.alt && (event.text == "k" || event.text == "K") && !root.sheet-open && root.paste-target == "") {
                 root.action("palette.open");
+                return accept;
+            }
+            // Esc cancels a part drag from the sidebar.
+            if (event.text == Key.Escape && DragState.active) {
+                DragState.cancelled = true;
+                DragState.active = false;
+                if (DragState.source == 2) { root.stack-drag(2, 0, 0); } else { root.library-drag("", 2, 0, 0); }
                 return accept;
             }
             // A sheet owns the keyboard; its own focus scope handles the keys.
@@ -630,15 +648,16 @@ export component AppWindow inherits Window {
                         spacing: 2px;
                         HorizontalLayout {
                             spacing: 8px;
-                            Text {
+                            name-text := Text {
                                 text: root.project-name;
                                 color: Theme.text;
                                 font-size: Theme.font-title;
                                 font-weight: 650;
                                 overflow: elide;
                                 vertical-alignment: center;
+                                horizontal-stretch: 1;
                             }
-                            VerticalLayout {
+                            if root.dirty: VerticalLayout {
                                 alignment: center;
                                 Rectangle {
                                     height: 18px;
@@ -657,16 +676,22 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            Rectangle { horizontal-stretch: 1; }
                             Rectangle {
-                                width: palette-text.preferred-width + 12px;
+                                // Icon only when the name, pill and buttons need the room.
+                                property <bool> icon-only: name-text.preferred-width + (root.dirty ? 50px : 0px) + palette-text.preferred-width + 12px + 16px + 24px + 40px > header-layout.width;
+                                width: self.icon-only ? 24px : palette-text.preferred-width + 12px;
+                                height: 24px;
+                                accessible-role: button;
+                                accessible-label: "Command palette (Ctrl+K)";
                                 border-radius: Theme.radius-control;
                                 background: palette-touch.has-hover ? Theme.control-hover : Theme.control-bg;
                                 palette-touch := TouchArea {
                                     clicked => { root.action("palette.open"); }
                                 }
+                                Icon { visible: parent.icon-only; x: 4px; y: 4px; name: "search"; tint: Theme.text-secondary; }
                                 palette-text := Text {
-                                    text: "⌕ Ctrl+K";
+                                    visible: !parent.icon-only;
+                                    text: "Search  Ctrl+K";
                                     color: Theme.text-secondary;
                                     font-family: Theme.font-symbol;
                                     font-size: Theme.font-caption;
@@ -772,6 +797,16 @@ export component AppWindow inherits Window {
                         for item in root.library: HorizontalLayout {
                             spacing: 8px;
                             padding-left: item.header ? 4px : 16px;
+                            if item.header: Rectangle {
+                                width: 14px;
+                                Icon {
+                                    name: item.expanded ? "chevron-down" : "chevron-right";
+                                    tint: Theme.text-tertiary;
+                                    width: 12px;
+                                    height: 12px;
+                                    y: 8px;
+                                }
+                            }
                             if !item.has-thumb: Glyph {
                                 letter: item.letter;
                                 tint: item.tint;
@@ -788,7 +823,7 @@ export component AppWindow inherits Window {
                                 horizontal-stretch: 1;
                                 height: 28px;
                                 ListRow {
-                                    label: item.header ? (item.expanded ? "▾ " : "▸ ") + item.label : item.label;
+                                    label: item.label;
                                     detail: item.detail;
                                     clicked => {
                                         if (item.header) { root.library-toggle(item.id); }
@@ -798,19 +833,30 @@ export component AppWindow inherits Window {
                                 if !item.header: TouchArea {
                                     mouse-cursor: grab;
                                     moved => {
-                                        if (self.pressed) {
+                                        if (self.pressed && !DragState.cancelled) {
+                                            DragState.active = true;
+                                            DragState.source = 1;
                                             root.library-drag(item.id, 0, self.absolute-position.x + self.mouse-x,
                                                 self.absolute-position.y + self.mouse-y);
                                         }
                                     }
                                     pointer-event(event) => {
-                                        if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
+                                        DragState.shift = event.modifiers.shift;
+                                        DragState.ctrl = event.modifiers.control;
+                                        if (event.kind == PointerEventKind.down) {
+                                            DragState.cancelled = false;
+                                        } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
                                             root.library-edit(item.id);
                                         } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
-                                            root.library-drag(item.id, 1, self.absolute-position.x + self.mouse-x,
-                                                self.absolute-position.y + self.mouse-y);
+                                            if (!DragState.cancelled) {
+                                                root.library-drag(item.id, 1, self.absolute-position.x + self.mouse-x,
+                                                    self.absolute-position.y + self.mouse-y);
+                                            }
+                                            DragState.active = false;
+                                            DragState.cancelled = false;
                                         } else if (event.kind == PointerEventKind.cancel) {
-                                            root.library-drag(item.id, 2, 0, 0);
+                                            if (!DragState.cancelled) { root.library-drag(item.id, 2, 0, 0); }
+                                            DragState.active = false;
                                         }
                                     }
                                 }
@@ -856,6 +902,7 @@ export component AppWindow inherits Window {
                 }
                 ListView {
                     vertical-stretch: 1;
+                    min-height: (root.height - 2 * Theme.inset) * 0.4;
                     for row in root.scene: SceneItem {
                         item: row;
                         clicked => { root.scene-row-clicked(row.kind, row.id); }
@@ -931,6 +978,7 @@ export component AppWindow inherits Window {
                     zones: root.platform-zones;
                     support: root.platform-support;
                     support-fields: root.platform-support-fields;
+                    support-bases: root.platform-support-bases;
                     node-count: root.platform-node-count;
                     warning: root.platform-warning;
                     presets: root.presets;

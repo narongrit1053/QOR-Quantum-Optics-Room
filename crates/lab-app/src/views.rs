@@ -118,6 +118,8 @@ pub struct InspectorFieldData {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlatformViewData {
+    /// Names of the other platforms (the "On platform" picker).
+    pub support_bases: Vec<String>,
     pub name: String,
     pub subtitle: String,
     pub kind: i32,
@@ -563,6 +565,7 @@ pub fn platform_view(doc: &Document, p: &Platform, holes: &HoleSet, units: Lengt
     let warning = outside_warning(doc, p);
 
     PlatformViewData {
+        support_bases: doc.platforms.iter().filter(|b| b.id != p.id).map(|b| b.name.clone()).collect(),
         name: p.name.clone(),
         subtitle,
         kind: match p.kind { PlatformKind::OpticalTable => 0, PlatformKind::Breadboard => 1, PlatformKind::Custom => 2 },
@@ -809,9 +812,9 @@ pub fn node_view(
             let value = node.params.get(*name).or_else(|| params.get(*name)).and_then(ParamValue::as_f64).unwrap_or(*default);
             edit_fields.push(EditFieldData {
                 id: format!("node.param.{name}"),
-                label: name.replace('_', " "),
-                value: lab_core::units::format_length(value, LengthUnit::Millimetre),
-                unit: "mm".into(),
+                label: title_case(name),
+                value: lab_core::units::format_length(value, units),
+                unit: units.suffix().into(),
                 enabled: true,
                 invalid: false,
             });
@@ -824,6 +827,14 @@ pub fn node_view(
         fields,
         edit_fields,
     }
+}
+
+/// "base_diameter" -> "Base Diameter".
+fn title_case(name: &str) -> String {
+    name.split('_')
+        .map(|w| w.chars().next().map_or(String::new(), |c| c.to_uppercase().chain(w.chars().skip(1)).collect()))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// SVG "M x y L … Z" with y negated, "{:.2}" numbers; zones as extra sub-paths; square viewbox = bbox padded 8% (≥ 10 mm).

@@ -24,6 +24,18 @@ export global EditState {
 
 // Programmatic focus: set `request` to a field id and that field takes focus (then the
 // request is cleared). Corner tables use it to move to the next row on Enter.
+// A part drag from the sidebar: Shift/Ctrl at the latest pointer event, and Esc cancel.
+export global DragState {
+    in-out property <bool> shift;
+    in-out property <bool> ctrl;
+    // A drag is in progress (pointer pressed and moving).
+    in-out property <bool> active;
+    // Esc cancelled the drag; the rest of the press is ignored until the button is released.
+    in-out property <bool> cancelled;
+    // Set by Esc: 1 library, 2 stack (which callback to cancel).
+    in-out property <int> source;
+}
+
 export global TableFocus {
     in-out property <string> request;
 }
@@ -351,7 +363,7 @@ export component CornerTable inherits VerticalLayout {
                     animate background { duration: Theme.quick; }
                     Text {
                         text: row.index + 1;
-                        color: row-focused || row-invalid ? white : Theme.text-secondary;
+                        color: row-focused || row-invalid ? Theme.on-accent : Theme.text-secondary;
                         font-size: 10px;
                         font-weight: 600;
                         horizontal-alignment: center;
