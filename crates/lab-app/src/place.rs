@@ -89,7 +89,7 @@ fn riser_for(catalog: &Catalog, part: &str, lift: f64, head: &Node) -> Option<No
 }
 
 /// A part node from the catalog; `None` when `part` is not in it.
-fn new_node(
+pub(crate) fn new_node(
     catalog: &Catalog,
     part: &str,
     id: u64,

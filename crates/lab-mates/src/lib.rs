@@ -3,7 +3,7 @@
 pub mod solver;
 
 use glam::{DAffine3, DMat3, DQuat, DVec2, DVec3};
-use lab_core::part::{ConnectorKind, Frame, PartDef};
+use lab_core::part::{ConnectorKind, Frame, Geometry, ParamValue, PartDef, Params};
 use lab_core::{HoleSet, LatticeIndex};
 
 const TOL: f64 = 0.05;
@@ -62,6 +62,27 @@ pub fn mate_pose(parent: &Frame, child: &Frame, slide: f64, twist: f64) -> (DVec
     (pose.translation, DQuat::from_mat3(&pose.matrix3).normalize())
 }
 
+/// A connector's frame for the given param overrides: for generators `post`, `pedestal_post`,
+/// `post_holder` and `riser`, a connector whose origin sits on the part's top (z == default
+/// length / height) moves to the overridden length / height. Every other frame is returned unchanged.
+pub fn connector_frame(def: &PartDef, conn: &str, params: &Params) -> Option<Frame> {
+    let mut frame = def.connector(conn)?.frame;
+    if let Geometry::Parametric { generator, params: defaults } = &def.geometry {
+        let key = match generator.as_str() {
+            "post" | "pedestal_post" => "length",
+            "post_holder" | "riser" => "height",
+            _ => return Some(frame),
+        };
+        let get = |p: &Params| p.get(key).and_then(ParamValue::as_f64);
+        if let (Some(old), Some(new)) = (get(defaults), get(params)) {
+            if close(frame.origin.z, old) {
+                frame.origin.z = new;
+            }
+        }
+    }
+    Some(frame)
+}
+
 /// Part pose in the platform frame when its `seat` connector is bolted to the hole at `hole`,
 /// turned by `angle` about +Z. A part without a seat stands with its origin on the hole.
 pub fn seat_pose(part: &PartDef, hole: DVec2, angle: f64) -> (DVec3, DQuat) {
@@ -90,7 +111,7 @@ pub fn snap(holes: &HoleSet, p: DVec2, max_distance: f64) -> Option<SnapHit> {
 
 #[cfg(test)]
 mod tests {
-    use lab_core::part::Gender;
+    use lab_core::part::{self, Gender};
     use lab_core::*;
 
     use super::*;
@@ -114,6 +135,36 @@ mod tests {
         assert!(p.distance(DVec3::new(0.0, 0.0, 40.0)) < 1e-9, "{p}");
         assert!((q * DVec3::Z).distance(DVec3::Z) < 1e-9);
         assert!((q * DVec3::X).distance(DVec3::X) < 1e-9);
+    }
+
+    #[test]
+    fn post_top_follows_length() {
+        let conn = |name: &str, z: f64| part::ConnectorDef {
+            name: name.into(),
+            kind: thread(Gender::Male),
+            frame: Frame { origin: DVec3::new(0.0, 0.0, z), z: DVec3::Z, x: DVec3::X },
+        };
+        let def = PartDef {
+            id: "thorlabs:TR2".into(),
+            version: 1,
+            vendor: String::new(),
+            part_number: String::new(),
+            name: "TR2".into(),
+            category: "posts/posts".into(),
+            tags: Vec::new(),
+            geometry: Geometry::Parametric {
+                generator: "post".into(),
+                params: Params::from([("length".to_string(), ParamValue::Number(50.8))]),
+            },
+            connectors: vec![conn("bottom", 0.0), conn("top", 50.8)],
+            optical_ports: Vec::new(),
+            meta: Default::default(),
+        };
+        let base = connector_frame(&def, "top", &Params::new()).unwrap();
+        let params = Params::from([("length".to_string(), ParamValue::Number(50.8 + 25.0))]);
+        let top = connector_frame(&def, "top", &params).unwrap();
+        assert!((top.origin.z - base.origin.z - 25.0).abs() < 1e-9);
+        assert_eq!(connector_frame(&def, "bottom", &params), def.connector("bottom").map(|c| c.frame));
     }
 
     #[test]

@@ -7,12 +7,12 @@
 use std::rc::Rc;
 
 use lab_app::{
-    CornerRowData, DoorRowData, EditFieldData, InspectorFieldData, NodeViewData, OutlinePreviewData,
+    CornerRowData, DoorRowData, EditFieldData, InspectorFieldData, NodeViewData, SetRowData, OutlinePreviewData,
     PlatformViewData, PresetRowData, PreviewLabelData, RoomViewData, SceneRowData, WallChoiceData, ZoneRowData,
 };
 use lab_ui::{
     AppWindow, CornerRow, DoorRow, EditField, InspectorField, LibraryRow, OutlinePreview, PresetRow, PreviewLabel,
-    SceneRow, WallChoice, ZoneRow,
+    SceneRow, SetRow, WallChoice, ZoneRow,
 };
 use slint::{Model, ModelRc, SharedString, VecModel};
 
@@ -21,6 +21,7 @@ pub struct UiModels {
     pub scene: Rc<VecModel<SceneRow>>,
     pub inspector: Rc<VecModel<InspectorField>>,
     pub node_fields: Rc<VecModel<EditField>>,
+    pub set_rows: Rc<VecModel<SetRow>>,
     pub platform_outline_fields: Rc<VecModel<EditField>>,
     pub platform_corners: Rc<VecModel<CornerRow>>,
     pub platform_preview_labels: Rc<VecModel<PreviewLabel>>,
@@ -46,6 +47,7 @@ impl UiModels {
         ui.set_scene(ModelRc::from(m.scene.clone()));
         ui.set_inspector(ModelRc::from(m.inspector.clone()));
         ui.set_node_fields(ModelRc::from(m.node_fields.clone()));
+        ui.set_set_rows(ModelRc::from(m.set_rows.clone()));
         ui.set_platform_outline_fields(ModelRc::from(m.platform_outline_fields.clone()));
         ui.set_platform_corners(ModelRc::from(m.platform_corners.clone()));
         ui.set_platform_preview_labels(ModelRc::from(m.platform_preview_labels.clone()));
@@ -172,6 +174,11 @@ pub fn fill_node(ui: &AppWindow, models: &UiModels, v: NodeViewData) {
     ui.set_selection_detail(s(v.detail));
     sync(&models.inspector, v.fields.into_iter().map(inspector_field));
     sync(&models.node_fields, v.edit_fields.into_iter().map(edit_field));
+    sync(&models.set_rows, v.set_rows.into_iter().map(set_row));
+}
+
+fn set_row(r: SetRowData) -> SetRow {
+    SetRow { node: r.node.0 as i32, header: r.header, current: r.current, field: edit_field(r.field) }
 }
 
 pub fn fill_platform(ui: &AppWindow, models: &UiModels, v: PlatformViewData) {

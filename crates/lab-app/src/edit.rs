@@ -15,7 +15,8 @@ use lab_core::units::{
 use lab_core::Command;
 use lab_core::glam::{DQuat, DVec3, EulerRot};
 use lab_core::model::{Attach, Node, Parent};
-use lab_core::part::{Frame, Geometry, ParamValue};
+use lab_core::model::NodeId;
+use lab_core::part::{Frame, Geometry, ParamValue, Params};
 use lab_catalog::Catalog;
 
 pub struct EditContext<'a> {
@@ -1478,9 +1479,40 @@ pub fn node_mate(doc: &Document, catalog: &Catalog, node: &Node) -> Option<(Fram
     let (Parent::Node(pid), Attach::Mate { self_conn, parent_conn, .. }) = (&node.parent, &node.attach) else {
         return None;
     };
-    let pc = catalog.get(&doc.node(*pid)?.part)?.connector(parent_conn)?;
-    let cc = catalog.get(&node.part)?.connector(self_conn)?;
-    Some((pc.frame, cc.frame, lab_mates::slide_range(&pc.kind)))
+    let parent = doc.node(*pid)?;
+    let parent_def = catalog.get(&parent.part)?;
+    let range = lab_mates::slide_range(&parent_def.connector(parent_conn)?.kind);
+    let pf = lab_mates::connector_frame(parent_def, parent_conn, &parent.params)?;
+    let cf = lab_mates::connector_frame(catalog.get(&node.part)?, self_conn, &node.params)?;
+    Some((pf, cf, range))
+}
+
+/// `SetAttach` commands that re-seat node `id` and its mated children after `id`'s params become
+/// `params` (children's poses are parent-relative, so deeper members follow on their own).
+fn repose_set(doc: &Document, catalog: &Catalog, id: NodeId, params: &Params) -> Vec<Command> {
+    fn params_of<'a>(n: &'a Node, id: NodeId, params: &'a Params) -> &'a Params {
+        if n.id == id { params } else { &n.params }
+    }
+    doc.nodes
+        .iter()
+        .filter(|n| n.id == id || n.parent == Parent::Node(id))
+        .filter_map(|n| {
+            let (Parent::Node(pid), Attach::Mate { self_conn, parent_conn, slide, twist }) = (&n.parent, &n.attach) else {
+                return None;
+            };
+            let parent = doc.node(*pid)?;
+            let pf = lab_mates::connector_frame(catalog.get(&parent.part)?, parent_conn, params_of(parent, id, params))?;
+            let cf = lab_mates::connector_frame(catalog.get(&n.part)?, self_conn, params_of(n, id, params))?;
+            let (position, rotation) = lab_mates::mate_pose(&pf, &cf, *slide, *twist);
+            (position.distance(n.position) > 1e-9).then(|| Command::SetAttach {
+                id: n.id,
+                parent: n.parent,
+                attach: n.attach.clone(),
+                position,
+                rotation,
+            })
+        })
+        .collect()
 }
 
 /// Rotation of a node about the vertical axis, radians.
@@ -1609,7 +1641,9 @@ pub fn node_field_edit(cx: &EditContext, catalog: &Catalog, field: &str, text: &
             let mut all = params.clone();
             all.extend(overrides.clone());
             lab_parts::generate(generator, &all).map_err(|e| EditError::Invalid(e.to_string()))?;
-            Command::SetParams { id, params: overrides }
+            let repose = repose_set(cx.doc, catalog, id, &overrides);
+            let set = Command::SetParams { id, params: overrides };
+            if repose.is_empty() { set } else { Command::Batch(std::iter::once(set).chain(repose).collect()) }
         }
     };
     Ok(EditOutcome::Command { command, label: format!("Edit {}", node.name), select: None, fixes: Vec::new() })

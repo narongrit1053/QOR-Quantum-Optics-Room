@@ -5,7 +5,7 @@ use lab_core::glam::DVec2;
 use lab_core::holes::{ExclusionZone, HoleSet, ZoneShape};
 use std::collections::HashSet;
 
-use lab_core::model::{Document, Finish, Node, Parent, Platform, PlatformKind, Shape, Support, Surface};
+use lab_core::model::{Document, Finish, Node, NodeId, Parent, Platform, PlatformKind, Shape, Support, Surface};
 use lab_core::outline::Outline;
 use lab_core::presets::{PRESETS, PresetGroup};
 use lab_core::room::Room;
@@ -164,6 +164,68 @@ pub struct NodeViewData {
     pub detail: String,
     pub fields: Vec<InspectorFieldData>,
     pub edit_fields: Vec<EditFieldData>,
+    /// The Set list (M6): empty unless the node has a mated parent or mated children.
+    pub set_rows: Vec<SetRowData>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetRowData {
+    pub node: NodeId,
+    /// A member header; otherwise `field` is one of that member's edit fields.
+    pub header: bool,
+    pub current: bool,
+    pub field: EditFieldData,
+}
+
+/// Root of the mate chain `id` belongs to.
+pub fn set_root(doc: &Document, mut id: NodeId) -> NodeId {
+    while let Some(Node { parent: Parent::Node(pid), attach: Attach::Mate { .. }, .. }) = doc.node(id) {
+        id = *pid;
+    }
+    id
+}
+
+/// Set rows for the chain root → leaves (breadth-first): a header per member, then its
+/// length/height/diameter params, slide and twist. Field ids are `set.<node id>:<node field>`.
+fn set_rows(doc: &Document, catalog: &Catalog, node: &Node, units: LengthUnit) -> Vec<SetRowData> {
+    let root = set_root(doc, node.id);
+    let mut members = vec![root];
+    let mut i = 0;
+    while i < members.len() {
+        let id = members[i];
+        members.extend(doc.children(Parent::Node(id)).filter(|n| matches!(n.attach, Attach::Mate { .. })).map(|n| n.id));
+        i += 1;
+    }
+    if members.len() < 2 {
+        return Vec::new();
+    }
+    let mut rows = Vec::new();
+    for member in members.iter().filter_map(|id| doc.node(*id)) {
+        let row = |header: bool, field: EditFieldData| SetRowData { node: member.id, header, current: member.id == node.id, field };
+        let field = |name: &str, label: &str, value: String, unit: &str, enabled: bool| EditFieldData {
+            id: format!("set.{}:{name}", member.id.0),
+            label: label.into(),
+            value,
+            unit: unit.into(),
+            enabled,
+            invalid: false,
+        };
+        rows.push(row(true, field("", &member.name, String::new(), "", true)));
+        if let Some(Geometry::Parametric { params, .. }) = catalog.get(&member.part).map(|d| &d.geometry) {
+            for name in ["length", "height", "diameter"] {
+                if let Some(v) = member.params.get(name).or_else(|| params.get(name)).and_then(ParamValue::as_f64) {
+                    let f = field(&format!("node.param.{name}"), &title_case(name), format_length(v, units), units.suffix(), true);
+                    rows.push(row(false, f));
+                }
+            }
+        }
+        if let Attach::Mate { slide, twist, .. } = &member.attach {
+            let ranged = node_mate(doc, catalog, member).is_some_and(|(_, _, (lo, hi))| lo < hi);
+            rows.push(row(false, field("node.slide", "Slide", format_length(*slide, units), units.suffix(), ranged)));
+            rows.push(row(false, field("node.rotation", "Twist", format_angle_deg(*twist), "°", true)));
+        }
+    }
+    rows
 }
 
 /// Builds the scene tree rows: room, platforms (stacked ones under their parent), nodes by
@@ -826,6 +888,7 @@ pub fn node_view(
         detail: def.map_or(node.part.clone(), |d| d.category.clone()),
         fields,
         edit_fields,
+        set_rows: set_rows(doc, catalog, node, units),
     }
 }
 

@@ -8,7 +8,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
-import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
@@ -21,7 +21,7 @@ import { CommandPalette } from "palette.slint";
 import { ExportSheet } from "export.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 
@@ -175,6 +175,7 @@ export component AppWindow inherits Window {
     in property <string> selection-detail;
     in property <[InspectorField]> inspector;
     in property <[EditField]> node-fields;
+    in property <[SetRow]> set-rows;
     // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure.
     in-out property <int> tool;
     // Measure readout; empty hides the chip.
@@ -953,6 +954,7 @@ export component AppWindow inherits Window {
                     detail: root.selection-detail;
                     fields: root.inspector;
                     edit-fields: root.node-fields;
+                    set-rows: root.set-rows;
                     error: root.inspector-error;
                     action(id) => { root.action(id); }
                     field-committed(id, text) => { return root.field-committed(id, text); }
