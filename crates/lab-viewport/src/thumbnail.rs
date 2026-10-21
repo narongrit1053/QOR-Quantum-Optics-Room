@@ -237,7 +237,7 @@ fn captured(shot: On<ScreenshotCaptured>, mut commands: Commands, mut thumbs: Re
     events.send(ViewportEvent::ThumbnailReady { part: job.part, path: job.path, ok });
 }
 
-fn write_png(path: &Path, image: &Image) -> Result<(), String> {
+pub(crate) fn write_png(path: &Path, image: &Image) -> Result<(), String> {
     let (w, h) = (image.width(), image.height());
     let mut data = image.data.clone().ok_or("the capture has no pixels")?;
     if matches!(image.texture_descriptor.format, TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb) {

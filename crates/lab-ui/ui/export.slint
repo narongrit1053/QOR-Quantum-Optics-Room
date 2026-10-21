@@ -1,0 +1,159 @@
+// "Export image" sheet (POLA-66): width and height in pixels, presets, Cancel / Export….
+
+import { Theme } from "theme.slint";
+import { PillButton } from "components.slint";
+
+component SizeField inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <bool> enabled;
+    height: 28px;
+    border-radius: Theme.radius-field;
+    background: Theme.field-bg;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.field-border;
+    input := TextInput {
+        x: 8px;
+        width: parent.width - 16px;
+        vertical-alignment: center;
+        input-type: number;
+        enabled: root.enabled;
+        color: Theme.text;
+        font-size: Theme.font-body;
+    }
+}
+
+export component ExportSheet inherits Rectangle {
+    in property <bool> open;
+    // Viewport size in physical pixels; the default is twice that.
+    in property <int> screen-width;
+    in property <int> screen-height;
+    callback export(int /* width */, int /* height */);
+    callback cancel();
+
+    property <string> error;
+
+    background: root.open ? #00000073 : #00000000;
+    animate background { duration: 200ms; easing: ease-out; }
+
+    function set-size(w: int, h: int) {
+        w-field.text = w;
+        h-field.text = h;
+        root.error = "";
+    }
+    function do-export() {
+        if (!w-field.text.is-float() || !h-field.text.is-float()
+            || w-field.text.to-float() < 16 || h-field.text.to-float() < 16
+            || w-field.text.to-float() > 8192 || h-field.text.to-float() > 8192) {
+            root.error = "Width and height must be 16 to 8192 pixels.";
+            return;
+        }
+        root.export(w-field.text.to-float(), h-field.text.to-float());
+    }
+
+    changed open => {
+        if (root.open) {
+            root.set-size(root.screen-width * 2, root.screen-height * 2);
+            keys.focus();
+        }
+    }
+
+    TouchArea {
+        enabled: root.open;
+        scroll-event(event) => { accept }
+    }
+
+    keys := FocusScope {
+        focus-on-click: false;
+        capture-key-pressed(event) => {
+            if (!root.open) {
+                return reject;
+            }
+            if (event.text == Key.Return) {
+                root.do-export();
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            width: 380px;
+            height: layout.preferred-height;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2 - 40px;
+            visible: root.open;
+            background: #232428;
+            border-radius: Theme.radius-panel;
+            border-width: 1px;
+            border-color: Theme.panel-border;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 16px;
+            drop-shadow-color: #000000A0;
+
+            layout := VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                Text {
+                    text: "Export image";
+                    color: Theme.text;
+                    font-size: Theme.font-title;
+                    font-weight: 650;
+                }
+                Text {
+                    text: "The current view as a PNG, in pixels.";
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-caption;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    w-field := SizeField { enabled: root.open; }
+                    Text { text: "×"; color: Theme.text-secondary; vertical-alignment: center; }
+                    h-field := SizeField { enabled: root.open; }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    PillButton {
+                        label: "Screen";
+                        enabled: root.open;
+                        clicked => { root.set-size(root.screen-width, root.screen-height); }
+                    }
+                    PillButton {
+                        label: "2×";
+                        enabled: root.open;
+                        clicked => { root.set-size(root.screen-width * 2, root.screen-height * 2); }
+                    }
+                    PillButton {
+                        label: "4K (3840×2160)";
+                        enabled: root.open;
+                        clicked => { root.set-size(3840, 2160); }
+                    }
+                }
+                if root.error != "": Text {
+                    text: "⚠ " + root.error;
+                    color: Theme.danger;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    padding-top: 4px;
+                    spacing: 8px;
+                    alignment: end;
+                    PillButton {
+                        label: "Cancel";
+                        enabled: root.open;
+                        clicked => { root.cancel(); }
+                    }
+                    PillButton {
+                        label: "Export…";
+                        primary: true;
+                        enabled: root.open;
+                        clicked => { root.do-export(); }
+                    }
+                }
+            }
+        }
+    }
+}

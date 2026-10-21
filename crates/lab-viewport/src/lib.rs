@@ -15,6 +15,7 @@
 //! picked; edits go through `lab_core::Command` on the UI side.
 
 mod blueprint;
+mod export;
 mod camera;
 mod gizmo;
 mod glb;
@@ -156,6 +157,10 @@ pub enum ViewportRequest {
     /// POLA-61. Render catalog part `part` offscreen (256×256, transparent background, 3/4 view)
     /// and write a PNG to `path`. Queued; one at a time.
     RenderThumbnail { part: String, path: std::path::PathBuf },
+    /// POLA-66. Render the main camera (its transform and projection, the document as shown)
+    /// offscreen at `width`×`height` (clamped to 16..=8192), opaque background, MSAA 4, and
+    /// write a PNG to `path`. In Split mode the 3D pane is exported.
+    ExportImage { path: std::path::PathBuf, width: u32, height: u32 },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -241,6 +246,8 @@ pub enum ViewportEvent {
     PartPoint { point: bevy::math::DVec3, normal: bevy::math::DVec3 },
     /// POLA-61. The PNG for `part` is written (`ok` false on failure; the app skips it then).
     ThumbnailReady { part: String, path: std::path::PathBuf, ok: bool },
+    /// POLA-66. Sent once per `ExportImage`; `ok` false on any failure.
+    ImageExported { path: std::path::PathBuf, ok: bool },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -284,6 +291,7 @@ pub(crate) enum FrameRequest {
     InspectPart(Option<String>),
     InspectMarkers(Vec<lab_core::part::Frame>),
     RenderThumbnail(String, std::path::PathBuf),
+    ExportImage(std::path::PathBuf, u32, u32),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

@@ -89,6 +89,10 @@ pub struct AppState {
     pub stack: crate::stack::StackState,
     /// Scene-tree rows (`(kind, id)`) whose children are hidden.
     pub scene_collapsed: std::collections::HashSet<(i32, i32)>,
+    /// The viewport sent `Ready`.
+    pub viewport_ready: bool,
+    /// POLA-66. `ExportImage` requests waiting for `ImageExported`, matched by path.
+    pub pending_exports: Vec<(std::path::PathBuf, Box<dyn FnOnce(bool)>)>,
 }
 
 impl AppState {
@@ -114,6 +118,8 @@ impl AppState {
             library: Default::default(),
             stack: Default::default(),
             scene_collapsed: Default::default(),
+            viewport_ready: false,
+            pending_exports: Vec::new(),
         }
     }
 

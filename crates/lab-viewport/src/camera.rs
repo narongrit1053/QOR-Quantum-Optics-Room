@@ -380,7 +380,7 @@ pub(crate) fn handle_input(
             }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
-            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) | FrameRequest::RenderThumbnail(..) => {}
+            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) | FrameRequest::RenderThumbnail(..) | FrameRequest::ExportImage(..) => {}
         }
     }
 }

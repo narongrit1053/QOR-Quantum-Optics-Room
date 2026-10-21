@@ -102,6 +102,7 @@ fn run_file_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiMo
         "file.new" => request(ui, app, models, PendingAction::New),
         "file.open" => request(ui, app, models, PendingAction::Open),
         "file.open_demo" => request(ui, app, models, PendingAction::OpenDemo),
+        "file.export_png" => crate::export_png::start(ui, app),
         _ => eprintln!("unknown file action {action}"),
     }
 }
@@ -723,7 +724,7 @@ fn show_message(ui: &AppWindow, app: &Rc<RefCell<AppState>>, title: &str, messag
 }
 
 /// Where dialogs start: the current project's folder, else the last folder used.
-fn initial_dir(app: &AppState) -> Option<PathBuf> {
+pub(crate) fn initial_dir(app: &AppState) -> Option<PathBuf> {
     app.session
         .location
         .as_ref()

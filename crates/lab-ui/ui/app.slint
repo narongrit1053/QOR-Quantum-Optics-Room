@@ -15,6 +15,7 @@ import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } fr
 import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
 import { WizardPanel } from "wizard.slint";
+import { ExportSheet } from "export.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
@@ -233,6 +234,12 @@ export component AppWindow inherits Window {
     in property <int> sheet-destructive: -1;
     // "" closed, "platform" | "room" = PasteSheet open
     in property <string> paste-target;
+    // POLA-66 export sheet.
+    in property <bool> export-open;
+    in property <int> export-screen-width;
+    in property <int> export-screen-height;
+    callback export-png(int /* width */, int /* height */);
+    callback export-cancel();
     in property <string> toast;
     // "" = no button
     in property <string> toast-action;
@@ -347,7 +354,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "";
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.export-open;
     property <string> unit-label: root.display-unit == 1 ? "in" : "mm";
 
     // EditState.focus-viewport is bumped by fields (Enter, Escape) to hand focus back.
@@ -1192,6 +1199,16 @@ export component AppWindow inherits Window {
             target: root.paste-target;
             apply(target, text) => { return root.paste-corners(target, text); }
             cancel => { root.action("paste.cancel"); }
+        }
+
+        ExportSheet {
+            width: root.width;
+            height: root.height;
+            open: root.export-open;
+            screen-width: root.export-screen-width;
+            screen-height: root.export-screen-height;
+            export(w, h) => { root.export-png(w, h); }
+            cancel => { root.export-cancel(); }
         }
     }
 }
