@@ -1,5 +1,5 @@
 //! Parametric part generators (DESIGN.md §5, docs/M2-PLAN.md POLA-37). Every part is built from
-//! boxes and cylinders in the part-local frame: millimetres, +Z up, origin at the bottom centre
+//! boxes, prisms and lathed profiles in the part-local frame: millimetres, +Z up, origin at the bottom centre
 //! (optics: their centre), optical axis along +Y. Meshes are cached by generator and parameters.
 
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use glam::{DVec2, DVec3};
 use lab_core::Finish;
 use lab_core::part::{ParamValue, Params};
-use lab_geom::{TriMesh, circle_points};
+use lab_geom::TriMesh;
 
 pub struct PartMesh {
     pub pieces: Vec<(Finish, TriMesh)>,
@@ -139,56 +139,249 @@ const GREY: Finish = Finish::Painted { rgb: [150, 150, 155] };
 fn build(name: &str, p: &dyn Fn(&str) -> f64) -> Result<PartMesh, GenError> {
     let mut b = Builder::default();
     match name {
-        "post" => b.cyl_z(STEEL, 0.0, p("length"), p("diameter") / 2.0),
+        "post" => {
+            let (r, l) = (p("diameter") / 2.0, p("length"));
+            let c = 0.5f64.min(l / 4.0).min(r / 4.0);
+            b.lathe_z(STEEL, &[(0.0, 0.0), (r - c, 0.0), (r, c), (r, l - c), (r - c, l), (0.0, l)]);
+        }
         "pedestal_post" => {
-            let l = p("length");
-            b.cyl_z(STEEL, 0.0, (l * 0.1).min(5.0), p("flange_diameter") / 2.0);
-            b.cyl_z(STEEL, 0.0, l, p("diameter") / 2.0);
+            let (r, l, fr) = (p("diameter") / 2.0, p("length"), p("flange_diameter") / 2.0);
+            let f = (l * 0.1).min(5.0);
+            let c = 0.5f64.min(l / 4.0).min(r / 4.0);
+            let step = (fr - 1.0).max(r);
+            b.lathe_z(STEEL, &[
+                (0.0, 0.0), (fr, 0.0), (fr, f * 0.6), (step, f), (r, f), (r, l - c), (r - c, l), (0.0, l),
+            ]);
         }
         "post_holder" => {
-            let h = p("height");
-            b.cyl_z(BLACK, 0.0, (h * 0.2).min(8.0), p("base_diameter") / 2.0);
-            b.cyl_z(BLACK, 0.0, h, p("bore") / 2.0 + 3.0);
+            let (h, br, bore) = (p("height"), p("base_diameter") / 2.0, p("bore") / 2.0);
+            let ro = bore + 3.0;
+            let f = (h * 0.2).min(8.0);
+            let floor = (f + 2.0).min(h * 0.9);
+            let lip = (br - 1.0).max(ro);
+            b.lathe_z(BLACK, &[
+                (0.0, 0.0), (br, 0.0), (br, f * 0.7), (lip, f), (ro, f),
+                (ro, h), (bore, h), (bore, floor), (0.0, floor),
+            ]);
+            // spring-loaded thumbscrew on the side, near the top
+            let z = (h - 6.0).max(f + 3.0).min(h - 2.0);
+            let knob = (br - ro).max(2.0);
+            let side = |x0: f64| move |q: DVec3| DVec3::new(x0 + q.z, q.x, z + q.y);
+            b.lathe(STEEL, &[(0.0, 0.0), (1.5, 0.0), (1.5, 1.0), (0.0, 1.0)], 12, side(ro - 0.5));
+            b.lathe(BLACK, &[(0.0, 0.0), (2.5, 0.0), (2.5, knob - 1.0), (0.0, knob - 1.0)], 16, side(ro + 0.5));
         }
         "base" | "clamping_fork" => {
-            let (l, w) = (p("length"), p("width"));
-            b.cuboid(BLACK, DVec3::new(-l / 2.0, -w / 2.0, 0.0), DVec3::new(l / 2.0, w / 2.0, p("thickness")));
+            let (l, w, t) = (p("length"), p("width"), p("thickness"));
+            let s = (w / 4.0).min(3.3); // half the slot width
+            let end = (l * 0.12).min(10.0);
+            let block = |b: &mut Builder, x0: f64, y0: f64, x1: f64, y1: f64, c: f64| {
+                b.prism_z(BLACK, &chamfer_rect(DVec2::new(x0, y0), DVec2::new(x1, y1), c), 0.0, t);
+            };
+            block(&mut b, -l / 2.0, s, l / 2.0, w / 2.0, 1.0);
+            block(&mut b, -l / 2.0, -w / 2.0, l / 2.0, -s, 1.0);
+            block(&mut b, -l / 2.0, -s, -l / 2.0 + end, s, 0.0);
+            if name == "base" {
+                block(&mut b, l / 2.0 - end, -s, l / 2.0, s, 0.0);
+            } else {
+                // the fork's slot is open at +X; its clamp bolt sits in the slot, flush with the top
+                let x = -l / 2.0 + end + 6.0f64.min(l / 4.0);
+                let bolt = [(0.0, 0.0), (s + 2.0, 0.0), (s + 2.0, 1.0), (s * 0.8, 1.0), (s * 0.8, 3.0), (0.0, 3.0)];
+                b.lathe(STEEL, &bolt, 6, move |q| DVec3::new(x + q.x, q.y, t - 3.0 + q.z));
+            }
         }
         "kinematic_mount" => {
             let (w, t, h, a) = (p("width"), p("thickness"), p("height"), p("axis_height"));
-            b.cuboid(BLACK, DVec3::new(-w / 2.0, -t / 2.0, 0.0), DVec3::new(w / 2.0, t / 2.0, h));
-            // seat ring marks the optic; never wider than the plate
-            let r = (p("optic_diameter") / 2.0 + 1.5).min(w / 2.0);
-            b.cyl_y(BLACK, a, t / 2.0, t / 2.0 + 2.0, r);
+            let y0 = -t / 2.0;
+            let (lo, hi) = (DVec2::new(-w / 2.0, 0.0), DVec2::new(w / 2.0, h));
+            let c = (w.min(h) * 0.08).min(3.0);
+            // fixed back plate and the front plate that carries the optic
+            b.prism_y(BLACK, &chamfer_rect(lo, hi, c), y0 + 0.3 * t, y0 + 0.6 * t);
+            b.prism_y(BLACK, &chamfer_rect(lo + DVec2::new(0.0, 1.0f64.min(h / 4.0)), hi, c), y0 + 0.68 * t, t / 2.0);
+            // retaining ring around the optic bore; never wider than the plate
+            let ro = (p("optic_diameter") / 2.0 + 1.5).min(w / 2.0);
+            b.lathe_y(BLACK, a, &annulus(ro - 1.5, ro, t / 2.0, t / 2.0 + 2.0, 0.0));
+            // three adjusters on the back: knobs on screws (springs omitted)
+            let k = (w.min(h) * 0.1).clamp(1.5, 4.0);
+            for (x, z) in [(-w / 2.0 + k + 1.0, h - k - 1.0), (w / 2.0 - k - 1.0, h - k - 1.0), (w / 2.0 - k - 1.0, k + 1.0)] {
+                let at = move |q: DVec3| DVec3::new(x - q.x, q.z, z + q.y);
+                let (ya, yb, yc) = (y0 + 0.03 * t, y0 + 0.2 * t, y0 + 0.3 * t);
+                b.lathe(STEEL, &[(0.0, yb), (k * 0.35, yb), (k * 0.35, yc), (0.0, yc)], 12, at);
+                b.lathe(BLACK, &[(0.0, y0), (k * 0.85, y0), (k, ya), (k, yb), (0.0, yb)], 16, at);
+            }
         }
         "fixed_mount" | "rotation_mount" | "iris" => {
-            let (od, t, a) = (p("outer_diameter"), p("thickness"), p("axis_height"));
-            ring_on_stem(&mut b, a, od / 2.0, t);
+            let (r, t, a) = (p("outer_diameter") / 2.0, p("thickness"), p("axis_height"));
+            let inner = if name == "iris" { p("aperture") } else { p("optic_diameter") };
+            let ri = (inner / 2.0).min(r - 1.0).max(0.1);
+            stem(&mut b, a - r, r.min(t));
+            match name {
+                "fixed_mount" => {
+                    b.lathe_y(BLACK, a, &annulus(ri, r, -t / 2.0, t / 2.0, 0.5));
+                    // retaining ring inside the bore, at the front
+                    b.lathe_y(STEEL, a, &annulus((ri - 1.0).max(ri * 0.8), ri, t / 2.0 - 1.5, t / 2.0 - 0.5, 0.0));
+                }
+                "rotation_mount" => {
+                    b.lathe_y(BLACK, a, &annulus(ri, r, -t / 2.0, 0.0, 0.5));
+                    let dial = (r - 1.0).max(ri + 0.5);
+                    b.lathe_y(BLACK, a, &annulus(ri, dial, 0.3f64.min(t / 4.0), t / 2.0, 0.3));
+                    // engraved graduations every 10°, longer every 30°
+                    for i in 0..36 {
+                        let (sn, cs) = (i as f64 * std::f64::consts::TAU / 36.0).sin_cos();
+                        let len = if i % 3 == 0 { 2.0 } else { 1.0 };
+                        let rr = (dial - len).max(ri);
+                        let tick = [DVec2::new(-0.2, rr), DVec2::new(0.2, rr), DVec2::new(0.2, dial), DVec2::new(-0.2, dial)]
+                            .map(|v| DVec2::new(v.x * cs - v.y * sn, a + v.x * sn + v.y * cs));
+                        b.prism_y(STEEL, &tick, t / 2.0 - 0.05, t / 2.0 + 0.05);
+                    }
+                }
+                _ => {
+                    let rb = (ri + 3.0).min(r - 0.5);
+                    b.lathe_y(BLACK, a, &annulus(rb, r, -t / 2.0, t / 2.0 - 2.0, 0.5));
+                    // the leaves close the bore down to `aperture`
+                    b.lathe_y(STEEL, a, &annulus(ri, rb, -0.3, 0.3, 0.0));
+                    // actuation lever pin on the front face
+                    let (sn, cs) = std::f64::consts::FRAC_PI_6.sin_cos();
+                    let rl = r - 3.0f64.min(r / 3.0);
+                    let (x, z) = (rl * cs, a + rl * sn);
+                    let pin = [(0.0, t / 2.0 - 2.0), (1.5, t / 2.0 - 2.0), (1.5, t / 2.0), (0.0, t / 2.0)];
+                    b.lathe(STEEL, &pin, 12, move |q| DVec3::new(x - q.x, q.z, z + q.y));
+                }
+            }
         }
         "periscope" => {
-            let (w, h) = (p("width"), p("height"));
-            b.cuboid(BLACK, DVec3::new(-w / 2.0, -w / 2.0, 0.0), DVec3::new(w / 2.0, w / 2.0, 10f64.min(h)));
-            b.cyl_z(STEEL, 0.0, h, w / 4.0);
+            let (w, h, a) = (p("width"), p("height"), p("axis_height"));
+            let base = 10f64.min(h);
+            b.prism_z(BLACK, &chamfer_rect(DVec2::splat(-w / 2.0), DVec2::splat(w / 2.0), w * 0.08), 0.0, base);
+            b.lathe_z(STEEL, &[(0.0, 0.0), (w / 4.0, 0.0), (w / 4.0, h), (0.0, h)]);
+            // two 45° mirror housings, one at the input height and one at the top
+            let s = (w / 8.0).min(h / 4.0);
+            let y = 3.0 * w / 8.0;
+            for z in [a.clamp(base + s, h - s), h - s] {
+                let diamond = [DVec2::new(y, z - s), DVec2::new(y + s, z), DVec2::new(y, z + s), DVec2::new(y - s, z)];
+                b.prism_x(BLACK, &diamond, -w / 4.0, w / 4.0);
+            }
         }
-        "mirror" => optic(&mut b, Finish::Mirror, p("diameter"), p("thickness")),
-        "lens" | "waveplate" => optic(&mut b, Finish::Glass, p("diameter"), p("thickness")),
+        "mirror" => {
+            let (r, t) = (p("diameter") / 2.0, p("thickness"));
+            let c = 0.3f64.min(t / 4.0).min(r / 4.0);
+            let (y0, y1) = (-t / 2.0, t / 2.0);
+            b.lathe_y(Finish::Mirror, 0.0, &[(0.0, y0), (r - c, y0), (r, y0 + c), (r, y1 - c), (r - c, y1), (0.0, y1)]);
+        }
+        "lens" => {
+            // biconvex: the edge is 40 % of the centre thickness
+            let (r, t) = (p("diameter") / 2.0, p("thickness"));
+            let sag = |x: f64| 0.2 * t + 0.3 * t * (1.0 - x * x);
+            let mut prof: Vec<(f64, f64)> = (0..=6).map(|i| (r * i as f64 / 6.0, -sag(i as f64 / 6.0))).collect();
+            prof.extend((0..=6).rev().map(|i| (r * i as f64 / 6.0, sag(i as f64 / 6.0))));
+            b.lathe_y(Finish::Glass, 0.0, &prof);
+        }
+        "waveplate" => {
+            // the plate in a thin black retaining ring
+            let (r, t) = (p("diameter") / 2.0, p("thickness"));
+            let rg = (r - 2.0).max(r * 0.7);
+            b.lathe_y(Finish::Glass, 0.0, &[(0.0, -t / 4.0), (rg, -t / 4.0), (rg, t / 4.0), (0.0, t / 4.0)]);
+            b.lathe_y(BLACK, 0.0, &annulus(rg, r, -t / 2.0, t / 2.0, 0.0));
+        }
         "cube" => {
             let s = p("size") / 2.0;
-            b.cuboid(Finish::Glass, DVec3::splat(-s), DVec3::splat(s));
+            let c = 0.4f64.min(s / 4.0);
+            b.prism_z(Finish::Glass, &chamfer_rect(DVec2::splat(-s), DVec2::splat(s), c), -s, s);
+            // the coated diagonal face, seen through the glass
+            let (d, e) = (0.95 * s, 0.1);
+            let diag = [DVec2::new(-d + e, -d - e), DVec2::new(d + e, d - e), DVec2::new(d - e, d + e), DVec2::new(-d - e, -d + e)];
+            b.prism_z(Finish::Mirror, &diag, -d, d);
         }
-        "beam_dump" | "fiber_coupler" => {
+        "beam_dump" => {
+            // finned body, entrance cone open towards -Y (the dump port)
             let (r, l, a) = (p("diameter") / 2.0, p("length"), p("axis_height"));
-            b.cyl_y(BLACK, a, -l / 2.0, l / 2.0, r);
+            let (y0, y1) = (-l / 2.0, l / 2.0);
+            let fin = (r * 0.15).min(2.0);
+            let mut prof = vec![(0.0, y1), (r - 1.0, y1), (r, y1 - 1.0)];
+            let fins = ((l * 0.75 - 2.0) / 4.0).floor().max(0.0) as usize;
+            for i in 0..fins {
+                let y = y1 - 2.0 - 4.0 * i as f64;
+                prof.extend([(r, y - 2.0), (r - fin, y - 2.0), (r - fin, y - 4.0), (r, y - 4.0)]);
+            }
+            prof.extend([(r, y0 + 1.0), (r - 1.0, y0), (r * 0.45, y0), (r * 0.1, y0 + l * 0.5), (0.0, y0 + l * 0.5)]);
+            b.lathe_y(BLACK, a, &prof);
             stem(&mut b, a - r, r);
         }
-        "modulator_box" | "photodiode" | "camera" | "spcm" | "crystal_oven" | "laser_head" => {
-            let (l, w, h) = (p("length"), p("width"), p("height"));
-            let finish = if name == "laser_head" { GREY } else { BLACK };
-            b.cuboid(finish, DVec3::new(-w / 2.0, -l / 2.0, 0.0), DVec3::new(w / 2.0, l / 2.0, h));
+        "fiber_coupler" => {
+            // body with its lens window at -Y (the fiber port) and an FC/PC connector at +Y
+            let (r, l, a) = (p("diameter") / 2.0, p("length"), p("axis_height"));
+            let (y0, y1) = (-l / 2.0, l / 2.0);
+            let (cl, win) = (8f64.min(l / 3.0), r * 0.35);
+            let body = [(0.0, y0 + 1.0), (win, y0 + 1.0), (win, y0), (r - 1.0, y0), (r, y0 + 1.0), (r, y1 - cl - 1.0), (r - 1.0, y1 - cl), (0.0, y1 - cl)];
+            b.lathe_y(BLACK, a, &body);
+            b.lathe_y(Finish::Glass, a, &[(0.0, y0 + 0.8), (win, y0 + 0.8), (win, y0 + 1.0), (0.0, y0 + 1.0)]);
+            let nut = (r * 0.4).min(4.5);
+            let (yn, ym) = (y1 - cl, y1 - cl * 0.4);
+            b.lathe(STEEL, &[(0.0, yn), (nut, yn), (nut, ym), (0.0, ym)], 6, move |q| DVec3::new(-q.x, q.z, a + q.y));
+            b.lathe_y(STEEL, a, &[(0.0, ym), (nut * 0.6, ym), (nut * 0.6, y1), (0.0, y1)]);
+            stem(&mut b, a - r, r);
+        }
+        "laser_head" => {
+            // body, heat-sink fins on top, exit aperture on +Y at the axis height
+            let (l, w, h, a) = (p("length"), p("width"), p("height"), p("axis_height"));
+            let c = (w.min(l).min(h) * 0.06).min(2.0);
+            let fin = (h * 0.15).min(10.0);
+            let nose = (l * 0.04).min(8.0);
+            let front = l / 2.0 - nose;
+            b.prism_z(GREY, &chamfer_rect(DVec2::new(-w / 2.0, -l / 2.0), DVec2::new(w / 2.0, front), c), 0.0, h - fin);
+            let n = ((w / 6.0).floor() as usize).clamp(2, 16);
+            let (pitch, inset) = (w / n as f64, 5f64.min(l / 10.0));
+            for i in 0..n {
+                let x = -w / 2.0 + (i as f64 + 0.5) * pitch;
+                let ft = (pitch * 0.4).min(2.0) / 2.0;
+                let fin_rect = chamfer_rect(DVec2::new(x - ft, -l / 2.0 + inset), DVec2::new(x + ft, front - inset), 0.0);
+                b.prism_z(BLACK, &fin_rect, h - fin - 0.1, h);
+            }
+            let ar = (w.min(h) * 0.1).min(a - 0.5).min(h - fin - a - 2.5).max(0.5);
+            let y1 = l / 2.0;
+            b.lathe_y(BLACK, a, &[(0.0, front), (ar + 2.0, front), (ar + 2.0, y1), (ar, y1), (ar, y1 - 0.5), (0.0, y1 - 0.5)]);
+        }
+        "modulator_box" | "photodiode" | "camera" | "spcm" | "crystal_oven" => {
+            // receivers face -Y: an input aperture or lens barrel there, a connector on top
+            let (l, w, h, a) = (p("length"), p("width"), p("height"), p("axis_height"));
+            let c = (w.min(l).min(h) * 0.06).min(2.0);
+            let front = match name {
+                "camera" => (l * 0.2).min(12.0),
+                "photodiode" | "spcm" => (l * 0.08).min(6.0),
+                _ => (l * 0.05).min(4.0),
+            };
+            let conn = (h * 0.1).min(5.0);
+            let (y0, y1) = (-l / 2.0, l / 2.0);
+            b.prism_z(BLACK, &chamfer_rect(DVec2::new(-w / 2.0, y0 + front), DVec2::new(w / 2.0, y1), c), 0.0, h - conn);
+            let room = a.min(h - conn - a).min(w / 2.0);
+            let ar = (w.min(h) * 0.15).min(6.0).min(room - 1.0).max(0.5);
+            let barrel = if name == "camera" { (room - 0.5).max(ar + 0.5) } else { (ar + 1.5).min(room).max(ar + 0.5) };
+            b.lathe_y(BLACK, a, &[(0.0, y0 + 1.0), (ar, y0 + 1.0), (ar, y0), (barrel, y0), (barrel, y0 + front), (0.0, y0 + front)]);
+            if name == "camera" {
+                b.lathe_y(Finish::Glass, a, &[(0.0, y0 + 0.8), (ar, y0 + 0.8), (ar, y0 + 1.0), (0.0, y0 + 1.0)]);
+            }
+            if matches!(name, "modulator_box" | "crystal_oven") {
+                // through-beam parts: the exit aperture on +Y
+                b.lathe_y(STEEL, a, &annulus(ar, barrel, y1, y1 + 0.5, 0.0));
+            }
+            // SMA / BNC connector on the top, towards the back
+            let cr = (conn * 0.6).min(w / 4.0).max(0.5);
+            let cy = y1 - cr - 3f64.min(l / 8.0);
+            b.lathe(STEEL, &[(0.0, h - conn - 0.1), (cr, h - conn - 0.1), (cr, h), (0.0, h)], 6, move |q| DVec3::new(q.x, cy + q.y, q.z));
+            if name == "spcm" {
+                // cooling fins on the top, beside the connector
+                let n = ((l / 8.0).floor() as usize).clamp(2, 12);
+                let span = cy - cr - 2.0 - (y0 + front);
+                for i in 0..n {
+                    let y = y0 + front + (i as f64 + 0.5) * span / n as f64;
+                    let fin_rect = chamfer_rect(DVec2::new(-w / 2.0 + 2.0, y - 0.75), DVec2::new(w / 2.0 - 2.0, y + 0.75), 0.0);
+                    b.prism_z(BLACK, &fin_rect, h - conn - 0.1, h - 0.5);
+                }
+            }
         }
         "riser" => {
             let (l, w) = (p("length"), p("width"));
-            b.cuboid(BLACK, DVec3::new(-w / 2.0, -l / 2.0, 0.0), DVec3::new(w / 2.0, l / 2.0, p("height")));
+            let c = (w.min(l) * 0.05).min(3.0);
+            b.prism_z(BLACK, &chamfer_rect(DVec2::new(-w / 2.0, -l / 2.0), DVec2::new(w / 2.0, l / 2.0), c), 0.0, p("height"));
         }
         "rack_19in" => {
             let (h, d) = (p("units") * 44.45 + 100.0, p("depth"));
@@ -223,17 +416,6 @@ fn build(name: &str, p: &dyn Fn(&str) -> f64) -> Result<PartMesh, GenError> {
         _ => return Err(GenError::Unknown(name.to_string())),
     }
     Ok(b.finish())
-}
-
-/// Optic centred on the origin, faces normal to ±Y.
-fn optic(b: &mut Builder, finish: Finish, diameter: f64, thickness: f64) {
-    b.cyl_y(finish, 0.0, -thickness / 2.0, thickness / 2.0, diameter / 2.0);
-}
-
-/// Ring of radius `r` around the optical axis at height `a`, on a stem down to z = 0.
-fn ring_on_stem(b: &mut Builder, a: f64, r: f64, t: f64) {
-    b.cyl_y(BLACK, a, -t / 2.0, t / 2.0, r);
-    stem(b, a - r, r.min(t));
 }
 
 /// Square stem from z = 0 to `top` (skipped when the body already reaches the table).
@@ -279,15 +461,33 @@ impl Builder {
         self.add(finish, m);
     }
 
-    /// Cylinder along +Z centred on the Z axis.
-    fn cyl_z(&mut self, finish: Finish, z0: f64, z1: f64, r: f64) {
-        self.add(finish, cylinder(r, z1 - z0, |p| DVec3::new(p.x, p.y, z0 + p.z)));
+    /// Solid of revolution about the part's Z axis; see `lathe`.
+    fn lathe_z(&mut self, finish: Finish, profile: &[(f64, f64)]) {
+        self.lathe(finish, profile, SIDES, |q| q);
     }
 
-    /// Cylinder along +Y through (0, y, z_axis).
-    fn cyl_y(&mut self, finish: Finish, z_axis: f64, y0: f64, y1: f64, r: f64) {
-        // local (x, y, h) → part (x, h, y) flips handedness; mirror x to keep it right-handed
-        self.add(finish, cylinder(r, y1 - y0, |p| DVec3::new(-p.x, y0 + p.z, z_axis + p.y)));
+    /// Solid of revolution about the line x = 0, z = `z_axis`; profile heights are part Y.
+    fn lathe_y(&mut self, finish: Finish, z_axis: f64, profile: &[(f64, f64)]) {
+        self.lathe(finish, profile, SIDES, move |q| DVec3::new(-q.x, q.z, z_axis + q.y));
+    }
+
+    fn lathe(&mut self, finish: Finish, profile: &[(f64, f64)], sides: usize, to_part: impl Fn(DVec3) -> DVec3) {
+        self.add(finish, lathe(profile, sides, to_part));
+    }
+
+    /// Convex CCW polygon in (x, y), extruded from z0 to z1.
+    fn prism_z(&mut self, finish: Finish, poly: &[DVec2], z0: f64, z1: f64) {
+        self.add(finish, prism(poly, z1 - z0, |q| DVec3::new(q.x, q.y, z0 + q.z)));
+    }
+
+    /// Convex CCW polygon in (x, z), extruded from y0 to y1.
+    fn prism_y(&mut self, finish: Finish, poly: &[DVec2], y0: f64, y1: f64) {
+        self.add(finish, prism(poly, y1 - y0, |q| DVec3::new(q.x, y1 - q.z, q.y)));
+    }
+
+    /// Convex CCW polygon in (y, z), extruded from x0 to x1.
+    fn prism_x(&mut self, finish: Finish, poly: &[DVec2], x0: f64, x1: f64) {
+        self.add(finish, prism(poly, x1 - x0, |q| DVec3::new(x0 + q.z, q.x, q.y)));
     }
 
     fn finish(self) -> PartMesh {
@@ -300,28 +500,55 @@ impl Builder {
     }
 }
 
-/// Closed cylinder of length `len` along local +Z from 0, mapped by the rigid map `to_part`.
-fn cylinder(r: f64, len: f64, to_part: impl Fn(DVec3) -> DVec3) -> TriMesh {
-    let ring = circle_points(DVec2::ZERO, r, 0.05, 48);
+const SIDES: usize = 32;
+
+/// Solid of revolution of `profile`, (radius, height) points in order around the outline (from the
+/// axis at the bottom out, up and back to the axis, or a closed loop for a ring), about local +Z,
+/// mapped by the rigid map `to_part`.
+fn lathe(profile: &[(f64, f64)], sides: usize, to_part: impl Fn(DVec3) -> DVec3) -> TriMesh {
+    let origin = to_part(DVec3::ZERO);
+    let dir = |v: DVec3| (to_part(v) - origin).normalize();
+    let tau = std::f64::consts::TAU;
+    let ring: Vec<DVec2> = (0..sides).map(|i| DVec2::from_angle(i as f64 * tau / sides as f64)).collect();
+    let mut m = TriMesh::default();
+    for edge in profile.windows(2) {
+        let [(r0, h0), (r1, h1)] = [edge[0], edge[1]];
+        let len = (r1 - r0).hypot(h1 - h0);
+        if len < 1e-9 {
+            continue;
+        }
+        let (nr, nh) = ((h1 - h0) / len, (r0 - r1) / len);
+        for i in 0..sides {
+            let (a, b) = (ring[i], ring[(i + 1) % sides]);
+            let base = m.positions.len() as u32;
+            for (k, (c, r, h)) in [(a, r0, h0), (b, r0, h0), (b, r1, h1), (a, r1, h1)].into_iter().enumerate() {
+                m.positions.push(to_part((c * r).extend(h)));
+                m.normals.push(dir((c * nr).extend(nh)));
+                m.uvs.push(DVec2::new((i + k % 2) as f64, (k / 2) as f64));
+            }
+            m.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+    m
+}
+
+/// Closed prism of the convex CCW polygon `poly` from 0 to `len` along local +Z, mapped by the
+/// rigid map `to_part`.
+fn prism(poly: &[DVec2], len: f64, to_part: impl Fn(DVec3) -> DVec3) -> TriMesh {
     let origin = to_part(DVec3::ZERO);
     let dir = |v: DVec3| (to_part(v) - origin).normalize();
     let mut m = TriMesh::default();
-    let n = ring.len();
+    let n = poly.len();
     for i in 0..n {
-        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        let (a, b) = (poly[i], poly[(i + 1) % n]);
+        let e = (b - a).normalize();
         let quad = [a.extend(0.0), b.extend(0.0), b.extend(len), a.extend(len)].map(&to_part);
-        let base = m.positions.len() as u32;
-        for (k, (p, rim)) in quad.iter().zip([a, b, b, a]).enumerate() {
-            m.positions.push(*p);
-            m.normals.push(dir(rim.extend(0.0)));
-            m.uvs.push(DVec2::new((i + k % 2) as f64, (k / 2) as f64));
-        }
-        m.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        push_quad(&mut m, quad, dir(DVec3::new(e.y, -e.x, 0.0)));
     }
     for (h, up) in [(0.0, false), (len, true)] {
         let base = m.positions.len() as u32;
         let normal = dir(DVec3::new(0.0, 0.0, if up { 1.0 } else { -1.0 }));
-        for p in &ring {
+        for p in poly {
             m.positions.push(to_part(p.extend(h)));
             m.normals.push(normal);
             m.uvs.push(*p);
@@ -332,6 +559,30 @@ fn cylinder(r: f64, len: f64, to_part: impl Fn(DVec3) -> DVec3) -> TriMesh {
         }
     }
     m
+}
+
+/// Rectangle `lo`..`hi` with its corners cut by `c` (0: square corners), CCW.
+fn chamfer_rect(lo: DVec2, hi: DVec2, c: f64) -> Vec<DVec2> {
+    let c = c.min((hi.x - lo.x) / 2.0).min((hi.y - lo.y) / 2.0).max(0.0);
+    if c < 1e-9 {
+        return vec![lo, DVec2::new(hi.x, lo.y), hi, DVec2::new(lo.x, hi.y)];
+    }
+    vec![
+        DVec2::new(lo.x + c, lo.y),
+        DVec2::new(hi.x - c, lo.y),
+        DVec2::new(hi.x, lo.y + c),
+        DVec2::new(hi.x, hi.y - c),
+        DVec2::new(hi.x - c, hi.y),
+        DVec2::new(lo.x + c, hi.y),
+        DVec2::new(lo.x, hi.y - c),
+        DVec2::new(lo.x, lo.y + c),
+    ]
+}
+
+/// Lathe profile of a ring from radius `ri` to `ro`, heights `h0`..`h1`, outer edges chamfered by `c`.
+fn annulus(ri: f64, ro: f64, h0: f64, h1: f64, c: f64) -> [(f64, f64); 7] {
+    let c = c.min((ro - ri) / 2.0).min((h1 - h0) / 2.0).max(0.0);
+    [(ri, h0), (ro - c, h0), (ro, h0 + c), (ro, h1 - c), (ro - c, h1), (ri, h1), (ri, h0)]
 }
 
 fn push_quad(m: &mut TriMesh, quad: [DVec3; 4], normal: DVec3) {
@@ -441,5 +692,42 @@ mod tests {
         assert!(matches!(generate("nope", &Params::new()), Err(GenError::Unknown(_))));
         let bad = Params::from([("length".to_string(), ParamValue::Number(-1.0))]);
         assert!(matches!(generate("post", &bad), Err(GenError::BadParam { .. })));
+    }
+
+    #[test]
+    fn premade_models_keep_their_size_and_budget() {
+        // outer boxes of the M2 block models; the detailed models stay within 1 mm of them
+        let old: &[(&str, [f64; 3], [f64; 3])] = &[
+            ("post", [-6.35, -6.30, 0.00], [6.35, 6.30, 50.00]),
+            ("pedestal_post", [-19.00, -19.00, 0.00], [19.00, 19.00, 50.00]),
+            ("post_holder", [-14.95, -14.99, 0.00], [15.00, 14.99, 50.00]),
+            ("base", [-37.50, -12.50, 0.00], [37.50, 12.50, 10.00]),
+            ("clamping_fork", [-25.00, -12.50, 0.00], [25.00, 12.50, 10.00]),
+            ("kinematic_mount", [-19.05, -6.35, 0.00], [19.05, 8.35, 38.10]),
+            ("fixed_mount", [-19.00, -5.00, 0.00], [19.00, 5.00, 39.30]),
+            ("rotation_mount", [-25.00, -7.50, 0.00], [25.00, 7.50, 55.00]),
+            ("periscope", [-25.00, -25.00, 0.00], [25.00, 25.00, 150.00]),
+            ("mirror", [-12.70, -3.00, -12.70], [12.70, 3.00, 12.70]),
+            ("lens", [-12.70, -2.00, -12.70], [12.70, 2.00, 12.70]),
+            ("cube", [-12.70, -12.70, -12.70], [12.70, 12.70, 12.70]),
+            ("waveplate", [-12.70, -1.00, -12.70], [12.70, 1.00, 12.70]),
+            ("iris", [-25.00, -4.00, 0.00], [25.00, 4.00, 55.00]),
+            ("beam_dump", [-12.50, -20.00, 0.00], [12.50, 20.00, 37.50]),
+            ("fiber_coupler", [-12.50, -15.00, 0.00], [12.50, 15.00, 37.50]),
+            ("modulator_box", [-20.00, -30.00, 0.00], [20.00, 30.00, 30.00]),
+            ("photodiode", [-10.00, -20.00, 0.00], [10.00, 20.00, 50.00]),
+            ("camera", [-15.00, -25.00, 0.00], [15.00, 25.00, 30.00]),
+            ("spcm", [-30.00, -60.00, 0.00], [30.00, 60.00, 50.00]),
+            ("crystal_oven", [-20.00, -30.00, 0.00], [20.00, 30.00, 30.00]),
+            ("laser_head", [-40.00, -100.00, 0.00], [40.00, 100.00, 60.00]),
+            ("riser", [-37.50, -50.00, 0.00], [37.50, 50.00, 25.00]),
+        ];
+        for &(name, lo, hi) in old {
+            let m = gen_default(name);
+            let tris: usize = m.pieces.iter().map(|(_, t)| t.indices.len() / 3).sum();
+            assert!(tris > 0 && tris < 5000, "{name}: {tris} triangles");
+            let err = (m.min - DVec3::from(lo)).abs().max((m.max - DVec3::from(hi)).abs()).max_element();
+            assert!(err <= 1.0, "{name}: box {}..{} moved {err} mm", m.min, m.max);
+        }
     }
 }
