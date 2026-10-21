@@ -60,6 +60,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
         while let Ok(event) = handle.events.try_recv() {
             match event {
                 ViewportEvent::Ready { adapter, backend, quality, msaa_samples } => {
+                    app.borrow_mut().viewport_ready = true;
                     ui.set_gpu(format!("{adapter} · {backend} · {quality:?}, MSAA {msaa_samples}×").into());
                 }
                 ViewportEvent::FrameReady { frames_rendered } => {
@@ -107,6 +108,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                         crate::library::fill(&app.borrow(), &models);
                     }
                 }
+                ViewportEvent::ImageExported { path, ok } => crate::export_png::finished(&app, &path, ok),
                 ViewportEvent::SceneError(message) => {
                     eprintln!("viewport: {message}");
                     controller::show_toast(&ui, &app.borrow(), &message, false);

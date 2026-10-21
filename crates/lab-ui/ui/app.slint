@@ -16,6 +16,7 @@ import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
 import { WizardPanel } from "wizard.slint";
 import { CommandPalette } from "palette.slint";
+import { ExportSheet } from "export.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
@@ -234,6 +235,12 @@ export component AppWindow inherits Window {
     in property <int> sheet-destructive: -1;
     // "" closed, "platform" | "room" = PasteSheet open
     in property <string> paste-target;
+    // POLA-66 export sheet.
+    in property <bool> export-open;
+    in property <int> export-screen-width;
+    in property <int> export-screen-height;
+    callback export-png(int /* width */, int /* height */);
+    callback export-cancel();
     in property <string> toast;
     // "" = no button
     in property <string> toast-action;
@@ -353,7 +360,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open;
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open;
     changed palette-open => {
         if (!root.palette-open) {
             EditState.focus-viewport += 1;
@@ -1234,6 +1241,16 @@ export component AppWindow inherits Window {
             target: root.paste-target;
             apply(target, text) => { return root.paste-corners(target, text); }
             cancel => { root.action("paste.cancel"); }
+        }
+
+        ExportSheet {
+            width: root.width;
+            height: root.height;
+            open: root.export-open;
+            screen-width: root.export-screen-width;
+            screen-height: root.export-screen-height;
+            export(w, h) => { root.export-png(w, h); }
+            cancel => { root.export-cancel(); }
         }
     }
 }

@@ -433,6 +433,11 @@ export component ProjectMenu inherits PopupWindow {
                 enabled: !root.busy;
                 clicked => { root.action("file.export_bom"); }
             }
+            MenuRow {
+                label: "Export PNG…";
+                enabled: !root.busy;
+                clicked => { root.action("file.export_png"); }
+            }
         }
     }
 }

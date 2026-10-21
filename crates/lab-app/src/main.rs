@@ -7,6 +7,7 @@ mod bom;
 mod bridge;
 mod controller;
 mod dialogs;
+mod export_png;
 mod files;
 mod import;
 mod library;
@@ -85,6 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     bridge::listen_to_io(&ui, &app, &models);
     bridge::connect_input(&ui, &app);
     controller::connect(&ui, &app, &models);
+    export_png::connect(&ui, &app);
     library::connect(&ui, &app, &models);
     stack::connect(&ui, &app);
     scene::connect(&ui, &app, &models);

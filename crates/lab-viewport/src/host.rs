@@ -206,7 +206,7 @@ pub fn start(
                     }),
             );
             app.add_plugins((SendFrameToUiPlugin(texture_tx), ExtractResourcePlugin::<BackBuffer>::default()));
-            app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin, crate::thumbnail::ThumbnailPlugin));
+            app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin, crate::thumbnail::ThumbnailPlugin, crate::export::ExportPlugin));
             app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
             app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin));
             app.run();
@@ -357,6 +357,9 @@ fn run_on_demand(
                 ViewportRequest::InspectMarkers(frames) => pending.push(FrameRequest::InspectMarkers(frames)),
                 ViewportRequest::RenderThumbnail { part, path } => {
                     pending.push(FrameRequest::RenderThumbnail(part, path))
+                }
+                ViewportRequest::ExportImage { path, width, height } => {
+                    pending.push(FrameRequest::ExportImage(path, width, height))
                 }
             }
         }
@@ -512,7 +515,7 @@ pub(crate) struct TargetSize(pub UVec2);
 #[derive(Resource)]
 pub(crate) struct CurrentTarget(pub ManualTextureViewHandle);
 
-fn apply_render_target(current: Res<CurrentTarget>, mut cameras: Query<&mut RenderTarget, (With<Camera3d>, Without<crate::thumbnail::ThumbCamera>)>) {
+fn apply_render_target(current: Res<CurrentTarget>, mut cameras: Query<&mut RenderTarget, (With<Camera3d>, Without<crate::thumbnail::ThumbCamera>, Without<crate::export::ExportCamera>)>) {
     for mut target in &mut cameras {
         *target = RenderTarget::TextureView(current.0);
     }
