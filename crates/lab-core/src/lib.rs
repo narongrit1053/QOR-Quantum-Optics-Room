@@ -33,7 +33,7 @@ pub use holes::*;
 pub use migrate::{LoadError, LoadReport};
 pub use model::*;
 pub use outline::*;
-pub use prefs::WallDisplay;
+pub use prefs::{ThemeMode, WallDisplay};
 pub use room::*;
 pub use selection::SelectionTarget;
 pub use units::{LengthUnit, Mm};

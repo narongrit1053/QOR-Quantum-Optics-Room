@@ -3,6 +3,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Colour scheme of the UI chrome (the 3D viewport keeps its look in every mode).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    #[default]
+    Dark,
+    Light,
+    HighContrast,
+}
+
 /// When room walls are drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WallDisplay {

@@ -4,7 +4,7 @@ import { Theme } from "theme.slint";
 export component Panel inherits Rectangle {
     background: Theme.panel-bg;
     border-radius: Theme.radius-panel;
-    border-width: 1px;
+    border-width: Theme.border-width;
     border-color: Theme.panel-border;
     drop-shadow-blur: 28px;
     drop-shadow-offset-y: 10px;
@@ -135,7 +135,7 @@ export component SegmentedControl inherits Rectangle {
         background: Theme.control-thumb;
         drop-shadow-blur: root.floating ? 0px : 4px;
         drop-shadow-offset-y: root.floating ? 0px : 1px;
-        drop-shadow-color: #00000059;
+        drop-shadow-color: Theme.drop-shadow;
         animate x { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
     }
 
@@ -214,7 +214,7 @@ export component PillButton inherits Rectangle {
         }
         if root.hint != "": Text {
             text: root.hint;
-            color: root.primary ? #FFFFFFB3 : Theme.text-tertiary;
+            color: root.primary ? Theme.on-accent-dim : Theme.text-tertiary;
             font-size: 11px;
             vertical-alignment: center;
         }
