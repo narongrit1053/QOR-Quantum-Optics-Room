@@ -49,10 +49,11 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
     ui.on_action(move |id| {
         let Some(ui) = w.upgrade() else { return };
-        on_action(&ui, &a, &m, &id);
+        run_action(&ui, &a, &m, &id);
     });
 
     crate::import::connect(ui, app, models);
+    crate::palette::connect(ui, app, models);
 
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
     ui.on_paste_corners(move |target, text| {
@@ -306,7 +307,7 @@ fn on_choice_selected(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<U
     refresh_all(ui, &app.borrow(), models);
 }
 
-fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str) {
+pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str) {
     match id {
         "edit.undo" => undo_redo(ui, app, models, false),
         "edit.redo" => undo_redo(ui, app, models, true),
@@ -343,6 +344,11 @@ fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
             let mode = if top { ViewMode::Top } else { ViewMode::Perspective };
             app.borrow().send(ViewportRequest::SetViewMode(mode));
         }
+        "view.split" => {
+            ui.set_view_mode(2);
+            app.borrow().send(ViewportRequest::SetViewMode(ViewMode::Split));
+        }
+        "palette.open" => ui.set_palette_open(true),
         "inspector.dismiss_error" => {
             ui.set_inspector_error("".into());
             // Drops any live-preview state (corner tint, previewed outline).

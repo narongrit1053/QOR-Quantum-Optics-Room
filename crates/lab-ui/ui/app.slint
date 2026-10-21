@@ -7,7 +7,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
@@ -15,9 +15,10 @@ import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } fr
 import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
 import { WizardPanel } from "wizard.slint";
+import { CommandPalette } from "palette.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus } from "fields.slint";
 
@@ -260,6 +261,11 @@ export component AppWindow inherits Window {
     callback field-edited(string /* id */, string /* text */);
     callback choice-selected(string /* id */, int /* index */);
     callback action(string /* id */);
+    // Command palette (POLA-65).
+    in-out property <bool> palette-open;
+    in property <[PaletteItem]> palette-items;
+    callback palette-query(string);
+    callback palette-run(string);
     // "" ok, else error text (the sheet stays open).
     callback paste-corners(string /* target */, string /* text */) -> string;
     callback sheet-button(int);
@@ -347,7 +353,12 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "";
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open;
+    changed palette-open => {
+        if (!root.palette-open) {
+            EditState.focus-viewport += 1;
+        }
+    }
     property <string> unit-label: root.display-unit == 1 ? "in" : "mm";
 
     // EditState.focus-viewport is bumped by fields (Enter, Escape) to hand focus back.
@@ -379,6 +390,11 @@ export component AppWindow inherits Window {
         focus-on-tab-navigation: false;
 
         capture-key-pressed(event) => {
+            // Ctrl+K opens the palette, also while a field is focused.
+            if (event.modifiers.control && !event.modifiers.alt && (event.text == "k" || event.text == "K") && !root.sheet-open && root.paste-target == "") {
+                root.action("palette.open");
+                return accept;
+            }
             // A sheet owns the keyboard; its own focus scope handles the keys.
             if (root.modal) {
                 return reject;
@@ -633,6 +649,22 @@ export component AppWindow inherits Window {
                                 }
                             }
                             Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                width: palette-text.preferred-width + 12px;
+                                border-radius: Theme.radius-control;
+                                background: palette-touch.has-hover ? Theme.control-hover : Theme.control-bg;
+                                palette-touch := TouchArea {
+                                    clicked => { root.action("palette.open"); }
+                                }
+                                palette-text := Text {
+                                    text: "⌕ Ctrl+K";
+                                    color: Theme.text-secondary;
+                                    font-family: Theme.font-symbol;
+                                    font-size: Theme.font-caption;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
                             Text {
                                 text: "⌄";
                                 color: Theme.text-tertiary;
@@ -1184,6 +1216,16 @@ export component AppWindow inherits Window {
             cancel => { root.import-cancel(); }
             choose-another => { root.action("import.step"); }
             define-connectors(id) => { root.import-define-connectors(id); }
+        }
+
+        CommandPalette {
+            width: root.width;
+            height: root.height;
+            open: root.palette-open;
+            items: root.palette-items;
+            palette-query(text) => { root.palette-query(text); }
+            palette-run(id) => { root.palette-run(id); }
+            palette-close => { root.palette-open = false; }
         }
 
         PasteSheet {
