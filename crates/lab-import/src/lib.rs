@@ -88,10 +88,10 @@ pub fn step2glb_path() -> PathBuf {
     }
     candidates.push(repo.join(rel));
     // A worktree's `.git` is a file "gitdir: <main>/.git/worktrees/<name>".
-    if let Ok(git) = std::fs::read_to_string(repo.join(".git")) {
-        if let Some(main) = git.trim().strip_prefix("gitdir:").and_then(|g| Path::new(g.trim()).ancestors().nth(3)) {
-            candidates.push(main.join(rel));
-        }
+    if let Ok(git) = std::fs::read_to_string(repo.join(".git"))
+        && let Some(main) = git.trim().strip_prefix("gitdir:").and_then(|g| Path::new(g.trim()).ancestors().nth(3))
+    {
+        candidates.push(main.join(rel));
     }
     candidates.into_iter().find(|p| p.is_file()).unwrap_or_else(|| repo.join(rel))
 }

@@ -107,6 +107,8 @@ pub(crate) fn pick(
 /// Tinted copies of shared materials: (base, colour, emissive, unlit) → copy.
 type Variants = HashMap<(AssetId<StandardMaterial>, [u32; 4], [u32; 4], bool), Handle<StandardMaterial>>;
 
+type Looks<'w, 's> = Query<'w, 's, (Entity, &'static HighlightLook, Has<SharedMaterial>, Option<&'static MeshMaterial3d<StandardMaterial>>)>;
+
 /// Applies the current selection and hover to every look. Runs when the selection changed or
 /// new looks were spawned (a rebuilt platform keeps its highlight); writes only changed values.
 #[allow(clippy::too_many_arguments)]
@@ -114,7 +116,7 @@ fn apply_highlight(
     mut commands: Commands,
     selection: Res<Selection>,
     capturing: Res<crate::export::Capturing>,
-    looks: Query<(Entity, &HighlightLook, Has<SharedMaterial>, Option<&MeshMaterial3d<StandardMaterial>>)>,
+    looks: Looks,
     added: Query<(), Added<HighlightLook>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hole_materials: ResMut<Assets<HoleTopMaterial>>,

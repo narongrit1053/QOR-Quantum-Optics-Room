@@ -39,6 +39,19 @@ Decided with you:
 | Platform | Windows 10/11, wgpu → DX12 (Vulkan fallback) |
 | Robustness | Atomic saves (temp file + rename), schema-versioned files with migrations, STEP import isolated in a separate process |
 
+### Measured against the targets (POLA-72, 2026-10-22, draft @ 87ca6cf, release build, RTX 4050 Laptop and Intel UHD)
+| Area | Target | Measured | Result |
+|---|---|---|---|
+| Offline | No network crates | 435 runtime crates, none network-capable (`scripts/check-offline.ps1`) | Pass |
+| Idle cost | ~0% GPU, <1% CPU | 0.00% GPU, 0.01% CPU | Pass |
+| Performance, 2k parts, integrated GPU | 60 fps | Intel UHD: 50-100 ms/frame (about 10-20 fps) | Miss, accepted |
+| Performance, 2k parts, discrete GPU | 60 fps | RTX 4050: about 19 ms/frame (about 52 fps) | Near (UHD class is the stated target) |
+| Performance, 10k parts | >=30 fps discrete | RTX 4050: about 20 ms/frame (about 48 fps) | Pass |
+| Startup | <= 2 s cold | window at 4.3 s, scene at 4.6 s | Miss, accepted |
+| Memory, 2k parts | <= 600 MB | 375 MB peak (RTX), 587 MB peak (UHD); 10k: 418 MB | Pass |
+| Footprint | ~40-70 MB binary | 82.6 MB | Miss, accepted |
+| Platform | Windows 10/11, DX12 | DX12 on both GPUs | Pass |
+
 ### Assumptions
 - One user per machine. Projects are shared as files (network drive, OneDrive, git). No real-time collaboration.
 - Internal units are **mm and radians**; the UI can display mm or inches.
