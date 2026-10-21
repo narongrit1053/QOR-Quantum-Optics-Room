@@ -33,6 +33,7 @@ impl Plugin for OutlinePlugin {
     }
 }
 
+type ChangedMainCamera = (With<OrbitCamera>, Without<TopPane>, Changed<GlobalTransform>);
 type CameraView<'a> = (&'a Camera, &'a GlobalTransform, &'a Projection);
 
 /// Respawns the outline when the selection changed or pieces were (re)spawned; despawns it on
@@ -87,7 +88,7 @@ fn rebuild_outline(
 /// Keeps the hull about `OUTLINE_PX` wide while the camera moves (the camera only moves on
 /// input or easing, so this costs nothing when idle).
 fn resize_outline(
-    camera: Query<CameraView, (With<OrbitCamera>, Without<TopPane>, Changed<GlobalTransform>)>,
+    camera: Query<CameraView, ChangedMainCamera>,
     mut outlines: Query<(&ChildOf, &mut Transform), With<Outline>>,
     pieces: Query<(&Aabb, &GlobalTransform), With<SceneNode>>,
 ) {

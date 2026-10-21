@@ -20,6 +20,8 @@ use crate::dialogs::{DialogKind, DialogResult, owner_hwnd, show_file_dialog_loca
 use crate::library;
 use crate::ui_models::UiModels;
 
+type Handles = (Rc<RefCell<AppState>>, Rc<UiModels>);
+
 const VENDORS: [&str; 4] = ["Thorlabs", "MOGLabs", "Toptica", "Other"];
 const FINISHES: [&str; 3] = ["anodized_black", "stainless", "painted"];
 const PAINT: [u8; 3] = [210, 210, 205];
@@ -31,7 +33,7 @@ thread_local! {
     /// The STEP file of the open dialog.
     static FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// App handles for worker results, which arrive on the UI thread without them.
-    static HANDLES: RefCell<Option<(Rc<RefCell<AppState>>, Rc<UiModels>)>> = const { RefCell::new(None) };
+    static HANDLES: RefCell<Option<Handles>> = const { RefCell::new(None) };
 }
 
 /// The `Finish` stored in an imported part's `meta["finish"]` (AnodizedBlack if unknown).

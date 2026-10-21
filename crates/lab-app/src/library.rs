@@ -13,8 +13,10 @@ use slint::ComponentHandle;
 use crate::app_state::AppState;
 use crate::ui_models::{UiModels, sync};
 
+type Group = (&'static str, &'static str, &'static str, (u8, u8, u8));
+
 /// Group order and looks: (first category segment, title, letter, rgb).
-const GROUPS: &[(&str, &str, &str, (u8, u8, u8))] = &[
+const GROUPS: &[Group] = &[
     ("posts", "Posts", "P", (191, 90, 242)),
     ("mounts", "Mounts", "M", (10, 132, 255)),
     ("optics", "Optics", "O", (48, 209, 88)),

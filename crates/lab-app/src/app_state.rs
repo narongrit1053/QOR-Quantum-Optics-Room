@@ -12,6 +12,9 @@ use lab_core::{HoleSet, LengthUnit, Platform, PlatformId, SelectionTarget, compu
 use lab_file::{IoWorker, ProjectLocation, RecoveryCandidate, Settings};
 use lab_viewport::ViewportRequest;
 
+/// An `ExportImage` request's file and its completion callback.
+pub type PendingExport = (std::path::PathBuf, Box<dyn FnOnce(bool)>);
+
 /// The app's only timers. All are single-shot, so an idle app has no wakeups.
 #[allow(dead_code)] // Parts are used only by the file flows (files.rs, T6b).
 #[derive(Default)]
@@ -92,7 +95,7 @@ pub struct AppState {
     /// The viewport sent `Ready`.
     pub viewport_ready: bool,
     /// POLA-66. `ExportImage` requests waiting for `ImageExported`, matched by path.
-    pub pending_exports: Vec<(std::path::PathBuf, Box<dyn FnOnce(bool)>)>,
+    pub pending_exports: Vec<PendingExport>,
 }
 
 impl AppState {

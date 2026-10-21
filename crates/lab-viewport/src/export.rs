@@ -27,6 +27,8 @@ const BACKGROUND: Color = Color::srgb(0x16 as f32 / 255.0, 0x18 as f32 / 255.0, 
 #[derive(Component)]
 pub(crate) struct ExportCamera;
 
+type MainCamera = (&'static Transform, &'static Projection, Option<&'static Msaa>);
+
 struct InFlight {
     path: PathBuf,
     camera: Entity,
@@ -56,7 +58,7 @@ fn step(
     mut images: ResMut<Assets<Image>>,
     mut redraw: ResMut<RedrawState>,
     events: Res<EventSender>,
-    main: Query<(&Transform, &Projection, Option<&Msaa>), (With<OrbitCamera>, Without<TopPane>)>,
+    main: Query<MainCamera, (With<OrbitCamera>, Without<TopPane>)>,
 ) {
     for request in &pending.0 {
         if let FrameRequest::ExportImage(path, w, h) = request {

@@ -274,6 +274,7 @@ pub(crate) struct FrameSources<'w, 's> {
 
 type CameraItem = (Entity, &'static mut OrbitCamera, &'static mut Camera, &'static GlobalTransform, Has<TopPane>);
 
+#[allow(clippy::too_many_arguments)] // a Bevy system: every input is its own parameter
 pub(crate) fn handle_input(
     pending: Res<PendingRequests>,
     full: Res<ViewportSize>,

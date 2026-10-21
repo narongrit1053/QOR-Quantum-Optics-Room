@@ -5,6 +5,7 @@ use bevy::{
     camera::{primitives::Aabb, visibility::VisibilitySystems},
     math::{DQuat, DVec3},
     picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
+    ecs::system::ParamSet,
     prelude::*,
 };
 use lab_core::part::Frame;
@@ -39,21 +40,22 @@ impl Plugin for InspectPlugin {
 }
 
 #[allow(clippy::too_many_arguments)]
+type InspectParams<'w, 's> = (
+    Query<'w, 's, (Entity, &'static Aabb, &'static GlobalTransform)>,
+    Query<'w, 's, &'static ChildOf>,
+    Res<'w, ViewportSize>,
+    Res<'w, EventSender>,
+    ResMut<'w, SettleFrames>,
+);
+
 fn apply_inspect(
     mut commands: Commands,
     pending: Res<PendingRequests>,
     clicks: Res<Clicks>,
     mut state: ResMut<Inspect>,
-    mut assets: SceneAssets,
+    mut sets: ParamSet<(SceneAssets, MeshRayCast)>,
     mut cameras: Query<(&mut OrbitCamera, &Camera, &GlobalTransform), Without<TopPane>>,
-    (pieces, parents, mut ray_cast, full, events, mut settle): (
-        Query<(Entity, &Aabb, &GlobalTransform)>,
-        Query<&ChildOf>,
-        MeshRayCast,
-        Res<ViewportSize>,
-        Res<EventSender>,
-        ResMut<SettleFrames>,
-    ),
+    (pieces, parents, full, events, mut settle): InspectParams,
 ) {
     for request in &pending.0 {
         match request {
@@ -81,7 +83,7 @@ fn apply_inspect(
                             pickable: false,
                             locked: false,
                         };
-                        let root = spawn_node(&mut commands, None, &node, node.position, node.rotation, &mut assets, &events);
+                        let root = spawn_node(&mut commands, None, &node, node.position, node.rotation, &mut sets.p0(), &events);
                         // Not part of the document: a document reload must not despawn it.
                         commands.entity(root).remove::<SceneEntity>();
                         state.root = Some(root);
@@ -133,7 +135,7 @@ fn apply_inspect(
         let Ok(ray) = camera.viewport_to_world(transform, p) else { continue };
         let filter = |e: Entity| inside(e);
         let settings = MeshRayCastSettings::default().with_filter(&filter);
-        if let Some((_, hit)) = ray_cast.cast_ray(ray, &settings).first() {
+        if let Some((_, hit)) = sets.p1().cast_ray(ray, &settings).first() {
             // The part sits at the origin unrotated: render space → part space is the document map.
             let n = hit.normal;
             events.send(ViewportEvent::PartPoint {

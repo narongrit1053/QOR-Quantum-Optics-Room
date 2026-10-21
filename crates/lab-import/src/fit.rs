@@ -59,7 +59,7 @@ fn fit_along(near: &[([DVec3; 3], DVec3, f64)], guess: DVec3, point: DVec3, n0: 
     let (u, v) = basis(axis);
     let to2 = |p: DVec3| (p.dot(u), p.dot(v));
     // Wall vertices with their triangle normal (walls of a hole face its axis).
-    let pts: Vec<((f64, f64), (f64, f64), DVec3)> = walls
+    let pts: Vec<WallPoint> = walls
         .iter()
         .flat_map(|(tri, n, _)| tri.iter().map(move |p| (to2(*p), (n.dot(u), n.dot(v)), *p)))
         .collect();
@@ -106,10 +106,13 @@ fn fit_along(near: &[([DVec3; 3], DVec3, f64)], guess: DVec3, point: DVec3, n0: 
     Some((HoleFit { axis: Frame { origin, z, x: basis(z).0 }, diameter: 2.0 * r }, score))
 }
 
+/// A wall vertex in the hole's plane, with its wall normal in the same plane and its 3D position.
+type WallPoint = ((f64, f64), (f64, f64), DVec3);
+
 fn inliers(
-    pts: &[((f64, f64), (f64, f64), DVec3)],
+    pts: &[WallPoint],
     (cx, cy, r): (f64, f64, f64),
-) -> impl Iterator<Item = &((f64, f64), (f64, f64), DVec3)> {
+) -> impl Iterator<Item = &WallPoint> {
     pts.iter().filter(move |(p, n, _)| {
         let d = dist(*p, (cx, cy));
         // Hole walls face the axis: the normal points from the wall toward the centre.

@@ -27,7 +27,6 @@ pub fn render_missing(app: &AppState) {
 }
 
 /// Re-renders `id` (after an import or a wizard save).
-
 pub fn render(app: &AppState, id: &str) {
     if let Some(path) = path(id) {
         app.send(ViewportRequest::RenderThumbnail { part: id.to_string(), path });
