@@ -452,6 +452,7 @@ fn apply_preference(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiMode
             PreferenceChange::Units(unit) => {
                 a.settings.display_unit = unit;
                 crate::measure::refresh(ui, unit);
+                crate::stack::fill(ui, &mut a);
                 None
             }
             PreferenceChange::Walls(display) => {

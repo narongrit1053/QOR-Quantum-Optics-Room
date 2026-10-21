@@ -32,7 +32,7 @@ export component ExportSheet inherits Rectangle {
 
     property <string> error;
 
-    background: root.open ? #00000073 : #00000000;
+    background: root.open ? Theme.scrim : transparent;
     animate background { duration: 200ms; easing: ease-out; }
 
     function set-size(w: int, h: int) {
@@ -52,7 +52,7 @@ export component ExportSheet inherits Rectangle {
 
     changed open => {
         if (root.open) {
-            root.set-size(root.screen-width * 2, root.screen-height * 2);
+            root.set-size(root.screen-width, root.screen-height);
             keys.focus();
         }
     }
@@ -85,13 +85,13 @@ export component ExportSheet inherits Rectangle {
             x: (root.width - self.width) / 2;
             y: (root.height - self.height) / 2 - 40px;
             visible: root.open;
-            background: #232428;
+            background: Theme.sheet-bg;
             border-radius: Theme.radius-panel;
             border-width: 1px;
             border-color: Theme.panel-border;
             drop-shadow-blur: 40px;
             drop-shadow-offset-y: 16px;
-            drop-shadow-color: #000000A0;
+            drop-shadow-color: Theme.shadow-strong;
 
             layout := VerticalLayout {
                 padding: 20px;

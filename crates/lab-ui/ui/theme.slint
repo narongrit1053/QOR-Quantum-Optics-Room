@@ -43,6 +43,12 @@ export global Theme {
     out property <color> subtle-bg-1: mode == 1 ? #00000008 : mode == 2 ? #000000 : #FFFFFF08;
     out property <color> subtle-bg-2: mode == 1 ? #0000000A : mode == 2 ? #0D0D0D : #FFFFFF0A;
     out property <color> chip-bg: mode == 1 ? #E5E5EA : mode == 2 ? #262626 : #2C2D31;
+    // Opaque toast surface; text (Theme.text) and accent-text keep >= 4.5:1 on it in every mode.
+    out property <color> toast-bg: mode == 1 ? #FFFFFF : mode == 2 ? #000000 : #2C2D31;
+    out property <color> accent-text: mode == 1 ? #0062CC : mode == 2 ? #FFD60A : #5EB0FF;
+    // Text on an accent or danger fill, and on the selected segment thumb (white thumb in high contrast).
+    out property <color> on-accent: mode == 2 ? #000000 : #FFFFFF;
+    out property <color> thumb-text: mode == 2 ? #000000 : text;
     out property <color> sheet-border: mode == 1 ? #00000026 : mode == 2 ? #FFFFFF : #FFFFFF1A;
 
     // Geometry (8-pt grid)

@@ -3,7 +3,7 @@
 
 import { Theme } from "theme.slint";
 import { SectionHeader, IconButton } from "components.slint";
-import { LabeledField } from "fields.slint";
+import { LabeledField, DragState } from "fields.slint";
 
 // "Label   ‹ value ›": steps through the choices the app owns.
 component Picker inherits HorizontalLayout {
@@ -74,15 +74,26 @@ export component StackPanel inherits VerticalLayout {
             enabled: root.fits;
             mouse-cursor: root.fits ? grab : default;
             moved => {
-                if (self.pressed) {
+                if (self.pressed && !DragState.cancelled) {
+                    DragState.active = true;
+                    DragState.source = 2;
                     root.drag(0, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                 }
             }
             pointer-event(event) => {
-                if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
-                    root.drag(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                DragState.shift = event.modifiers.shift;
+                DragState.ctrl = event.modifiers.control;
+                if (event.kind == PointerEventKind.down) {
+                    DragState.cancelled = false;
+                } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                    if (!DragState.cancelled) {
+                        root.drag(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    }
+                    DragState.active = false;
+                    DragState.cancelled = false;
                 } else if (event.kind == PointerEventKind.cancel) {
-                    root.drag(2, 0, 0);
+                    if (!DragState.cancelled) { root.drag(2, 0, 0); }
+                    DragState.active = false;
                 }
             }
         }

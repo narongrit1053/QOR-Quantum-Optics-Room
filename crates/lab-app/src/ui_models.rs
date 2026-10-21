@@ -194,6 +194,7 @@ pub fn fill_platform(ui: &AppWindow, models: &UiModels, v: PlatformViewData) {
     ui.set_platform_grid_note(s(v.grid_note));
     sync(&models.platform_zones, v.zones.into_iter().map(zone_row));
     ui.set_platform_support(v.support);
+    ui.set_platform_support_bases(ModelRc::from(Rc::new(VecModel::from(v.support_bases.into_iter().map(SharedString::from).collect::<Vec<_>>()))));
     sync(&models.platform_support_fields, v.support_fields.into_iter().map(edit_field));
     ui.set_platform_node_count(v.node_count);
     ui.set_platform_warning(s(v.warning));
