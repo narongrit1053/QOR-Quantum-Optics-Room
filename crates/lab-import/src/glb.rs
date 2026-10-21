@@ -193,7 +193,7 @@ pub fn write(materials: &[Material], lods: &[Vec<(usize, TriMesh)>]) -> Vec<u8> 
     let mut bin: Vec<u8> = Vec::new();
     let (mut views, mut accessors) = (Vec::new(), Vec::new());
     let mut push = |data: Vec<u8>, target: u32, acc: Value| -> usize {
-        while bin.len() % 4 != 0 {
+        while !bin.len().is_multiple_of(4) {
             bin.push(0);
         }
         views.push(json!({ "buffer": 0, "byteOffset": bin.len(), "byteLength": data.len(), "target": target }));
@@ -231,7 +231,7 @@ pub fn write(materials: &[Material], lods: &[Vec<(usize, TriMesh)>]) -> Vec<u8> 
         .iter()
         .map(|m| json!({ "pbrMetallicRoughness": { "baseColorFactor": m.color, "metallicFactor": m.metallic, "roughnessFactor": m.roughness }, "doubleSided": false }))
         .collect();
-    while bin.len() % 4 != 0 {
+    while !bin.len().is_multiple_of(4) {
         bin.push(0);
     }
     let doc = json!({
@@ -240,7 +240,7 @@ pub fn write(materials: &[Material], lods: &[Vec<(usize, TriMesh)>]) -> Vec<u8> 
         "accessors": accessors, "bufferViews": views, "buffers": [{ "byteLength": bin.len() }],
     });
     let mut js = serde_json::to_vec(&doc).expect("JSON of plain values");
-    while js.len() % 4 != 0 {
+    while !js.len().is_multiple_of(4) {
         js.push(b' ');
     }
     let total = 12 + 8 + js.len() + 8 + bin.len();

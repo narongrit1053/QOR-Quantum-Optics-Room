@@ -241,7 +241,7 @@ pub(crate) fn write_png(path: &Path, image: &Image) -> Result<(), String> {
     let (w, h) = (image.width(), image.height());
     let mut data = image.data.clone().ok_or("the capture has no pixels")?;
     if matches!(image.texture_descriptor.format, TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb) {
-        for px in data.chunks_exact_mut(4) {
+        for px in data.as_chunks_mut::<4>().0.iter_mut() {
             px.swap(0, 2);
         }
     }

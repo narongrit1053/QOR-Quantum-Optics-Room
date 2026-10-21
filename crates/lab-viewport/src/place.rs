@@ -217,17 +217,19 @@ fn drag_part(
     }
 }
 
+type GhostAssets<'w> = (
+    ResMut<'w, Assets<Mesh>>,
+    ResMut<'w, Assets<StandardMaterial>>,
+    ResMut<'w, PartMeshes>,
+    ResMut<'w, SettleFrames>,
+);
+
 /// Builds the ghost when the dragged item changed and moves it to its pose.
 fn update_ghost(
     mut commands: Commands,
     mut ghost: ResMut<Ghost>,
     (catalog, events): (Res<CatalogRes>, Res<EventSender>),
-    (mut meshes, mut materials, mut part_meshes, mut settle): (
-        ResMut<Assets<Mesh>>,
-        ResMut<Assets<StandardMaterial>>,
-        ResMut<PartMeshes>,
-        ResMut<SettleFrames>,
-    ),
+    (mut meshes, mut materials, mut part_meshes, mut settle): GhostAssets,
 ) {
     let Some(pose) = ghost.pose.take() else { return };
     if std::mem::take(&mut ghost.rebuild)

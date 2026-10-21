@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn mask_mip_chain_is_complete_and_energy_preserving() {
         for &(cols, rows) in &[(7u32, 5u32), (20, 20), (48, 36), (1, 1), (1, 9), (30, 2), (143, 59)] {
-            let present = |c: u32, r: u32| (c * 7 + r * 3) % 5 != 0 && !(c > cols / 2 && r > rows / 2);
+            let present = |c: u32, r: u32| !(c * 7 + r * 3).is_multiple_of(5) && !(c > cols / 2 && r > rows / 2);
             let mask = build_mask(cols, rows, present);
             let (w, h) = mask.size;
             let max = w.max(h);

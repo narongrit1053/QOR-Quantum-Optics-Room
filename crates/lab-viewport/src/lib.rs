@@ -41,7 +41,7 @@ use lab_core::{ChangeSet, Document, PlatformId};
 pub use lab_core::{SelectionTarget, WallDisplay};
 
 pub use bevy::math::Vec2;
-pub use host::{ViewportHandle, start};
+pub use host::{ViewportHandle, smoke_test, start};
 pub use place::stack_chain;
 pub use wgpu;
 

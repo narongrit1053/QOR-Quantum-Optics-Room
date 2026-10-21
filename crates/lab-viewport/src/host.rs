@@ -206,14 +206,60 @@ pub fn start(
                     }),
             );
             app.add_plugins((SendFrameToUiPlugin(texture_tx), ExtractResourcePlugin::<BackBuffer>::default()));
-            app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin, crate::thumbnail::ThumbnailPlugin, crate::export::ExportPlugin));
-            app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
-            app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin));
+            add_scene_plugins(&mut app, document);
             app.run();
         })
         .expect("failed to spawn the viewport thread");
 
     ViewportHandle { textures: texture_rx, requests: request_tx, events: event_rx }
+}
+
+fn add_scene_plugins(app: &mut App, document: Document) {
+    app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin, crate::thumbnail::ThumbnailPlugin, crate::export::ExportPlugin));
+    app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
+    app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin));
+}
+
+/// Startup test hook: the viewport's resources and plugins on a render-less Bevy app, with every schedule
+/// built. A system-parameter conflict (B0002) panics here, without a GPU or window.
+#[doc(hidden)]
+pub fn smoke_test(document: Document) {
+    use bevy::render::settings::WgpuSettings;
+    let (events, _event_rx) = async_channel::unbounded::<ViewportEvent>();
+    let events = EventSender { events, wake_ui: std::sync::Arc::new(|| {}) };
+    let mut app = App::new();
+    app.insert_resource(BackBuffer(None))
+        .insert_resource(CurrentTarget(ManualTextureViewHandle(0)))
+        .init_resource::<PendingRequests>()
+        .init_resource::<RedrawState>()
+        .init_resource::<SettleFrames>()
+        .insert_resource(events)
+        .insert_resource(Quality::Balanced)
+        .insert_resource(MsaaSamples(1))
+        .insert_resource(ViewportSize(Vec2::new(640.0, 480.0)))
+        .init_resource::<TargetSize>()
+        .add_systems(First, apply_render_target)
+        .add_systems(Last, count_down_settle_frames);
+    crate::glb::register_sources(&mut app);
+    app.add_plugins(
+        DefaultPlugins
+            .build()
+            .disable::<PipelinedRenderingPlugin>()
+            .set(RenderPlugin {
+                render_creation: WgpuSettings { backends: None, ..default() }.into(),
+                ..default()
+            })
+            .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false, ..default() }),
+    );
+    add_scene_plugins(&mut app, document);
+    app.finish();
+    app.cleanup();
+    // Running the frame needs the render target, so build every schedule instead: parameter
+    // conflicts panic while a system is initialised.
+    let mut schedules = app.world_mut().remove_resource::<Schedules>().expect("schedules");
+    for (_, schedule) in schedules.iter_mut() {
+        schedule.initialize(app.world_mut()).expect("viewport schedule failed to build");
+    }
 }
 
 /// The adapter `device` was created on. The UI chooses the GPU (preferring a discrete one), so
@@ -515,7 +561,9 @@ pub(crate) struct TargetSize(pub UVec2);
 #[derive(Resource)]
 pub(crate) struct CurrentTarget(pub ManualTextureViewHandle);
 
-fn apply_render_target(current: Res<CurrentTarget>, mut cameras: Query<&mut RenderTarget, (With<Camera3d>, Without<crate::thumbnail::ThumbCamera>, Without<crate::export::ExportCamera>)>) {
+type SceneCameras = (With<Camera3d>, Without<crate::thumbnail::ThumbCamera>, Without<crate::export::ExportCamera>);
+
+fn apply_render_target(current: Res<CurrentTarget>, mut cameras: Query<&mut RenderTarget, SceneCameras>) {
     for mut target in &mut cameras {
         *target = RenderTarget::TextureView(current.0);
     }
