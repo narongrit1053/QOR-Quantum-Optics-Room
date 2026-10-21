@@ -155,6 +155,25 @@ struct Entry {
 
 /// The single central-directory entry called `name`.
 fn find_entry(archive: &[u8], name: &str) -> Result<Entry, ZipError> {
+    let mut found = None;
+    for (entry_name, entry) in central_directory(archive)? {
+        if entry_name == name.as_bytes() {
+            if found.is_some() {
+                return Err(ZipError::Duplicate);
+            }
+            found = Some(entry);
+        }
+    }
+    found.ok_or(ZipError::Missing)
+}
+
+/// The names of every entry in the archive (invalid UTF-8 names are skipped).
+pub(crate) fn entry_names(archive: &[u8]) -> Result<Vec<String>, ZipError> {
+    Ok(central_directory(archive)?.into_iter().filter_map(|(n, _)| String::from_utf8(n).ok()).collect())
+}
+
+/// Every central-directory entry with its raw name.
+fn central_directory(archive: &[u8]) -> Result<Vec<(Vec<u8>, Entry)>, ZipError> {
     if archive.len() < EOCD_LEN {
         return Err(no_eocd(archive));
     }
@@ -185,7 +204,7 @@ fn find_entry(archive: &[u8], name: &str) -> Result<Entry, ZipError> {
         return Err(ZipError::Truncated);
     }
 
-    let mut found = None;
+    let mut found = Vec::new();
     let mut at = cd_offset as usize;
     for _ in 0..total {
         if u32_at(archive, at)? != CENTRAL_SIG {
@@ -201,22 +220,20 @@ fn find_entry(archive: &[u8], name: &str) -> Result<Entry, ZipError> {
         if next > cd_end {
             return Err(ZipError::Truncated);
         }
-        if archive.get(name_start..name_end) == Some(name.as_bytes()) {
-            if found.is_some() {
-                return Err(ZipError::Duplicate);
-            }
-            found = Some(Entry {
+        {
+            let name = archive.get(name_start..name_end).ok_or(ZipError::Truncated)?.to_vec();
+            found.push((name, Entry {
                 flags: u16_at(archive, at + 8)?,
                 method: u16_at(archive, at + 10)?,
                 crc: u32_at(archive, at + 16)?,
                 compressed: u32_at(archive, at + 20)?,
                 size: u32_at(archive, at + 24)?,
                 local_offset: u32_at(archive, at + 42)?,
-            });
+            }));
         }
         at = next;
     }
-    found.ok_or(ZipError::Missing)
+    Ok(found)
 }
 
 /// The inflated size the central directory declares for `name`, if the entry exists.

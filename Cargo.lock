@@ -3917,6 +3917,7 @@ name = "lab-app"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "blake3",
  "lab-catalog",
  "lab-core",
  "lab-file",
@@ -3929,6 +3930,7 @@ dependencies = [
  "raw-window-handle",
  "serde_json",
  "slint",
+ "toml",
  "windows-sys 0.60.2",
 ]
 

@@ -192,6 +192,7 @@ mod tests {
             document: sample_doc(),
             location: loc,
             report: LoadReport::default(),
+            extras: Vec::new(),
         };
         let recovered = Session::from_recovered(loaded);
         assert!(recovered.is_dirty());

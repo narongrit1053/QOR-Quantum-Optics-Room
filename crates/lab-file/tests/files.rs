@@ -15,7 +15,7 @@ use lab_core::{
     PlatformId, PlatformKind, RectCorner, SCHEMA_VERSION, Support, Surface, WallDisplay, ZoneShape,
 };
 use lab_file::{
-    AutosaveSession, FileErrorKind, IoJob, IoResult, IoWorker, PROJECT_EXTENSION, PROJECT_JSON, ProjectFormat,
+    AutosaveSession, EmbeddedFile, FileErrorKind, IoJob, IoResult, IoWorker, PROJECT_EXTENSION, PROJECT_JSON, ProjectFormat,
     ProjectLocation, SaveOptions, Settings, atomic_write, decode_bytes, encode_archive, find_recoverable, load_project,
     load_settings, load_settings_at, save_project, save_settings, save_settings_at, settings_path,
 };
@@ -217,6 +217,34 @@ fn p1_save_load_save_is_byte_identical() {
 }
 
 #[test]
+fn p_extras_round_trip_archive_and_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let hex = "ab".repeat(32);
+    let extras = vec![
+        EmbeddedFile { name: "parts/user_X.toml".into(), data: b"id = \"user:X\"".to_vec() },
+        EmbeddedFile { name: format!("parts/meshes/{hex}.glb"), data: vec![1, 2, 3] },
+        EmbeddedFile { name: "thumbnail.png".into(), data: vec![0x89, b'P', b'N', b'G'] },
+    ];
+    let options = SaveOptions { extras: extras.clone(), ..Default::default() };
+    let sorted = |mut v: Vec<EmbeddedFile>| {
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        v
+    };
+    let doc = demo_document();
+    let archive = archive_at(&dir.path().join(format!("e.{PROJECT_EXTENSION}")));
+    let folder = folder_at(&dir.path().join("e"));
+    for location in [archive, folder.clone()] {
+        save_project(&doc, &location, &options).unwrap();
+        let loaded = load_project(&location.path).unwrap();
+        assert!(loaded.document.content_eq(&doc));
+        assert_eq!(sorted(loaded.extras), sorted(extras.clone()));
+    }
+    // A folder save without extras deletes the stale ones.
+    save_project(&doc, &folder, &SaveOptions::default()).unwrap();
+    assert!(load_project(&folder.path).unwrap().extras.is_empty());
+}
+
+#[test]
 fn p2_folder_loads_from_folder_and_project_json() {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("proj");
@@ -288,7 +316,7 @@ fn p6_backup_is_created_once() {
     let original = fs::read(v1_fixture()).unwrap();
     fs::write(&path, &original).unwrap();
     let backup = dir.path().join("old.labsetup.v1.bak");
-    let options = SaveOptions { backup_schema: Some(1) };
+    let options = SaveOptions { backup_schema: Some(1), ..Default::default() };
 
     let loaded = load_project(&path).unwrap();
     save_project(&loaded.document, &archive_at(&path), &options).unwrap();
@@ -530,6 +558,7 @@ fn default_root_and_settings_path_follow_the_environment() {
         display_unit: LengthUnit::Inch,
         wall_display: WallDisplay::Always,
         last_dir: Some(dir.path().into()),
+        ..Default::default()
     };
     save_settings(&wanted).unwrap();
     assert_eq!(load_settings(), wanted);
@@ -619,6 +648,7 @@ fn t1_corrupt_settings_are_renamed() {
         display_unit: LengthUnit::Inch,
         wall_display: WallDisplay::Hidden,
         last_dir: Some(PathBuf::from("C:/labs")),
+        ..Default::default()
     };
     save_settings_at(&path, &wanted).unwrap();
     assert_eq!(load_settings_at(&path), wanted);

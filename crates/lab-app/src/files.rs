@@ -242,7 +242,14 @@ pub fn initial_session(args: &[String], settings: &Settings) -> (Session, Option
     let demo = || Session::new_clean(demo_document(), None);
     let Some(path) = args.get(1) else { return (demo(), None) };
     match load_project(Path::new(path)) {
-        Ok(project) => (Session::from_loaded(project), None),
+        Ok(project) => {
+            // The app's catalog loads after this, so embedded parts are in it.
+            let (_, skipped) = crate::embed::unpack(&lab_catalog::Catalog::load_default().0, &project.extras);
+            if !skipped.is_empty() {
+                eprintln!("embedded parts skipped (local versions used): {skipped:?}");
+            }
+            (Session::from_loaded(project), None)
+        }
         Err(error) => (demo(), Some(error.to_string())),
     }
 }
@@ -325,10 +332,19 @@ fn on_loaded(
     let Some(path) = flow(|f| f.loads.remove(&ticket)) else { return };
     set_busy(ui, app, models, false, "");
     match result {
-        Ok(project) => {
+        Ok(mut project) => {
             let repairs = project.report.repairs.clone();
             remember_dir(app, &project.location);
+            let extras = std::mem::take(&mut project.extras);
+            let (added, skipped) = crate::embed::unpack(&app.borrow().catalog, &extras);
+            if added > 0 {
+                crate::library::reload_catalog(&mut app.borrow_mut(), models);
+            }
             start_over(ui, app, models, Session::from_loaded(project));
+            if !skipped.is_empty() {
+                let text = format!("{} parts in this file differ from your library; your versions are used.", skipped.len());
+                controller::show_toast(ui, &app.borrow(), &text, false);
+            }
             if !repairs.is_empty() {
                 let list = repairs.iter().map(|r| format!("• {r}")).collect::<Vec<_>>().join("\n");
                 show_message(
@@ -413,12 +429,35 @@ fn save_as(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, f
     });
 }
 
+/// Renders the 512×288 thumbnail first, then saves with the embedded parts (POLA-68).
 fn submit_save(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, location: ProjectLocation, then: AfterSave) {
+    set_busy(ui, app, models, true, "Saving…");
+    let thumb = std::env::temp_dir().join(format!("labsetup-thumb-{}.png", std::process::id()));
+    let (ui_weak, a, m, path) = (ui.as_weak(), app.clone(), models.clone(), thumb.clone());
+    let done = Box::new(move |ok: bool| {
+        let bytes = if ok { std::fs::read(&path).ok() } else { None };
+        let _ = std::fs::remove_file(&path);
+        if let Some(ui) = ui_weak.upgrade() {
+            submit_save_with(&ui, &a, &m, location, then, bytes);
+        }
+    });
+    crate::export_png::render_to(app, thumb, 512, 288, done);
+}
+
+fn submit_save_with(
+    ui: &AppWindow,
+    app: &Rc<RefCell<AppState>>,
+    models: &Rc<UiModels>,
+    location: ProjectLocation,
+    then: AfterSave,
+    thumbnail: Option<Vec<u8>>,
+) {
     let job = {
         let mut a = app.borrow_mut();
         let ticket = a.ticket();
         let state = a.session.history.state_id();
-        let options = SaveOptions { backup_schema: a.session.migrated_from };
+        let extras = crate::embed::collect(&a.session.doc, &a.catalog, thumbnail);
+        let options = SaveOptions { backup_schema: a.session.migrated_from, extras };
         a.pending_save = Some(PendingSave { ticket, state, location: location.clone(), then });
         IoJob::Save { ticket, doc: Box::new(a.session.doc.clone()), location, options }
     };
