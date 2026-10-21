@@ -1,6 +1,7 @@
 // No console window in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod actions;
 mod app_state;
 mod bom;
 mod bridge;
@@ -11,6 +12,7 @@ mod import;
 mod library;
 mod measure;
 mod overlay;
+mod palette;
 mod place;
 mod transform;
 mod stack;

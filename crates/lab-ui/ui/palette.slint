@@ -1,0 +1,130 @@
+// Command palette (Ctrl+K, POLA-65): a floating search over every app action.
+
+import { Theme } from "theme.slint";
+import { PaletteItem } from "types.slint";
+
+export component CommandPalette inherits Rectangle {
+    in property <bool> open;
+    in property <[PaletteItem]> items;
+    callback palette-query(string);
+    callback palette-run(string);
+    callback palette-close();
+
+    property <int> current: 0;
+
+    visible: root.open;
+    changed open => {
+        if (root.open) {
+            field.text = "";
+            root.current = 0;
+            root.palette-query("");
+            field.focus();
+        }
+    }
+
+    // A click outside the panel closes it.
+    TouchArea {
+        clicked => { root.palette-close(); }
+        scroll-event(event) => { accept }
+    }
+
+    panel := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height / 6;
+        width: 560px;
+        height: layout.preferred-height;
+        background: Theme.panel-bg;
+        border-radius: Theme.radius-control;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000066;
+
+        TouchArea { }   // keep clicks on the panel from closing it
+
+        layout := VerticalLayout {
+            padding: 8px;
+            spacing: 2px;
+
+            Rectangle {
+                height: 34px;
+                border-radius: Theme.radius-control;
+                background: Theme.control-bg;
+                field := TextInput {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    color: Theme.text;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                    single-line: true;
+                    edited => {
+                        root.current = 0;
+                        root.palette-query(self.text);
+                    }
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) { root.palette-close(); return accept; }
+                        if (event.text == Key.DownArrow) {
+                            root.current = Math.min(root.current + 1, Math.min(root.items.length, 10) - 1);
+                            return accept;
+                        }
+                        if (event.text == Key.UpArrow) { root.current = Math.max(root.current - 1, 0); return accept; }
+                        if (event.text == Key.Return && root.items.length > 0) {
+                            root.palette-run(root.items[root.current].id);
+                            return accept;
+                        }
+                        reject
+                    }
+                }
+                if field.text == "": Text {
+                    x: 10px;
+                    height: 100%;
+                    text: "Search actions…";
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                }
+            }
+
+            for item[i] in root.items: Rectangle {
+                visible: i < 10;
+                height: i < 10 ? 30px : 0px;
+                border-radius: Theme.radius-control;
+                background: i == root.current ? Theme.accent-soft : row-touch.has-hover ? Theme.control-hover : transparent;
+                row-touch := TouchArea {
+                    clicked => { root.palette-run(item.id); }
+                }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    Text {
+                        text: item.title;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: item.group;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: item.shortcut;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            if root.items.length == 0: Text {
+                height: 30px;
+                text: "No matching actions";
+                color: Theme.text-secondary;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
