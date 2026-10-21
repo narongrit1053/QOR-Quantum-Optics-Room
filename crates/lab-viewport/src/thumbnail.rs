@@ -28,6 +28,8 @@ const LAYER: usize = 7;
 const FOV: f32 = 0.5;
 /// Frames rendered after the part is ready before it is framed, and again before the capture.
 const SETTLE: u32 = 3;
+/// Frames to wait for a GLB scene before the part is skipped (a failed load never gets ready).
+const LOAD_TIMEOUT: u32 = 600;
 
 /// The thumbnail camera; the host leaves its render target alone.
 #[derive(Component)]
@@ -103,7 +105,19 @@ fn step(
     // Keep the on-demand loop running while thumbnails are pending.
     redraw.keep_alive |= thumbs.current.is_some() || !thumbs.queue.is_empty();
     let Some(job) = thumbs.current.as_mut() else { return };
-    if !job.ready || job.shot {
+    if !job.ready {
+        job.frames += 1;
+        if job.frames >= LOAD_TIMEOUT {
+            let job = thumbs.current.take().unwrap();
+            warn!("no thumbnail for {}: its GLB did not load", job.part);
+            for entity in job.entities {
+                commands.entity(entity).try_despawn();
+            }
+            events.send(ViewportEvent::ThumbnailReady { part: job.part, path: job.path, ok: false });
+        }
+        return;
+    }
+    if job.shot {
         return;
     }
     job.frames += 1;
@@ -218,6 +232,7 @@ fn glb_ready(
     }
     if let Some(job) = thumbs.current.as_mut() {
         job.ready = true;
+        job.frames = 0;
     }
 }
 
@@ -256,4 +271,18 @@ pub(crate) fn write_png(path: &Path, image: &Image) -> Result<(), String> {
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header().and_then(|mut w| w.write_image_data(&data)).map_err(|e| e.to_string())
+}
+
+/// Reads a thumbnail PNG written by [`write_png`] as `(width, height, RGBA8 pixels)`. The UI
+/// loads it from bytes because its path-keyed image cache would keep showing a stale render.
+pub fn read_thumbnail(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    let file = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let mut reader = png::Decoder::new(file).read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
+    buf.truncate(info.buffer_size());
+    Some((info.width, info.height, buf))
 }

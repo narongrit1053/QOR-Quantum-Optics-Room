@@ -55,7 +55,7 @@ fn send_overlay(
                 }
             };
             for p in doc.platforms.iter().filter(|p| shown(p.id)) {
-                let (lo, hi) = p.room_aabb();
+                let (lo, hi) = doc.platform_room_aabb(p.id).unwrap_or_else(|| p.room_aabb());
                 let z = hi.z;
                 let corner = |x: f64, y: f64| project(DVec3::new(x, y, z));
                 let (Some(tl), Some(tr), Some(bl), Some(br)) =

@@ -71,20 +71,29 @@ pub enum ImportError {
     Io(#[from] std::io::Error),
 }
 
-/// `LABSETUP_STEP2GLB`, else `<exe dir>/step2glb/step2glb.exe`, else
-/// `<CARGO_MANIFEST_DIR>/../../tools/step2glb/build/Release/step2glb.exe`.
+/// `LABSETUP_STEP2GLB`, else `step2glb.exe` next to the exe or in `<exe dir>/step2glb/`, else the
+/// repo's `tools/step2glb/build/Release/step2glb.exe`; in a git worktree (where the build dir is
+/// absent) the main checkout's copy.
 pub fn step2glb_path() -> PathBuf {
     if let Some(p) = std::env::var_os("LABSETUP_STEP2GLB") {
         return p.into();
     }
-    if let Some(p) = std::env::current_exe()
-        .ok()
-        .and_then(|e| Some(e.parent()?.join("step2glb").join("step2glb.exe")))
-        .filter(|p| p.is_file())
-    {
-        return p;
+    let rel = Path::new("tools/step2glb/build/Release/step2glb.exe");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let exe_dir = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.to_path_buf()));
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(d) = &exe_dir {
+        candidates.push(d.join("step2glb.exe"));
+        candidates.push(d.join("step2glb").join("step2glb.exe"));
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/step2glb/build/Release/step2glb.exe")
+    candidates.push(repo.join(rel));
+    // A worktree's `.git` is a file "gitdir: <main>/.git/worktrees/<name>".
+    if let Ok(git) = std::fs::read_to_string(repo.join(".git")) {
+        if let Some(main) = git.trim().strip_prefix("gitdir:").and_then(|g| Path::new(g.trim()).ancestors().nth(3)) {
+            candidates.push(main.join(rel));
+        }
+    }
+    candidates.into_iter().find(|p| p.is_file()).unwrap_or_else(|| repo.join(rel))
 }
 
 /// Blocking; call it off the UI thread. Runs step2glb in a temp dir (60 s timeout, kill on
@@ -171,17 +180,38 @@ pub fn read_glb(path: &Path, lod: usize) -> Result<Vec<([f32; 4], TriMesh)>, Imp
         .collect())
 }
 
-/// Writes `def` to `<library>/parts/imported/<id with ':' and '/' replaced by '_'>.toml`
+/// Writes `def` over the user-library file that already defines its id (anywhere under
+/// `<library>/parts/`), else to `<library>/parts/imported/<id with ':' and '/' replaced by '_'>.toml`
 /// (write to `.tmp`, then rename). Returns the path.
 pub fn write_part(library: &Path, def: &PartDef) -> std::io::Result<PathBuf> {
     let dir = library.join("parts").join("imported");
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.toml", def.id.replace([':', '/'], "_")));
+    let path = find_part_file(&library.join("parts"), &def.id)
+        .unwrap_or_else(|| dir.join(format!("{}.toml", def.id.replace([':', '/'], "_"))));
     let text = toml::to_string(def).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, text)?;
     std::fs::rename(&tmp, &path)?;
     Ok(path)
+}
+
+/// The `.toml` under `dir` (recursively) whose `id` is `id`.
+fn find_part_file(dir: &Path, id: &str) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_part_file(&path, id) {
+                return Some(found);
+            }
+        } else if path.extension().is_some_and(|e| e == "toml")
+            && let Ok(text) = std::fs::read_to_string(&path)
+            && let Ok(value) = text.parse::<toml::Table>()
+            && value.get("id").and_then(|v| v.as_str()) == Some(id)
+        {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn run_step2glb(exe: &Path, step: &Path, out: &Path, deflection: f64, up: SourceUp, tmp: &Path) -> Result<(), ImportError> {
@@ -361,6 +391,11 @@ mod tests {
         };
         let p = write_part(&lib.0, &def).unwrap();
         assert!(p.ends_with("parts/imported/thorlabs_FMMP1_M.toml"));
-        assert_eq!(toml::from_str::<PartDef>(&std::fs::read_to_string(p).unwrap()).unwrap(), def);
+        assert_eq!(toml::from_str::<PartDef>(&std::fs::read_to_string(&p).unwrap()).unwrap(), def);
+        // A part saved by hand elsewhere under parts/ is rewritten in place, not duplicated.
+        let own = lib.0.join("parts").join("mine.toml");
+        std::fs::rename(&p, &own).unwrap();
+        assert_eq!(write_part(&lib.0, &def).unwrap(), own);
+        assert!(!p.exists());
     }
 }

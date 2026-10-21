@@ -12,7 +12,7 @@ import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, Do
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
-import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } from "overlays.slint";
+import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay } from "overlays.slint";
 import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
 import { Icon } from "icons.slint";
@@ -295,6 +295,9 @@ export component AppWindow inherits Window {
     callback library-drag(string /* part id */, int, length, length);
     // POLA-60: right-click on a library part ("Edit connectors…" for user-library parts).
     callback library-edit(string /* part id */);
+    property <string> library-menu-part;
+    property <length> library-menu-x;
+    property <length> library-menu-y;
 
     // POLA-60 connector wizard (state in lab-app/src/wizard.rs).
     in property <bool> wizard-open;
@@ -809,7 +812,10 @@ export component AppWindow inherits Window {
                                     }
                                     pointer-event(event) => {
                                         if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
-                                            root.library-edit(item.id);
+                                            root.library-menu-part = item.id;
+                                            root.library-menu-x = self.absolute-position.x + self.mouse-x;
+                                            root.library-menu-y = self.absolute-position.y + self.mouse-y;
+                                            part-menu.show();
                                         } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
                                             root.library-drag(item.id, 1, self.absolute-position.x + self.mouse-x,
                                                 self.absolute-position.y + self.mouse-y);
@@ -1005,13 +1011,20 @@ export component AppWindow inherits Window {
             }
         }
 
+        // POLA-60: one right-click menu for every library row (popups cannot be repeated).
+        part-menu := PartMenu {
+            x: root.library-menu-x;
+            y: root.library-menu-y;
+            edit-connectors => { root.library-edit(root.library-menu-part); }
+        }
+
         // ── View switcher and units (top centre) ─────────────────────────────
         // Centred on the 3D/Top/Split control alone, so Blueprint and Labels appearing in Top do
         // not shift it.
         HorizontalLayout {
             x: min(
                 sidebar.x + sidebar.width + (root.width - sidebar.x - sidebar.width - view-switch.preferred-width) / 2,
-                (inspector-panel.shown ? inspector-panel.x : root.width) - self.preferred-width - Theme.inset);
+                (root.wizard-open ? wizard-panel.x : inspector-panel.shown ? inspector-panel.x : root.width) - self.preferred-width - Theme.inset);
             y: Theme.inset;
             width: self.preferred-width;
             height: self.preferred-height;

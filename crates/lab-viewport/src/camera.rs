@@ -500,7 +500,7 @@ fn render_box(lo: DVec3, hi: DVec3) -> (Vec3, Vec3) {
 }
 
 fn platform_box(doc: &Document, id: lab_core::PlatformId) -> Option<(Vec3, Vec3)> {
-    let (lo, hi) = doc.platform(id)?.room_aabb();
+    let (lo, hi) = doc.platform_room_aabb(id)?;
     Some(render_box(lo, hi))
 }
 

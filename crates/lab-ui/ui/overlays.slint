@@ -541,3 +541,28 @@ export component ViewportOverlay inherits Rectangle {
         }
     }
 }
+
+// POLA-60: right-click menu of a library part.
+export component PartMenu inherits PopupWindow {
+    callback edit-connectors();
+
+    width: 200px;
+
+    Rectangle {
+        background: Theme.sheet-bg;
+        border-radius: 10px;
+        border-width: Theme.border-width;
+        border-color: Theme.panel-border;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow;
+
+        VerticalLayout {
+            padding: 5px;
+            MenuRow {
+                label: "Edit connectors…";
+                clicked => { root.edit-connectors(); }
+            }
+        }
+    }
+}

@@ -172,6 +172,19 @@ impl Document {
         Some((origin, rotation))
     }
 
+    /// Room-space bounding box of a platform, with stacked platforms at their composed pose.
+    pub fn platform_room_aabb(&self, id: PlatformId) -> Option<(DVec3, DVec3)> {
+        let p = self.platform(id)?;
+        if !matches!(p.support, Support::OnPlatform { .. }) {
+            return Some(p.room_aabb());
+        }
+        let (origin, rotation) = self.platform_pose(id)?;
+        let points: Vec<DVec2> =
+            p.outline.corners().iter().map(|c| origin.truncate() + DVec2::from_angle(rotation).rotate(c.point)).collect();
+        let (lo, hi) = lab_geom::bounds(&points);
+        Some((lo.extend(origin.z - p.thickness), hi.extend(origin.z)))
+    }
+
     /// Whether any node, platform or opening uses `raw` as its id.
     pub fn contains_id(&self, raw: u64) -> bool {
         self.nodes.iter().any(|n| n.id.0 == raw)
@@ -360,8 +373,7 @@ impl Platform {
         let (lo, hi) = lab_geom::bounds(&points);
         let bottom = match self.support {
             Support::Legs { .. } | Support::Isolators { .. } => 0.0,
-            // shortcut: an OnPlatform box uses its own fields, not the composed pose; switch to
-            // Document::platform_pose when stacked platforms need exact bounds.
+            // An OnPlatform box from its own fields; Document::platform_room_aabb composes the pose.
             Support::Fixed | Support::OnPlatform { .. } => self.top_height - self.thickness,
         };
         (lo.extend(bottom), hi.extend(self.top_height))

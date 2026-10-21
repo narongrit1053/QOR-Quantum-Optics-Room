@@ -1134,6 +1134,11 @@ mod tests {
         let expected = table.position.extend(table.top_height) + DVec3::new(100.0, 0.0, 100.0 + bb.thickness);
         assert!(origin.distance(expected) < 1e-9, "{origin}");
         assert_eq!(rotation, table.rotation_z);
+        let (lo, hi) = doc.platform_room_aabb(bb_id).unwrap();
+        assert!((hi.z - origin.z).abs() < 1e-9 && (lo.z - (origin.z - bb.thickness)).abs() < 1e-9);
+        let centre = (lo.truncate() + hi.truncate()) / 2.0;
+        let bb_centre = (bb.outline.bounds().0 + bb.outline.bounds().1) / 2.0;
+        assert!(centre.distance(origin.truncate() + DVec2::from_angle(rotation).rotate(bb_centre)) < 1e-6);
         assert_rejected(&doc, Command::RemovePlatform(table.id), |e| *e == CommandError::PlatformHasChildren(table.id));
         let mut looped = table.clone();
         looped.support = Support::OnPlatform { parent: bb_id, standoff: 10.0 };
