@@ -428,6 +428,11 @@ export component ProjectMenu inherits PopupWindow {
                 enabled: !root.busy;
                 clicked => { root.action("file.save_folder"); }
             }
+            MenuRow {
+                label: "Export BOM (CSV)…";
+                enabled: !root.busy;
+                clicked => { root.action("file.export_bom"); }
+            }
         }
     }
 }
