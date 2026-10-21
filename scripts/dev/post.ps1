@@ -23,6 +23,7 @@ function Send([uint32]$m, [int]$w, [IntPtr]$l) { [P]::PostMessage($h, $m, [IntPt
 $MOVE = 0x200; $LDOWN = 0x201; $LUP = 0x202; $WHEEL = 0x20A
 switch ($Action) {
   'click' { Send $MOVE 0 (L $X $Y); Send $LDOWN 1 (L $X $Y); Send $LUP 0 (L $X $Y) }
+  'rclick' { Send $MOVE 0 (L $X $Y); Send 0x204 2 (L $X $Y); Send 0x205 0 (L $X $Y) }
   'hover' { Send $MOVE 0 (L $X $Y) }
   'drag'  {
     Send $MOVE 0 (L $X $Y); Send $LDOWN 1 (L $X $Y)

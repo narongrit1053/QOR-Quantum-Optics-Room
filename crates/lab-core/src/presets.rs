@@ -195,10 +195,10 @@ fn free_position(doc: &Document, p: &Platform) -> DVec2 {
     let centre = (lo + hi) / 2.0;
     let centre = if centre.is_finite() { centre } else { DVec2::ZERO };
     let at_centre = Platform { position: centre, ..p.clone() }.room_aabb();
-    if doc.platforms.iter().all(|q| plan_gap(at_centre, q.room_aabb()) >= PLACEMENT_GAP) {
+    if doc.platforms.iter().all(|q| plan_gap(at_centre, doc.platform_room_aabb(q.id).unwrap_or_else(|| q.room_aabb())) >= PLACEMENT_GAP) {
         return centre;
     }
-    let right = doc.platforms.iter().map(|q| q.room_aabb().1.x).fold(f64::NEG_INFINITY, f64::max);
+    let right = doc.platforms.iter().map(|q| doc.platform_room_aabb(q.id).unwrap_or_else(|| q.room_aabb()).1.x).fold(f64::NEG_INFINITY, f64::max);
     let (local_lo, _) = p.outline.bounds();
     DVec2::new(right + PLACEMENT_GAP - local_lo.x, 0.0)
 }

@@ -83,7 +83,7 @@ pub(crate) fn placement(
             let local = DQuat::from_rotation_z(-angle) * (point - origin);
             let platform = doc.platform(pid)?;
             let snapped = (!free)
-                .then(|| compute_holes(platform).ok())
+                .then(|| platform_holes(platform))
                 .flatten()
                 .and_then(|holes| lab_mates::snap(&holes, local.truncate(), holes.pitch.max_element()));
             let (attach, at) = match snapped {
@@ -101,6 +101,25 @@ pub(crate) fn placement(
             Some((request, (position, rotation)))
         }
     }
+}
+
+thread_local! {
+    /// The holes of the last platform dragged over; recomputed only when that platform changes.
+    static HOLES: std::cell::RefCell<Option<(lab_core::Platform, std::rc::Rc<lab_core::HoleSet>)>> = Default::default();
+}
+
+fn platform_holes(platform: &lab_core::Platform) -> Option<std::rc::Rc<lab_core::HoleSet>> {
+    HOLES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((p, holes)) = &*cache
+            && p == platform
+        {
+            return Some(holes.clone());
+        }
+        let holes = std::rc::Rc::new(compute_holes(platform).ok()?);
+        *cache = Some((platform.clone(), holes.clone()));
+        Some(holes)
+    })
 }
 
 /// Mates `def` to the connector of node `id` nearest to `point` that has a compatible partner.
@@ -128,12 +147,26 @@ fn mate_on_node(
     })?;
     let (child, parent) = (&def.connectors[ci], &parent_def.connectors[pi]);
     let (lo, hi) = lab_mates::slide_range(&parent.kind);
-    let slide = 0.0f64.clamp(lo, hi);
-    let (position, rotation) = lab_mates::mate_pose(&parent.frame, &child.frame, slide, 0.0);
+    // Slide: the pointer's position along the slide axis (pose is linear in slide), clamped.
+    let p0 = lab_mates::mate_pose(&parent.frame, &child.frame, 0.0, 0.0).0;
+    let axis = lab_mates::mate_pose(&parent.frame, &child.frame, 1.0, 0.0).0 - p0;
+    let along = if axis.length_squared() > 1e-12 { (local - p0).dot(axis) / axis.length_squared() } else { 0.0 };
+    let slide = along.clamp(lo, hi);
+    // Twist: keep the yaw the part had while dragged over the platform (its X along the
+    // platform's X), the nearest whole degree.
+    let want = turn * DVec3::X;
+    let twist = (0..360)
+        .map(|d| (d as f64).to_radians())
+        .min_by(|a, b| {
+            let fit = |t: &f64| (room_rot * lab_mates::mate_pose(&parent.frame, &child.frame, slide, *t).1 * DVec3::X).dot(want);
+            fit(b).total_cmp(&fit(a))
+        })
+        .unwrap_or(0.0);
+    let (position, rotation) = lab_mates::mate_pose(&parent.frame, &child.frame, slide, twist);
     let request = PlaceRequest {
         item: item.clone(),
         parent: Parent::Node(id),
-        attach: Attach::Mate { self_conn: child.name.clone(), parent_conn: parent.name.clone(), slide, twist: 0.0 },
+        attach: Attach::Mate { self_conn: child.name.clone(), parent_conn: parent.name.clone(), slide, twist },
         position,
         rotation,
     };
