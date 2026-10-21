@@ -68,7 +68,7 @@ export component NumberField inherits Rectangle {
     height: max(26px, root.font-size + 13px);
     border-radius: Theme.radius-field;
     background: root.plain && !input.has-focus ? transparent : Theme.field-bg;
-    border-width: 1px;
+    border-width: Theme.border-width;
     border-color: root.invalid || root.local-invalid ? Theme.danger
         : input.has-focus ? Theme.accent
         : root.plain ? transparent : Theme.field-border;
@@ -491,8 +491,8 @@ component Cell inherits HorizontalLayout {
 // A card holding one zone or door.
 component RowCard inherits Rectangle {
     border-radius: 8px;
-    background: #FFFFFF06;
-    border-width: 1px;
+    background: Theme.subtle-bg;
+    border-width: Theme.border-width;
     border-color: Theme.hairline;
 }
 
@@ -654,7 +654,7 @@ export component DoorList inherits VerticalLayout {
                     horizontal-stretch: 1;
                     border-radius: Theme.radius-field;
                     background: wall-touch.has-hover ? Theme.control-hover : Theme.field-bg;
-                    border-width: 1px;
+                    border-width: Theme.border-width;
                     border-color: Theme.field-border;
                     HorizontalLayout {
                         padding-left: 8px;
@@ -684,9 +684,9 @@ export component DoorList inherits VerticalLayout {
                         y: parent.height + 2px;
                         width: parent.width;
                         Rectangle {
-                            background: #232428;
+                            background: Theme.sheet-bg;
                             border-radius: Theme.radius-control;
-                            border-width: 1px;
+                            border-width: Theme.border-width;
                             border-color: Theme.panel-border;
                             drop-shadow-blur: 18px;
                             drop-shadow-offset-y: 6px;

@@ -7,6 +7,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
+import "../../../library/fonts/Inter-VariableFont.ttf";
 import { SceneRow, LibraryRow, InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus } from "fields.slint";
@@ -14,6 +15,7 @@ import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, ViewportOverlay } from "overlays.slint";
 import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
+import { Icon } from "icons.slint";
 import { WizardPanel } from "wizard.slint";
 
 export { Theme }
@@ -465,7 +467,7 @@ export component AppWindow inherits Window {
                 x: parent.width / 2;
                 width: 1phx;
                 height: 100%;
-                background: #FFFFFF40;
+                background: Theme.scroll-thumb;
             }
 
             if root.viewport-preparing: Text {
@@ -633,12 +635,25 @@ export component AppWindow inherits Window {
                                 }
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            Text {
-                                text: "⌄";
-                                color: Theme.text-tertiary;
-                                font-family: Theme.font-symbol;
-                                font-size: Theme.font-body;
-                                vertical-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                Icon { name: "chevron-down"; tint: Theme.text-tertiary; }
+                            }
+                            // Cycles Dark, Light, High contrast.
+                            VerticalLayout {
+                                alignment: center;
+                                theme-button := Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    border-radius: Theme.radius-control;
+                                    background: theme-touch.has-hover ? Theme.control-hover : transparent;
+                                    accessible-role: button;
+                                    accessible-label: "Change theme";
+                                    Icon { name: "theme"; tint: Theme.text-secondary; }
+                                    theme-touch := TouchArea {
+                                        clicked => { root.action(Theme.mode == 0 ? "view.theme.light" : Theme.mode == 1 ? "view.theme.contrast" : "view.theme.dark"); }
+                                    }
+                                }
                             }
                         }
                         Text {
@@ -1003,7 +1018,7 @@ export component AppWindow inherits Window {
             height: 42px;
             border-radius: 21px;
             background: Theme.panel-bg;
-            border-width: 1px;
+            border-width: Theme.border-width;
             border-color: Theme.panel-border;
             drop-shadow-blur: 24px;
             drop-shadow-offset-y: 8px;
@@ -1084,7 +1099,7 @@ export component AppWindow inherits Window {
             width: status-row.preferred-width;
             border-radius: 13px;
             background: Theme.panel-bg;
-            border-width: 1px;
+            border-width: Theme.border-width;
             border-color: Theme.panel-border;
             animate y { duration: Theme.smooth; easing: cubic-bezier(0.2, 0.9, 0.25, 1.0); }
 
@@ -1129,7 +1144,7 @@ export component AppWindow inherits Window {
             width: measure-row.preferred-width;
             border-radius: 13px;
             background: Theme.panel-bg;
-            border-width: 1px;
+            border-width: Theme.border-width;
             border-color: Theme.panel-border;
             measure-row := HorizontalLayout {
                 padding-left: 12px;

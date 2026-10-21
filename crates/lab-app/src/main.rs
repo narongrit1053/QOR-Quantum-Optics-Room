@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let io = IoWorker::start(autosave.ok(), bridge::io_result_sink());
 
     let ui = AppWindow::new()?;
+    ui.global::<lab_ui::Theme>().set_mode(theme_index(settings.theme));
     let models = UiModels::install(&ui);
     let wall_display = settings.wall_display;
     let mut state = AppState::new(session, settings);
@@ -115,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return;
                 };
                 #[cfg(windows)]
-                style_title_bar(ui.window());
+                style_title_bar(ui.window(), ui.global::<lab_ui::Theme>().get_mode());
                 let snapshot = a.borrow().session.doc.clone();
                 // Automatic unless overridden (until there is a preferences UI).
                 let quality = match std::env::var("LABSETUP_QUALITY").as_deref() {
@@ -187,6 +188,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn theme_index(mode: lab_core::ThemeMode) -> i32 {
+    match mode {
+        lab_core::ThemeMode::Dark => 0,
+        lab_core::ThemeMode::Light => 1,
+        lab_core::ThemeMode::HighContrast => 2,
+    }
+}
+
+/// Switches the UI chrome and the native title bar to `mode`; the caller saves the setting.
+fn apply_theme(ui: &AppWindow, mode: lab_core::ThemeMode) {
+    ui.global::<lab_ui::Theme>().set_mode(theme_index(mode));
+    #[cfg(windows)]
+    style_title_bar(ui.window(), theme_index(mode));
+}
+
 /// Makes the native title bar blend into the app: dark mode plus an explicit caption colour
 /// equal to the window background. The explicit colour also wins over the "show accent colour
 /// on title bars" setting. Windows 10 ignores the colour attributes and keeps dark mode only.
@@ -194,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// (A Mica backdrop was tried here but cannot show: the client area is fully covered by the
 /// opaque 3D viewport, and an explicit caption colour replaces Mica in the title bar.)
 #[cfg(windows)]
-fn style_title_bar(window: &slint::Window) {
+fn style_title_bar(window: &slint::Window, mode: i32) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -210,9 +226,12 @@ fn style_title_bar(window: &slint::Window) {
     let Ok(handle) = handle.window_handle() else { return };
     let RawWindowHandle::Win32(win32) = handle.as_raw() else { return };
     let hwnd = win32.hwnd.get() as windows_sys::Win32::Foundation::HWND;
-    let dark: i32 = 1;
-    let caption = colorref(0x0B, 0x0C, 0x0E); // Theme.window-bg
-    let text = colorref(0xA1, 0xA1, 0xA6); // Theme.text-secondary
+    // Mirrors Theme.window-bg and Theme.text-secondary for each mode (0 dark, 1 light, 2 contrast).
+    let (dark, caption, text): (i32, u32, u32) = match mode {
+        1 => (0, colorref(0xF5, 0xF5, 0xF7), colorref(0x6E, 0x6E, 0x73)),
+        2 => (1, colorref(0, 0, 0), colorref(0xFF, 0xFF, 0xFF)),
+        _ => (1, colorref(0x0B, 0x0C, 0x0E), colorref(0xA1, 0xA1, 0xA6)),
+    };
     // SAFETY: `hwnd` is the live window handle; each attribute value is a 4-byte integer.
     unsafe {
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE as _, (&raw const dark).cast(), 4);

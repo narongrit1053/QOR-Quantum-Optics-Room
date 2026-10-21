@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lab_core::{LengthUnit, WallDisplay};
+use lab_core::{LengthUnit, ThemeMode, WallDisplay};
 use serde::{Deserialize, Serialize};
 
 use crate::FileError;
@@ -17,6 +17,8 @@ pub struct Settings {
     pub wall_display: WallDisplay,
     #[serde(default)]
     pub last_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub theme: ThemeMode,
 }
 
 /// `$LABSETUP_SETTINGS`, else `%APPDATA%\LabSetup\settings.json`, else the temp dir.

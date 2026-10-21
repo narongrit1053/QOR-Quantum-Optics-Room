@@ -17,7 +17,7 @@ export component Sheet inherits Rectangle {
     in property <int> destructive: -1;
     callback button(int);
 
-    background: root.open ? #00000073 : #00000000;
+    background: root.open ? Theme.scrim : transparent;
     animate background { duration: 200ms; easing: ease-out; }
 
     // Swallow every pointer event while open.
@@ -66,13 +66,13 @@ export component Sheet inherits Rectangle {
         opacity: root.open ? 1 : 0;
         animate opacity { duration: 200ms; }
         visible: self.opacity > 0;
-        background: #232428;
+        background: Theme.sheet-bg;
         border-radius: Theme.radius-panel;
-        border-width: 1px;
+        border-width: Theme.border-width;
         border-color: Theme.panel-border;
         drop-shadow-blur: 40px;
         drop-shadow-offset-y: 16px;
-        drop-shadow-color: #000000A0;
+        drop-shadow-color: Theme.shadow-strong;
 
         card-layout := VerticalLayout {
             padding: 20px;
@@ -118,7 +118,7 @@ export component PasteSheet inherits Rectangle {
     property <bool> open: root.target != "";
     property <string> error;
 
-    background: root.open ? #00000073 : #00000000;
+    background: root.open ? Theme.scrim : transparent;
     animate background { duration: 200ms; easing: ease-out; }
 
     function do-apply() {
@@ -166,13 +166,13 @@ export component PasteSheet inherits Rectangle {
             opacity: root.open ? 1 : 0;
             animate opacity { duration: 200ms; }
             visible: self.opacity > 0;
-            background: #232428;
+            background: Theme.sheet-bg;
             border-radius: Theme.radius-panel;
-            border-width: 1px;
+            border-width: Theme.border-width;
             border-color: Theme.panel-border;
             drop-shadow-blur: 40px;
             drop-shadow-offset-y: 16px;
-            drop-shadow-color: #000000A0;
+            drop-shadow-color: Theme.shadow-strong;
 
             card-layout := VerticalLayout {
                 padding: 20px;
@@ -193,7 +193,7 @@ export component PasteSheet inherits Rectangle {
                     height: 200px;
                     border-radius: Theme.radius-field;
                     background: Theme.field-bg;
-                    border-width: 1px;
+                    border-width: Theme.border-width;
                     border-color: area.has-focus ? Theme.accent : root.error != "" ? Theme.danger : Theme.field-border;
                     clip: true;
                     area := TextInput {
@@ -273,8 +273,8 @@ export component Toast inherits Rectangle {
     height: 36px;
     width: row.preferred-width;
     border-radius: 18px;
-    background: #2C2D31F2;
-    border-width: 1px;
+    background: Theme.menu-bg;
+    border-width: Theme.border-width;
     border-color: Theme.panel-border;
     drop-shadow-blur: 24px;
     drop-shadow-offset-y: 8px;
@@ -345,14 +345,14 @@ component MenuRow inherits Rectangle {
             }
             if root.detail != "": Text {
                 text: root.detail;
-                color: touch.has-hover && root.enabled ? #FFFFFFB3 : Theme.text-tertiary;
+                color: touch.has-hover && root.enabled ? Theme.on-accent-dim : Theme.text-tertiary;
                 font-size: Theme.font-caption;
                 overflow: elide;
             }
         }
         if root.shortcut != "": Text {
             text: root.shortcut;
-            color: touch.has-hover && root.enabled ? #FFFFFFB3 : Theme.text-tertiary;
+            color: touch.has-hover && root.enabled ? Theme.on-accent-dim : Theme.text-tertiary;
             font-size: Theme.font-caption;
             vertical-alignment: center;
         }
@@ -382,9 +382,9 @@ export component ProjectMenu inherits PopupWindow {
     width: 250px;
 
     Rectangle {
-        background: #232428;
+        background: Theme.sheet-bg;
         border-radius: 10px;
-        border-width: 1px;
+        border-width: Theme.border-width;
         border-color: Theme.panel-border;
         drop-shadow-blur: 24px;
         drop-shadow-offset-y: 8px;
@@ -443,9 +443,9 @@ export component PresetMenu inherits PopupWindow {
     height: min(440px, list.preferred-height + 2px);
 
     Rectangle {
-        background: #232428;
+        background: Theme.sheet-bg;
         border-radius: 10px;
-        border-width: 1px;
+        border-width: Theme.border-width;
         border-color: Theme.panel-border;
         drop-shadow-blur: 24px;
         drop-shadow-offset-y: 8px;
@@ -509,7 +509,7 @@ export component ViewportOverlay inherits Rectangle {
             y: d.y - self.height / 2;
             width: dim-text.preferred-width + 8px;
             height: dim-text.preferred-height + 2px;
-            background: #16181CCC;
+            background: Theme.overlay-bg;
             dim-text := Text {
                 text: d.text;
                 color: Theme.text-secondary;
@@ -523,7 +523,7 @@ export component ViewportOverlay inherits Rectangle {
         width: label-text.preferred-width + 12px;
         height: label-text.preferred-height + 4px;
         border-radius: self.height / 2;
-        background: #1C1C1ECC;
+        background: Theme.overlay-bg-2;
         label-text := Text {
             text: l.text;
             color: Theme.text;

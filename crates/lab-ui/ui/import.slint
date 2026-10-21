@@ -37,7 +37,7 @@ export component ImportDialog inherits Rectangle {
     callback define-connectors(string);
 
     visible: root.step != 0;
-    background: #00000073;
+    background: Theme.scrim;
 
     TouchArea {
         scroll-event(event) => { accept }
@@ -64,10 +64,10 @@ export component ImportDialog inherits Rectangle {
         height: layout.preferred-height;
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2 - 40px;
-        background: #232428;
+        background: Theme.sheet-bg;
         border-radius: Theme.radius-panel;
-        border-width: 1px;
-        border-color: #ffffff1a;
+        border-width: Theme.border-width;
+        border-color: Theme.sheet-border;
 
         layout := VerticalLayout {
             padding: 20px;

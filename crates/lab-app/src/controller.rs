@@ -336,6 +336,22 @@ fn on_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
                 app.send(ViewportRequest::Isolate(platform));
             }
         }
+        "view.theme.dark" | "view.theme.light" | "view.theme.contrast" => {
+            let mode = match id {
+                "view.theme.light" => lab_core::ThemeMode::Light,
+                "view.theme.contrast" => lab_core::ThemeMode::HighContrast,
+                _ => lab_core::ThemeMode::Dark,
+            };
+            crate::apply_theme(ui, mode);
+            let settings = {
+                let mut a = app.borrow_mut();
+                a.settings.theme = mode;
+                a.settings.clone()
+            };
+            if let Err(error) = lab_file::save_settings(&settings) {
+                eprintln!("settings not saved: {error}");
+            }
+        }
         "view.show_all" => app.borrow().send(ViewportRequest::Isolate(None)),
         "view.top" | "view.3d" => {
             let top = id == "view.top";

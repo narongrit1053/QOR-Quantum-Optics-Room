@@ -1,46 +1,62 @@
 // Design tokens. Dark is the default: labs are dim, and a dark UI keeps attention on the scene.
-// Spacing follows an 8-pt grid; radii are 14px for panels and 8px for controls.
+// Spacing follows an 8-pt grid; radii are 10px for panels and 6px for controls.
+// Every colour has three values (dark | light | high contrast); no .slint file outside this one
+// may contain a colour literal.
 
 export global Theme {
-    // Surfaces
-    out property <color> window-bg: #0B0C0E;
+    // 0 dark (default), 1 light, 2 high contrast. Set at start and by the view.theme.* actions.
+    in-out property <int> mode: 0;
+
+    // The viewport keeps its studio look in every mode.
     out property <brush> viewport-bg: @radial-gradient(circle, #2A2D33 0%, #16181C 55%, #0B0C0E 100%);
-    out property <color> panel-bg: #18191CE6;
-    out property <color> panel-border: #FFFFFF14;
-    out property <color> control-bg: #FFFFFF0F;
-    out property <color> control-hover: #FFFFFF14;
-    out property <color> control-thumb: #3A3B40;
-    out property <color> hairline: #FFFFFF12;
-    out property <color> shadow: #00000080;
 
-    // Text
-    out property <color> text: #F5F5F7;
-    out property <color> text-secondary: #A1A1A6;
-    out property <color> text-tertiary: #6E6E73;
+    out property <color> window-bg: mode == 1 ? #F5F5F7 : mode == 2 ? #000000 : #0B0C0E;
+    out property <color> panel-bg: mode == 1 ? #FFFFFFE6 : mode == 2 ? #000000 : #18191CE6;
+    out property <color> panel-border: mode == 1 ? #0000001A : mode == 2 ? #FFFFFF : #FFFFFF14;
+    out property <color> control-bg: mode == 1 ? #0000000A : mode == 2 ? #1A1A1A : #FFFFFF0F;
+    out property <color> control-hover: mode == 1 ? #00000012 : mode == 2 ? #333333 : #FFFFFF14;
+    out property <color> control-thumb: mode == 1 ? #D1D1D6 : mode == 2 ? #FFFFFF : #3A3B40;
+    out property <color> hairline: mode == 1 ? #0000001A : mode == 2 ? #FFFFFF : #FFFFFF12;
+    out property <color> shadow: mode == 1 ? #00000033 : mode == 2 ? #000000 : #00000080;
+    out property <color> text: mode == 1 ? #1D1D1F : mode == 2 ? #FFFFFF : #F5F5F7;
+    out property <color> text-secondary: mode == 1 ? #6E6E73 : mode == 2 ? #FFFFFF : #A1A1A6;
+    out property <color> text-tertiary: mode == 1 ? #AEAEB2 : mode == 2 ? #D9D9D9 : #6E6E73;
+    out property <color> accent: mode == 1 ? #0A84FF : mode == 2 ? #FFD60A : #0A84FF;
+    out property <color> accent-soft: mode == 1 ? #0A84FF33 : mode == 2 ? #FFD60A4D : #0A84FF33;
+    out property <color> ok: mode == 1 ? #248A3D : mode == 2 ? #30D158 : #30D158;
+    out property <color> beam: mode == 1 ? #D70015 : mode == 2 ? #FF6482 : #FF375F;
+    out property <color> danger: mode == 1 ? #D70015 : mode == 2 ? #FF6961 : #FF453A;
+    out property <color> danger-soft: mode == 1 ? #D7001526 : mode == 2 ? #FF69614D : #FF453A26;
+    out property <color> warning: mode == 1 ? #B25000 : mode == 2 ? #FFD60A : #FFD60A;
+    out property <color> field-bg: mode == 1 ? #0000000A : mode == 2 ? #000000 : #FFFFFF0D;
+    out property <color> field-border: mode == 1 ? #00000026 : mode == 2 ? #FFFFFF : #FFFFFF1F;
+    out property <color> scrim: mode == 1 ? #00000040 : mode == 2 ? #000000CC : #00000073;
+    out property <color> sheet-bg: mode == 1 ? #FFFFFF : mode == 2 ? #000000 : #232428;
+    out property <color> menu-bg: mode == 1 ? #FFFFFFF2 : mode == 2 ? #000000 : #2C2D31F2;
+    out property <color> overlay-bg: mode == 1 ? #FFFFFFCC : mode == 2 ? #000000 : #16181CCC;
+    out property <color> overlay-bg-2: mode == 1 ? #F5F5F7CC : mode == 2 ? #000000 : #1C1C1ECC;
+    out property <color> shadow-strong: mode == 1 ? #00000040 : mode == 2 ? #000000 : #000000A0;
+    out property <color> drop-shadow: mode == 1 ? #00000026 : mode == 2 ? #000000 : #00000059;
+    out property <color> on-accent-dim: mode == 1 ? #FFFFFFD9 : mode == 2 ? #000000 : #FFFFFFB3;
+    out property <color> scroll-thumb: mode == 1 ? #00000040 : mode == 2 ? #FFFFFF : #FFFFFF40;
+    out property <color> subtle-bg: mode == 1 ? #00000005 : mode == 2 ? #000000 : #FFFFFF06;
+    out property <color> subtle-bg-1: mode == 1 ? #00000008 : mode == 2 ? #000000 : #FFFFFF08;
+    out property <color> subtle-bg-2: mode == 1 ? #0000000A : mode == 2 ? #0D0D0D : #FFFFFF0A;
+    out property <color> chip-bg: mode == 1 ? #E5E5EA : mode == 2 ? #262626 : #2C2D31;
+    out property <color> sheet-border: mode == 1 ? #00000026 : mode == 2 ? #FFFFFF : #FFFFFF1A;
 
-    // Accent and status
-    out property <color> accent: #0A84FF;
-    out property <color> accent-soft: #0A84FF33;
-    out property <color> ok: #30D158;
-    out property <color> beam: #FF375F;
-    out property <color> danger: #FF453A;
-    out property <color> danger-soft: #FF453A26;
-    out property <color> warning: #FFD60A;
-
-    // Fields
-    out property <color> field-bg: #FFFFFF0D;
-    out property <color> field-border: #FFFFFF1F;
-
-    // Geometry
-    out property <length> radius-panel: 14px;
-    out property <length> radius-control: 8px;
-    out property <length> gap: 8px;
-    out property <length> inset: 12px;
-    out property <length> inspector-width: 300px;
+    // Geometry (8-pt grid)
+    out property <length> radius-panel: 10px;
+    out property <length> radius-control: 6px;
     out property <length> radius-field: 6px;
+    out property <length> gap: 8px;
+    out property <length> inset: 16px;
+    out property <length> inspector-width: 300px;
+    out property <length> border-width: mode == 2 ? 2px : 1px;
+    out property <length> icon-size: 16px;
 
     // Type
-    out property <string> font: "Segoe UI Variable Text";
+    out property <string> font: "Inter";
     out property <string> font-symbol: "Segoe UI Symbol";
     out property <length> font-body: 13px;
     out property <length> font-caption: 11px;
