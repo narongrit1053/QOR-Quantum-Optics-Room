@@ -292,13 +292,22 @@ pub fn close_sheet(ui: &AppWindow, app: &mut AppState) {
 fn on_field_committed(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str, text: &str) -> bool {
     let outcome = {
         let a = app.borrow();
-        if id.starts_with("node.") {
+        if let Some((node, field)) = set_field(id) {
+            let cx = EditContext { selection: Some(SelectionTarget::Node(node)), ..context(&a) };
+            edit::node_field_edit(&cx, &a.catalog, field, text)
+        } else if id.starts_with("node.") {
             edit::node_field_edit(&context(&a), &a.catalog, id, text)
         } else {
             edit::field_edit(&context(&a), id, text)
         }
     };
     apply_outcome(ui, app, models, id, outcome)
+}
+
+/// `set.<node id>:<node field>` (a Set row field) → (node, field).
+fn set_field(id: &str) -> Option<(NodeId, &str)> {
+    let (node, field) = id.strip_prefix("set.")?.split_once(':')?;
+    Some((NodeId(node.parse().ok()?), field))
 }
 
 fn on_choice_selected(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str, index: i32) {
@@ -372,6 +381,18 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             app.borrow().send(ViewportRequest::SetViewMode(ViewMode::Split));
         }
         "palette.open" => ui.set_palette_open(true),
+        "set.select_root" => {
+            let root = match app.borrow().session.selection {
+                Some(SelectionTarget::Node(id)) => lab_app::set_root(&app.borrow().session.doc, id),
+                _ => return,
+            };
+            select(ui, app, models, Some(SelectionTarget::Node(root)));
+        }
+        id if id.starts_with("set.select.") => {
+            if let Ok(n) = id["set.select.".len()..].parse() {
+                select(ui, app, models, Some(SelectionTarget::Node(NodeId(n))));
+            }
+        }
         "inspector.dismiss_error" => {
             ui.set_inspector_error("".into());
             // Drops any live-preview state (corner tint, previewed outline).

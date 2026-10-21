@@ -2,7 +2,7 @@
 // (spec §6.1, §6.4). No std-widgets here (D20): their style clashes with the dark theme.
 
 import { Theme } from "theme.slint";
-import { InspectorField, EditField, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
+import { InspectorField, EditField, SetRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
 import { SectionHeader, SegmentedControl, PillButton, IconButton, Field, ListRow } from "components.slint";
 import { TextField, LabeledField, CornerTable, ZoneList, DoorList } from "fields.slint";
 import { PresetMenu } from "overlays.slint";
@@ -170,6 +170,7 @@ export component NodeInspector inherits Rectangle {
     in property <string> detail;
     in property <[InspectorField]> fields;
     in property <[EditField]> edit-fields;
+    in property <[SetRow]> set-rows;
     in property <string> error;
     callback action(string /* id */);
     callback field-committed(string /* id */, string /* text */) -> bool;
@@ -215,6 +216,44 @@ export component NodeInspector inherits Rectangle {
             invalid: f.invalid;
             committed(i, t) => { return root.field-committed(i, t); }
             edited(i, t) => { root.field-edited(i, t); }
+        }
+        if root.set-rows.length > 0: Divider { }
+        if root.set-rows.length > 0: HorizontalLayout {
+            padding-left: 9px;
+            Text {
+                text: "Set";
+                color: Theme.text;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Rectangle { }
+            PillButton {
+                label: "Select set";
+                clicked => { root.action("set.select_root"); }
+            }
+        }
+        for r in root.set-rows: VerticalLayout {
+            if r.header: TouchArea {
+                height: 24px;
+                clicked => { root.action("set.select." + r.node); }
+                Text {
+                    x: 9px;
+                    text: r.field.label;
+                    color: r.current ? Theme.accent : Theme.text;
+                    font-weight: r.current ? 650 : 400;
+                    vertical-alignment: center;
+                }
+            }
+            if !r.header: LabeledField {
+                label: r.field.label;
+                id: r.field.id;
+                value: r.field.value;
+                unit: r.field.unit;
+                enabled: r.field.enabled;
+                invalid: r.field.invalid;
+                committed(i, t) => { return root.field-committed(i, t); }
+                edited(i, t) => { root.field-edited(i, t); }
+            }
         }
     }
 }

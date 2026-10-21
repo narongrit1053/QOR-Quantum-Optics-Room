@@ -118,10 +118,12 @@ fn mate_frames(doc: &Document, catalog: &Catalog, node: &Node) -> Option<(Frame,
     let (Parent::Node(pid), Attach::Mate { self_conn, parent_conn, .. }) = (&node.parent, &node.attach) else {
         return None;
     };
-    let parent_def = catalog.get(&doc.node(*pid)?.part)?;
-    let pc = parent_def.connector(parent_conn)?;
-    let cc = catalog.get(&node.part)?.connector(self_conn)?;
-    Some((pc.frame, cc.frame, lab_mates::slide_range(&pc.kind)))
+    let parent = doc.node(*pid)?;
+    let parent_def = catalog.get(&parent.part)?;
+    let range = lab_mates::slide_range(&parent_def.connector(parent_conn)?.kind);
+    let pf = lab_mates::connector_frame(parent_def, parent_conn, &parent.params)?;
+    let cf = lab_mates::connector_frame(catalog.get(&node.part)?, self_conn, &node.params)?;
+    Some((pf, cf, range))
 }
 
 /// Whether direction `z` of node `id`'s part frame is vertical in the room.

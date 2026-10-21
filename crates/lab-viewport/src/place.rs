@@ -147,6 +147,10 @@ fn mate_on_node(
     })?;
     let (child, parent) = (&def.connectors[ci], &parent_def.connectors[pi]);
     let (lo, hi) = lab_mates::slide_range(&parent.kind);
+    let parent = &lab_core::part::ConnectorDef {
+        frame: lab_mates::connector_frame(parent_def, &parent.name, &node.params)?,
+        ..parent.clone()
+    };
     // Slide: the pointer's position along the slide axis (pose is linear in slide), clamped.
     let p0 = lab_mates::mate_pose(&parent.frame, &child.frame, 0.0, 0.0).0;
     let axis = lab_mates::mate_pose(&parent.frame, &child.frame, 1.0, 0.0).0 - p0;

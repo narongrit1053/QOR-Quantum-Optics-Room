@@ -73,6 +73,8 @@ pub enum Command {
         platform: Box<Platform>,
     },
     SetRoom(Box<Room>),
+    /// Applies the commands in order as one step (M6 set re-pose); all or nothing.
+    Batch(Vec<Command>),
 }
 
 /// Which parts of a platform an update changed.
@@ -295,6 +297,26 @@ impl Command {
     /// On error the document is left unchanged.
     pub fn apply(self, doc: &mut Document) -> Result<(Command, ChangeSet), CommandError> {
         match self {
+            Command::Batch(commands) => {
+                let mut inverses = Vec::new();
+                let mut changes = ChangeSet::default();
+                for command in commands {
+                    match command.apply(doc) {
+                        Ok((inverse, c)) => {
+                            inverses.push(inverse);
+                            changes.merge(c);
+                        }
+                        Err(e) => {
+                            for inverse in inverses.into_iter().rev() {
+                                let _ = inverse.apply(doc);
+                            }
+                            return Err(e);
+                        }
+                    }
+                }
+                inverses.reverse();
+                Ok((Command::Batch(inverses), changes))
+            }
             Command::AddNode { node, index } => {
                 check_new_nodes(doc, [&node])?;
                 check_parents(doc, std::slice::from_ref(&node), None)?;
@@ -583,6 +605,7 @@ impl Command {
                 format!("Edit {}", doc.platform(platform.id).map_or(platform.name.as_str(), |p| p.name.as_str()))
             }
             Command::SetRoom(_) => "Edit Room".into(),
+            Command::Batch(commands) => commands.first().map_or_else(String::new, |c| c.label(doc)),
         }
     }
 }

@@ -161,6 +161,46 @@ mod tests {
         assert!((p.z - 75.0).abs() < 0.1, "mirror centre at {}", p.z);
     }
 
+    /// Lengthening the post of a placed KM100 stack by 25 mm lifts the mount 25 mm; the base stays.
+    #[test]
+    fn post_length_lifts_mount() {
+        use lab_core::model::{Attach, Document, NodeId, Parent};
+        use lab_core::{Command, History, SelectionTarget};
+        let (catalog, _) = Catalog::load_default();
+        let mount = catalog.get("thorlabs:KM100").unwrap();
+        let sol = solve_stack(mount, 75.0, &catalog.in_category("posts")).unwrap();
+        let spec = StackSpec { optic: None, mount: mount.id.clone(), base: sol.base, holder: sol.holder, post: sol.post, slide: sol.slide };
+        let root_part = DragItem::Stack(spec.clone()).root().to_string();
+        let (p, r) = lab_mates::seat_pose(catalog.get(&root_part).unwrap(), Default::default(), 0.0);
+        let mut nodes = vec![crate::place::new_node(&catalog, &root_part, 1, Parent::Room, Attach::Free, p, r).unwrap()];
+        for (part, attach, position, rotation) in lab_viewport::stack_chain(&catalog, &spec).unwrap() {
+            let below = Parent::Node(nodes.last().unwrap().id);
+            let id = nodes.len() as u64 + 1;
+            nodes.push(crate::place::new_node(&catalog, &part, id, below, attach, position, rotation).unwrap());
+        }
+        let mut doc = Document::new("t");
+        let mut history = History::default();
+        history.execute(&mut doc, Command::PlaceAssembly { nodes }).unwrap();
+        let post = doc.nodes.iter().find(|n| n.part == spec.post).unwrap();
+        let mount_id = doc.nodes.iter().find(|n| n.part == spec.mount).unwrap().id;
+        let length = catalog.get(&spec.post).unwrap();
+        let lab_core::part::Geometry::Parametric { params, .. } = &length.geometry else { panic!() };
+        let length = params["length"].as_f64().unwrap();
+        let before = (doc.node_pose(NodeId(1)).unwrap().0, doc.node_pose(mount_id).unwrap().0);
+        let cx = lab_app::EditContext { doc: &doc, selection: Some(SelectionTarget::Node(post.id)), units: lab_core::units::LengthUnit::Millimetre };
+        let Ok(lab_app::EditOutcome::Command { command, .. }) =
+            lab_app::edit::node_field_edit(&cx, &catalog, "node.param.length", &format!("{}", length + 25.0))
+        else {
+            panic!("expected a command");
+        };
+        history.execute(&mut doc, command).unwrap();
+        assert!(doc.node_pose(NodeId(1)).unwrap().0.distance(before.0) < 1e-9);
+        let lift = doc.node_pose(mount_id).unwrap().0 - before.1;
+        assert!((lift.z - 25.0).abs() < 1e-6, "mount moved {lift}");
+        history.undo(&mut doc).unwrap().unwrap();
+        assert!(doc.node_pose(mount_id).unwrap().0.distance(before.1) < 1e-9);
+    }
+
     #[test]
     fn cycle_wraps() {
         let options = vec![None, Some("a".to_string()), Some("b".to_string())];
