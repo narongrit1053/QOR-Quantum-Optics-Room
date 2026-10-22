@@ -221,6 +221,9 @@ pub fn on_close_requested(
 pub fn startup(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     let _ = models;
     exit_on_ui_panic();
+    if let Some(text) = STARTUP_SKIPPED.take() {
+        controller::show_toast(ui, &app.borrow(), &text, false);
+    }
     if app.borrow().recovery.is_empty() {
         return;
     }
@@ -254,6 +257,15 @@ fn exit_on_ui_panic() {
     });
 }
 
+thread_local! {
+    /// The skipped-parts notice of the command-line open, shown by [`startup`].
+    static STARTUP_SKIPPED: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
+}
+
+fn skipped_text(n: usize) -> String {
+    format!("{n} parts in this file differ from your library; your versions are used.")
+}
+
 /// The document to start with: the project named on the command line (loaded synchronously),
 /// else the demo. On a load failure the demo is used and the error is returned for display.
 ///
@@ -269,6 +281,7 @@ pub fn initial_session(args: &[String], settings: &Settings, has_recovery: bool)
             let (_, skipped) = crate::embed::unpack(&lab_catalog::Catalog::load_default().0, &project.extras);
             if !skipped.is_empty() {
                 eprintln!("embedded parts skipped (local versions used): {skipped:?}");
+                STARTUP_SKIPPED.set(Some(skipped_text(skipped.len())));
             }
             (Session::from_loaded(project), None)
         }
@@ -372,7 +385,7 @@ fn on_loaded(
             }
             start_over(ui, app, models, Session::from_loaded(project));
             if !skipped.is_empty() {
-                let text = format!("{} parts in this file differ from your library; your versions are used.", skipped.len());
+                let text = skipped_text(skipped.len());
                 controller::show_toast(ui, &app.borrow(), &text, false);
             }
             if !repairs.is_empty() {

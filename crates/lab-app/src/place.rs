@@ -29,7 +29,10 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 Some(lift) if lift > 0.5 => {
                     let Some(riser) = riser_for(&a.catalog, part, lift, &root) else { return };
                     let seat = a.catalog.get(part).and_then(|d| d.connector("seat")).map(|c| c.frame);
-                    let top = Frame { origin: DVec3::new(0.0, 0.0, lift), z: DVec3::Z, x: DVec3::X };
+                    // The riser is centred under the head's footprint; the head sits back over its origin.
+                    let c = riser.position - root.position;
+                    let c = root.rotation.inverse() * c;
+                    let top = Frame { origin: DVec3::new(-c.x, -c.y, lift), z: DVec3::Z, x: DVec3::X };
                     let (position, rotation) =
                         seat.map(|s| lab_mates::mate_pose(&top, &s, 0.0, 0.0)).unwrap_or((top.origin, DQuat::IDENTITY));
                     let head = Node { id: NodeId(first + 1), parent: Parent::Node(riser.id), attach: Attach::Free, position, rotation, ..root };
@@ -69,7 +72,9 @@ fn laser_lift(app: &AppState, part: &str, request: &PlaceRequest) -> Option<f64>
         return None;
     }
     let port = app.catalog.get(part)?.optical_ports.iter().find(|p| p.kind == "source")?;
-    Some(app.stack.beam_height - port.frame.origin.z)
+    // Exit height above the seat (the seat may not be at z = 0).
+    let seat = app.catalog.get(part)?.connector("seat").map_or(0.0, |c| c.frame.origin.z);
+    Some(app.stack.beam_height - (port.frame.origin.z - seat))
 }
 
 /// A `generic:riser` of the head's footprint and height `lift`, at the head's drop pose.
@@ -79,9 +84,12 @@ fn riser_for(catalog: &Catalog, part: &str, lift: f64, head: &Node) -> Option<No
     if lo.x > hi.x {
         return None;
     }
-    // shortcut: footprint is the bbox centred on the origin (imports are re-based there).
-    let (w, l) = (2.0 * lo.x.abs().max(hi.x.abs()), 2.0 * lo.y.abs().max(hi.y.abs()));
-    let mut riser = new_node(catalog, "generic:riser", head.id.0, head.parent, head.attach.clone(), head.position, head.rotation)?;
+    // shortcut: footprint in the head's own frame, assuming its seat faces down; a tilted seat needs the seat frame.
+    let (w, l) = (hi.x - lo.x, hi.y - lo.y);
+    let centre = DVec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, 0.0);
+    let at = head.position + head.rotation * centre;
+    let attach = if centre.truncate().length() > 1e-6 { Attach::Free } else { head.attach.clone() };
+    let mut riser = new_node(catalog, "generic:riser", head.id.0, head.parent, attach, at, head.rotation)?;
     for (k, v) in [("length", l), ("width", w), ("height", lift)] {
         riser.params.insert(k.into(), ParamValue::Number(v));
     }

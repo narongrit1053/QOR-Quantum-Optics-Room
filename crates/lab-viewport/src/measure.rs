@@ -113,6 +113,13 @@ fn measure_input(
             Some((Some(PickId(SelectionTarget::Platform(pid))), point)) => {
                 Some(hole_near(doc, *pid, point).filter(|&h| near(h).is_some()).unwrap_or(point))
             }
+            // A part over the hole: snap to the holes of the platform it stands on.
+            Some((Some(PickId(SelectionTarget::Node(id))), point)) => Some(
+                doc.root_platform(*id)
+                    .and_then(|pid| hole_near(doc, pid, point))
+                    .filter(|&h| near(h).is_some())
+                    .unwrap_or(point),
+            ),
             Some((_, point)) => Some(point),
             None => ray
                 .intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))
@@ -139,15 +146,28 @@ fn measure_input(
     }
 }
 
-fn draw_measure(measure: Res<Measure>, mut gizmos: Gizmos, capturing: Res<crate::export::Capturing>) {
+fn draw_measure(
+    measure: Res<Measure>,
+    mut gizmos: Gizmos,
+    capturing: Res<crate::export::Capturing>,
+    camera: Query<(&GlobalTransform, &Projection), (With<OrbitCamera>, Without<crate::camera::TopPane>)>,
+) {
     if capturing.0 {
         return;
     }
     if !measure.active {
         return;
     }
+    let view = camera.single().ok();
     let dot = |gizmos: &mut Gizmos, p: DVec3| {
-        gizmos.sphere(Isometry3d::from_translation(to_render(p)), 0.003, ACCENT);
+        let p = to_render(p);
+        // About 0.6 % of the view height, whatever the zoom.
+        let r = match view {
+            Some((t, Projection::Perspective(pp))) => t.translation().distance(p) * (pp.fov / 2.0).tan() * 0.012,
+            Some((_, Projection::Orthographic(o))) => o.area.height() * 0.006,
+            _ => 0.003,
+        };
+        gizmos.sphere(Isometry3d::from_translation(p), r, ACCENT);
     };
     if let Some(a) = measure.a {
         dot(&mut gizmos, a);
