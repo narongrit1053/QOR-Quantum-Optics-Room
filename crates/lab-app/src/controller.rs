@@ -458,6 +458,37 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 execute(ui, app, models, id, command, label.into(), roots.first().map(|r| SelectionTarget::Node(*r)), Vec::new());
             }
         }
+        _ if id.starts_with("nudge.") || id == "tool.rotate_left" || id == "tool.rotate_right" => {
+            let how = match id {
+                "tool.rotate_left" => crate::nudge::Nudge::Turn { degrees: -15.0 },
+                "tool.rotate_right" => crate::nudge::Nudge::Turn { degrees: 15.0 },
+                _ => {
+                    // "nudge.step:dx:dy" (holes) or "nudge.fine:dx:dy" (mm).
+                    let mut parts = id["nudge.".len()..].split(':');
+                    let kind = parts.next().unwrap_or("");
+                    let mut d = || parts.next().and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+                    let (dx, dy) = (d(), d());
+                    if kind == "fine" {
+                        crate::nudge::Nudge::Fine { dx: f64::from(dx), dy: f64::from(dy) }
+                    } else {
+                        crate::nudge::Nudge::Step { dx, dy }
+                    }
+                }
+            };
+            let Some(SelectionTarget::Node(node)) = app.borrow().session.selection else { return };
+            let label = if matches!(how, crate::nudge::Nudge::Turn { .. }) { "Rotate" } else { "Nudge" };
+            let result = crate::nudge::nudge(&app.borrow().session.doc, &[node], how);
+            match result {
+                Ok(Some(command)) => {
+                    execute(ui, app, models, id, command, label.into(), None, Vec::new());
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let text = if error == crate::nudge::NudgeError::Locked { "Part is locked" } else { "No hole there" };
+                    show_toast(ui, &app.borrow(), text, false);
+                }
+            }
+        }
         _ if id.starts_with("file.") => files::handle_file_action(ui, app, models, id),
         _ => {
             let outcome = {

@@ -485,6 +485,26 @@ export component AppWindow inherits Window {
                 root.action("selection.delete");
                 return accept;
             }
+            // Arrows nudge the selected set (Shift: 5 holes, Alt: 1 mm); Q / E turn it 15°.
+            if (!EditState.text-focused && !event.modifiers.control && !event.modifiers.meta) {
+                if (event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                    if (root.selection-kind != 1) { return reject; }
+                    root.action((event.modifiers.alt ? "nudge.fine:" : "nudge.step:")
+                        + (event.text == Key.LeftArrow ? (event.modifiers.shift && !event.modifiers.alt ? "-5:0" : "-1:0")
+                        : event.text == Key.RightArrow ? (event.modifiers.shift && !event.modifiers.alt ? "5:0" : "1:0")
+                        : event.text == Key.UpArrow ? (event.modifiers.shift && !event.modifiers.alt ? "0:5" : "0:1")
+                        : (event.modifiers.shift && !event.modifiers.alt ? "0:-5" : "0:-1")));
+                    return accept;
+                }
+                if (!event.modifiers.alt && !event.modifiers.shift && (event.text == "q" || event.text == "Q")) {
+                    root.action("tool.rotate_left");
+                    return accept;
+                }
+                if (!event.modifiers.alt && !event.modifiers.shift && (event.text == "e" || event.text == "E")) {
+                    root.action("tool.rotate_right");
+                    return accept;
+                }
+            }
             if (!EditState.text-focused && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta) {
                 if (root.gallery-key(event.text)) {
                     return accept;
