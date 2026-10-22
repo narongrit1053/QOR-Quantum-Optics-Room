@@ -100,6 +100,8 @@ pub struct AppState {
     pub pending_exports: Vec<PendingExport>,
     /// M6: the beam trace of `session.doc`, refreshed by `beams::retrace`.
     pub beams: lab_optics::Trace,
+    /// M7 A: copied set nodes (in-app clipboard).
+    pub clipboard: Vec<lab_core::Node>,
 }
 
 impl AppState {
@@ -129,6 +131,7 @@ impl AppState {
             viewport_ready: false,
             pending_exports: Vec::new(),
             beams: Default::default(),
+            clipboard: Vec::new(),
         }
     }
 
