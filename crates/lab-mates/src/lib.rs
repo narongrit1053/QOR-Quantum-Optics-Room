@@ -159,6 +159,7 @@ mod tests {
             connectors: vec![conn("bottom", 0.0), conn("top", 50.8)],
             optical_ports: Vec::new(),
             meta: Default::default(),
+            features: Vec::new(),
         };
         let base = connector_frame(&def, "top", &Params::new()).unwrap();
         let params = Params::from([("length".to_string(), ParamValue::Number(50.8 + 25.0))]);

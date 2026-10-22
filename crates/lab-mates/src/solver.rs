@@ -130,6 +130,7 @@ mod tests {
             connectors,
             optical_ports: vec![],
             meta: Default::default(),
+            features: Vec::new(),
         }
     }
 

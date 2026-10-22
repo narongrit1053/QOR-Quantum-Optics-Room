@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lab_core::glam::DVec3;
-use lab_core::part::{ConnectorDef, ConnectorKind, Frame, Gender, Geometry, OpticalPort, PartDef};
+use lab_core::part::{ConnectorDef, ConnectorKind, Feature, Frame, Gender, Geometry, OpticalPort, PartDef};
 use lab_geom::TriMesh;
 use lab_import::fit::{HoleFit, fit_hole, suggest};
 use lab_ui::AppWindow;
@@ -102,6 +102,8 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
                 wz.def.connectors.remove(i);
             } else if i - wz.def.connectors.len() < wz.def.optical_ports.len() {
                 wz.def.optical_ports.remove(i - wz.def.connectors.len());
+            } else if i - wz.def.connectors.len() - wz.def.optical_ports.len() < wz.def.features.len() {
+                wz.def.features.remove(i - wz.def.connectors.len() - wz.def.optical_ports.len());
             }
         });
         send_markers(&a.borrow());
@@ -308,6 +310,13 @@ fn row(c: &ConnectorDef) -> String {
     format!("{} · {what}", c.name)
 }
 
+fn feature_row(f: &Feature) -> String {
+    match f {
+        Feature::Plane { normal: n, .. } => format!("face · normal ({:.2}, {:.2}, {:.2})", n.x, n.y, n.z),
+        Feature::Axis { radius, hole, .. } => format!("axis · {} Ø{:.2} mm", if *hole { "hole" } else { "shaft" }, 2.0 * radius),
+    }
+}
+
 fn send_markers(app: &AppState) {
     let frames = with(|wz| {
         wz.def.connectors.iter().map(|c| c.frame).chain(wz.def.optical_ports.iter().map(|p| p.frame)).collect()
@@ -326,6 +335,7 @@ fn refresh(ui: &slint::Weak<AppWindow>) {
             .iter()
             .map(row)
             .chain(wz.def.optical_ports.iter().map(|p| format!("{} · {} port", p.name, p.kind)))
+            .chain(wz.def.features.iter().map(feature_row))
             .map(SharedString::from)
             .collect();
         ui.set_wizard_title(wz.def.name.as_str().into());

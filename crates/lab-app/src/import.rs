@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use lab_core::Finish;
 use lab_core::glam::DVec3;
-use lab_core::part::{ConnectorDef, ConnectorKind, Frame, Geometry, PartDef};
+use lab_core::part::{ConnectorDef, ConnectorKind, Feature, Frame, Gender, Geometry, PartDef};
+use lab_geom::TriMesh;
 use lab_import::{ImportOptions, Progress, SourceUp};
 use lab_ui::AppWindow;
 use slint::ComponentHandle;
@@ -142,6 +143,14 @@ fn start(ui: &AppWindow) {
             .ok();
         };
         let result = lab_import::import_step(&step, &library, &opts, &progress).and_then(|imported| {
+            let mut mesh = TriMesh::default();
+            for (_, m) in lab_import::read_glb(&imported.path, 0)? {
+                mesh.append(&m);
+            }
+            let features = lab_import::features::detect(&mesh);
+            let mut connectors =
+                vec![ConnectorDef { name: "seat".into(), kind: ConnectorKind::HoleGridSeat, frame: seat_frame(&features) }];
+            connectors.extend(hole_connectors(&features));
             let def = PartDef {
                 id: format!("{}:{}", vendor.to_lowercase(), part_number),
                 version: 1,
@@ -151,16 +160,13 @@ fn start(ui: &AppWindow) {
                 category: if category.is_empty() { "imported".into() } else { category },
                 tags: Vec::new(),
                 geometry: Geometry::Mesh { asset: imported.asset.clone() },
-                connectors: vec![ConnectorDef {
-                    name: "seat".into(),
-                    kind: ConnectorKind::HoleGridSeat,
-                    frame: Frame { origin: DVec3::ZERO, z: DVec3::NEG_Z, x: DVec3::X },
-                }],
+                connectors,
                 optical_ports: Vec::new(),
                 meta: BTreeMap::from([
                     ("finish".to_string(), FINISHES[finish_index.clamp(0, 2) as usize].to_string()),
                     ("source".to_string(), step.file_name().unwrap_or_default().to_string_lossy().into_owned()),
                 ]),
+                features,
             };
             lab_import::write_part(&library, &def)?;
             Ok((def, imported))
@@ -191,6 +197,46 @@ fn start(ui: &AppWindow) {
         })
         .ok();
     });
+}
+
+/// The seat (M8-PLAN A): the bottom hole (opening at z = 0, axis ‖ Z within 2°) of M4–M6 /
+/// 8-32–1/4-20 size nearest the bbox centre in XY; none: the origin.
+fn seat_frame(features: &[Feature]) -> Frame {
+    let origin = features
+        .iter()
+        .filter_map(|f| match f {
+            Feature::Axis { origin, dir, radius, hole: true }
+                if dir.z < -0.999_390_827 && origin.z.abs() < 0.5 && (3.2..=6.2).contains(&(2.0 * radius)) =>
+            {
+                Some(DVec3::new(origin.x, origin.y, 0.0))
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.length().total_cmp(&b.length()))
+        .unwrap_or(DVec3::ZERO);
+    Frame { origin, z: DVec3::NEG_Z, x: DVec3::X }
+}
+
+/// Detected holes as connectors `hole_1`, …, typed like the wizard's Hole button does.
+fn hole_connectors(features: &[Feature]) -> Vec<ConnectorDef> {
+    features
+        .iter()
+        .filter_map(|f| match f {
+            Feature::Axis { origin, dir, radius, hole: true } => Some((*origin, *dir, (radius * 200.0).round() / 100.0)),
+            _ => None,
+        })
+        .enumerate()
+        .map(|(i, (origin, z, diameter))| {
+            let kind = match lab_import::fit::suggest(diameter) {
+                ("thread", spec) => ConnectorKind::Thread { spec: spec.into(), gender: Gender::Female },
+                ("bore", _) => ConnectorKind::Bore { diameter, gender: Gender::Female, range: None },
+                _ => ConnectorKind::OpticBore { diameter, gender: Gender::Female },
+            };
+            let helper = if z.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+            let frame = Frame { origin, z, x: z.cross(helper).cross(z).normalize() };
+            ConnectorDef { name: format!("hole_{}", i + 1), kind, frame }
+        })
+        .collect()
 }
 
 fn finish(ui: &AppWindow, message: Result<(String, String, String), String>) {

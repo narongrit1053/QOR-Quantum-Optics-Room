@@ -414,6 +414,7 @@ mod tests {
                 frame: Frame { origin: DVec3::new(0.0, 100.0, 40.0), z: DVec3::Y, x: DVec3::X },
             }],
             meta: Default::default(),
+            features: Vec::new(),
         };
         doc.nodes.truncate(1);
         let lookup = |id: &str| (id == "test:laser").then(|| def.clone());
