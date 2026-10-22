@@ -43,6 +43,8 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("tool.move", "Move Tool", "Tools", "translate drag gizmo", ""),
     a("tool.rotate", "Rotate Tool", "Tools", "turn angle gizmo", ""),
     a("tool.measure", "Measure Tool", "Tools", "distance ruler dimension", "M"),
+    a("tool.rotate_left", "Rotate −15°", "Tools", "turn nudge counterclockwise", "Q"),
+    a("tool.rotate_right", "Rotate +15°", "Tools", "turn nudge clockwise", "E"),
     a("platform.zone.add_rect", "Add Rectangular Zone", "Platform", "keep out area", ""),
     a("platform.zone.add_circle", "Add Circular Zone", "Platform", "keep out area round", ""),
     a("platform.delete", "Delete Platform", "Platform", "remove table breadboard", ""),

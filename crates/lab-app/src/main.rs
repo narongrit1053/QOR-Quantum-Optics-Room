@@ -14,6 +14,7 @@ mod files;
 mod import;
 mod library;
 mod measure;
+mod nudge;
 mod overlay;
 mod palette;
 mod place;
