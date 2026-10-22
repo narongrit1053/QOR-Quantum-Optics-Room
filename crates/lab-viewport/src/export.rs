@@ -20,8 +20,6 @@ use crate::{FrameRequest, ViewportEvent};
 
 /// Frames rendered before the capture.
 const SETTLE: u32 = 3;
-/// Opaque background: the middle stop of the UI's viewport gradient (`Theme.viewport-bg`).
-const BACKGROUND: Color = Color::srgb(0x16 as f32 / 255.0, 0x18 as f32 / 255.0, 0x1C as f32 / 255.0);
 
 /// The export camera; the host leaves its render target alone.
 #[derive(Component)]
@@ -42,7 +40,7 @@ struct InFlight {
 pub(crate) struct Capturing(pub bool);
 
 #[derive(Resource, Default)]
-struct Exports {
+pub(crate) struct Exports {
     queue: VecDeque<(PathBuf, u32, u32)>,
     current: Option<InFlight>,
 }
@@ -56,7 +54,7 @@ impl Plugin for ExportPlugin {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn step(
+pub(crate) fn step(
     mut commands: Commands,
     mut exports: ResMut<Exports>,
     pending: Res<PendingRequests>,
@@ -65,14 +63,16 @@ fn step(
     events: Res<EventSender>,
     mut capturing: ResMut<Capturing>,
     main: Query<MainCamera, (With<OrbitCamera>, Without<TopPane>)>,
+    thumbs: Query<(), With<crate::thumbnail::ThumbCamera>>,
 ) {
     for request in &pending.0 {
         if let FrameRequest::ExportImage(path, w, h) = request {
             exports.queue.push_back((path.clone(), (*w).clamp(16, 8192), (*h).clamp(16, 8192)));
         }
     }
-    // shortcut: runs beside thumbnails (separate queue); fine while thumbnails are rare, share one queue if GPU memory becomes a problem.
+    // One offscreen render at a time: wait while a thumbnail renders (thumbnails wait on `Capturing`).
     if exports.current.is_none()
+        && thumbs.is_empty()
         && let Some((path, width, height)) = exports.queue.pop_front()
     {
         let Ok((transform, projection, _)) = main.single() else {
@@ -84,7 +84,7 @@ fn step(
         let camera = commands
             .spawn((
                 Camera3d::default(),
-                Camera { order: -20, clear_color: ClearColorConfig::Custom(BACKGROUND), ..default() },
+                Camera { order: -20, clear_color: ClearColorConfig::Custom(Color::NONE), ..default() },
                 RenderTarget::Image(image.clone().into()),
                 projection.clone(),
                 Msaa::Sample4,
@@ -115,7 +115,7 @@ fn captured(
     let Some(job) = exports.current.take() else { return };
     capturing.set_if_neq(Capturing(false));
     commands.entity(job.camera).try_despawn();
-    let ok = match crate::thumbnail::write_png(&job.path, &shot.image) {
+    let ok = match crate::thumbnail::write_png(&job.path, &shot.image, true) {
         Ok(()) => true,
         Err(e) => {
             warn!("image {} not written: {e}", job.path.display());

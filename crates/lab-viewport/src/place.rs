@@ -403,5 +403,12 @@ mod tests {
         // Post origin 5 mm below the holder top (50 mm): z = 45 in the holder frame.
         assert!((request.position - DVec3::new(0.0, 0.0, 45.0)).length() < 1e-9, "{request:?}");
         assert!((room.z - (origin.z + 45.0)).abs() < 1e-9);
+
+        // Lower down the bore the post slides to the pointer, keeping the platform's yaw.
+        let mid = origin + DQuat::from_rotation_z(angle) * (pos + DVec3::new(0.0, 0.0, 20.0));
+        let (request, (_, room_rot)) = placement(&doc, &catalog, &item, &post(), Hit::Node(id, mid), false).unwrap();
+        assert!(matches!(request.attach, Attach::Mate { slide, .. } if (slide + 30.0).abs() < 1e-9), "{request:?}");
+        assert!((request.position.z - 20.0).abs() < 1e-9, "{request:?}");
+        assert!((room_rot * DVec3::X).dot(DQuat::from_rotation_z(angle) * DVec3::X) > 0.9998);
     }
 }
