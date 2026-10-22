@@ -165,6 +165,9 @@ pub enum ViewportRequest {
     ExportImage { path: std::path::PathBuf, width: u32, height: u32 },
     /// M6. Show or hide the traced laser beams (default shown).
     SetBeams(bool),
+    /// M8 view cube. Ease the 3D camera to this direction (as `CameraOrient` reports it) around
+    /// the orbit pivot, keeping the distance. Ignored outside the 3D view.
+    ViewDirection { yaw: f32, pitch: f32 },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -254,6 +257,9 @@ pub enum ViewportEvent {
     ThumbnailReady { part: String, path: std::path::PathBuf, ok: bool },
     /// POLA-66. Sent once per `ExportImage`; `ok` false on any failure.
     ImageExported { path: std::path::PathBuf, ok: bool },
+    /// M8. The main camera's orientation (render space: eye = focus + d·(cos p sin y, sin p,
+    /// cos p cos y), Y up), sent when it turns by > 0.002 rad.
+    CameraOrient { yaw: f32, pitch: f32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -299,6 +305,7 @@ pub(crate) enum FrameRequest {
     RenderThumbnail(String, std::path::PathBuf),
     ExportImage(std::path::PathBuf, u32, u32),
     SetBeams(bool),
+    ViewDirection(f32, f32),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

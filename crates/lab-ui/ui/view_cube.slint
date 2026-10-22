@@ -1,0 +1,76 @@
+// M8 view cube. Faces are projected and hit-tested in Rust (lab-app/src/view_cube.rs); this only
+// draws them and reports the pointer in the cube's own px (96 × 96).
+import { Theme } from "theme.slint";
+import { ToolButton } from "components.slint";
+
+export struct CubeFaceRow {
+    label: string,
+    // SVG path in cube px.
+    commands: string,
+    cx: length,
+    cy: length,
+    show-label: bool,
+    hovered: bool,
+}
+
+export component ViewCube inherits Rectangle {
+    in property <[CubeFaceRow]> faces;
+    callback hover(length, length);
+    callback clicked(length, length);
+    callback home();
+
+    width: 96px;
+    height: 96px + 30px;
+
+    cube := Rectangle {
+        y: 0;
+        width: 96px;
+        height: 96px;
+        for f in root.faces: Rectangle {
+            Path {
+                x: 0;
+                y: 0;
+                width: 96px;
+                height: 96px;
+                viewbox-width: 96;
+                viewbox-height: 96;
+                commands: f.commands;
+                fill: f.hovered ? Theme.accent-soft : Theme.panel-bg;
+                stroke: f.hovered ? Theme.accent : Theme.panel-border;
+                stroke-width: 1px;
+            }
+            if f.show-label: Text {
+                x: f.cx - 30px;
+                y: f.cy - 8px;
+                width: 60px;
+                height: 16px;
+                text: f.label;
+                font-size: 10px;
+                color: f.hovered ? Theme.accent : Theme.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            changed has-hover => {
+                if !self.has-hover { root.hover(-1px, -1px); }
+            }
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.move { root.hover(self.mouse-x, self.mouse-y); }
+            }
+            clicked => { root.clicked(self.mouse-x, self.mouse-y); }
+        }
+    }
+
+    HorizontalLayout {
+        y: 96px + 4px;
+        width: 96px;
+        height: 26px;
+        alignment: center;
+        ToolButton {
+            label: "Home";
+            clicked => { root.home(); }
+        }
+    }
+}

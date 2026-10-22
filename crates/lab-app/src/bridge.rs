@@ -107,6 +107,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                         crate::library::fill(&app.borrow(), &models);
                     }
                 }
+                ViewportEvent::CameraOrient { yaw, pitch } => crate::view_cube::on_orient(&ui, yaw, pitch),
                 ViewportEvent::ImageExported { path, ok } => crate::export_png::finished(&app, &path, ok),
                 ViewportEvent::SceneError(message) => {
                     eprintln!("viewport: {message}");
