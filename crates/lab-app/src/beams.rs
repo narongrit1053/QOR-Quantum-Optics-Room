@@ -166,6 +166,30 @@ mod tests {
         panic!("no yaw puts {optic} in the beam at {at}");
     }
 
+    /// POLA-101: the demo's M1 (a primitive-shape node) is traced, and a rotation typed in the
+    /// inspector turns the beam leaving it.
+    #[test]
+    fn demo_mirror_rotation_moves_the_beam() {
+        let (catalog, _) = Catalog::load_default();
+        let mut doc = lab_core::sample::demo_document();
+        let m1 = doc.nodes.iter().find(|n| n.name == "M1").unwrap().id;
+        let trace = |d: &Document| lab_optics::trace_document(d, &|p| catalog.get(p).cloned());
+        let after = |d: &Document| {
+            let t = trace(d);
+            let i = t.segments.iter().position(|s| s.hit.as_ref().is_some_and(|(n, _)| *n == m1)).expect("M1 not hit");
+            let s = t.segments.iter().skip(i + 1).find(|s| s.start.distance(t.segments[i].end) < 1e-6).unwrap();
+            (s.end - s.start).normalize()
+        };
+        assert!(trace(&doc).radius_at(m1).is_some());
+        let before = after(&doc);
+        let cx = lab_app::EditContext { doc: &doc, selection: Some(lab_core::SelectionTarget::Node(m1)), units: lab_core::units::LengthUnit::Millimetre };
+        let lab_app::EditOutcome::Command { command, .. } = lab_app::node_field_edit(&cx, &catalog, "node.rotation", "120").unwrap() else {
+            panic!("no command")
+        };
+        History::default().execute(&mut doc, command).unwrap();
+        assert!(after(&doc).dot(before) < 0.99, "beam after M1 did not turn");
+    }
+
     /// Exit-walkthrough scene: laser (raised 35 mm so its 40 mm axis is at 75 mm), two mirror sets
     /// folding the beam, a lens set focusing it. `LABSETUP_BEAM_SCENE=<path>` writes it as a project.
     #[test]

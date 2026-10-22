@@ -107,12 +107,13 @@ impl Builder<'_> {
             Shape::Box { size: DVec3::new(38.0, 38.0, 13.0) },
             Finish::AnodizedBlack,
         );
+        // A catalog part (its optical port faces local +Y), so the beam trace reflects off it.
         self.add(
             label,
             "generic:mirror-1in",
             centre,
-            facing(normal),
-            Shape::Cylinder { radius: 12.7, length: 6.0 },
+            DQuat::from_rotation_z(normal.y.atan2(normal.x) - FRAC_PI_2),
+            Shape::Part,
             Finish::Mirror,
         );
     }
@@ -162,18 +163,6 @@ impl Builder<'_> {
             Finish::Painted { rgb: [44, 48, 56] },
         );
     }
-
-    fn beam(&mut self, label: &str, from: DVec2, to: DVec2) {
-        let (a, b) = (from.extend(BEAM_HEIGHT), to.extend(BEAM_HEIGHT));
-        self.add(
-            label,
-            "beam",
-            (a + b) / 2.0,
-            facing(b - a),
-            Shape::Cylinder { radius: 0.75, length: a.distance(b) },
-            Finish::Beam { wavelength_nm: 780.0 },
-        );
-    }
 }
 
 pub fn demo_document() -> Document {
@@ -198,16 +187,17 @@ pub fn demo_document() -> Document {
     let mut b = Builder { doc: &mut doc, platform: table, holes };
 
     // Laser head sitting directly on the table, beam leaving its +X face.
+    // The catalog laser head emits along local +Y from 100 mm ahead, 40 mm up: turned to +X and
+    // raised so the beam leaves at beam height; traced live (lab-optics), so no drawn beams.
     let laser_centre = b.hole(6, 8);
     b.add(
         "Laser (ECDL, 780 nm)",
         "generic:laser-head",
-        laser_centre.extend(45.0),
-        DQuat::IDENTITY,
-        Shape::Box { size: DVec3::new(300.0, 120.0, 90.0) },
+        laser_centre.extend(BEAM_HEIGHT - 40.0),
+        DQuat::from_rotation_z(-FRAC_PI_2),
+        Shape::Part,
         Finish::Painted { rgb: [58, 64, 74] },
     );
-    let exit = laser_centre + DVec2::new(150.0, 0.0);
 
     let x = DVec3::X;
     let y = DVec3::Y;
@@ -237,16 +227,6 @@ pub fn demo_document() -> Document {
 
     b.detector("D1 (transmitted)", 42, 24, -x);
     b.detector("D2 (reflected)", 34, 12, y);
-
-    let m1 = b.hole(18, 8);
-    let m2 = b.hole(18, 24);
-    let d1 = b.hole(42, 24) - DVec2::new(12.5, 0.0);
-    let d2 = b.hole(34, 12) + DVec2::new(0.0, 12.5);
-    b.beam("Beam · laser → M1", exit, m1);
-    b.beam("Beam · M1 → M2", m1, m2);
-    b.beam("Beam · M2 → PBS", m2, pbs_at);
-    b.beam("Beam · PBS → D1", pbs_at, d1);
-    b.beam("Beam · PBS → D2", pbs_at, d2);
 
     doc
 }
