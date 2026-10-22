@@ -212,15 +212,36 @@ export component NodeInspector inherits Rectangle {
             value: field.value;
         }
         if root.edit-fields.length > 0: Divider { }
-        for f in root.edit-fields: LabeledField {
-            label: f.label;
-            id: f.id;
-            value: f.value;
-            unit: f.unit;
-            enabled: f.enabled;
-            invalid: f.invalid;
-            committed(i, t) => { return root.field-committed(i, t); }
-            edited(i, t) => { root.field-edited(i, t); }
+        for f in root.edit-fields: VerticalLayout {
+            if f.id != "node.note": LabeledField {
+                label: f.label;
+                id: f.id;
+                value: f.value;
+                unit: f.unit;
+                enabled: f.enabled;
+                invalid: f.invalid;
+                committed(i, t) => { return root.field-committed(i, t); }
+                edited(i, t) => { root.field-edited(i, t); }
+            }
+        }
+        // The note is a multi-line field below the other edit fields.
+        for f in root.edit-fields: VerticalLayout {
+            spacing: 2px;
+            if f.id == "node.note": Text {
+                text: f.label;
+                color: Theme.text-secondary;
+                font-size: Theme.font-body;
+                height: 24px;
+                vertical-alignment: center;
+            }
+            if f.id == "node.note": TextField {
+                id: f.id;
+                value: f.value;
+                multiline: true;
+                stretch: true;
+                committed(i, t) => { return root.field-committed(i, t); }
+                edited(i, t) => { root.field-edited(i, t); }
+            }
         }
         if root.beam-laser || root.beam-text != "": Divider { }
         if root.beam-laser || root.beam-text != "": HorizontalLayout {
@@ -404,10 +425,9 @@ export component PlatformInspector inherits Rectangle {
         if root.outline-kind == 2: ControlRow {
             label: "Notch";
             SegmentedControl {
-                items: ["↙", "↘", "↗", "↖"];
+                items: ["BL", "BR", "TR", "TL"];
                 current: root.notch-corner;
                 floating: false;
-                item-font-family: Theme.font-symbol;
                 horizontal-stretch: 1;
                 selected(i) => { root.choice-selected("platform.outline.notch_corner", i); }
             }
@@ -562,9 +582,8 @@ export component PlatformInspector inherits Rectangle {
         }
 
         if root.warning != "": Text {
-            text: "⚠ " + root.warning;
+            text: "Warning: " + root.warning;
             color: Theme.warning;
-            font-family: Theme.font-symbol;
             font-size: Theme.font-caption;
             wrap: word-wrap;
         }
