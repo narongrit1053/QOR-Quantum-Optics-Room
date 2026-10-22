@@ -199,19 +199,26 @@ fn start(ui: &AppWindow) {
     });
 }
 
-/// The seat (M8-PLAN A): the bottom hole (opening at z = 0, axis ‖ Z within 2°) of M4–M6 /
-/// 8-32–1/4-20 size nearest the bbox centre in XY; none: the origin.
+/// The seat (M8-PLAN A): a bottom hole (axis down within 2°, M4–M6 / 8-32–1/4-20 size, opening
+/// within 1 mm of z = 0 and of the lowest such opening) nearest the bbox centre in XY, at z = 0;
+/// none: the origin.
 fn seat_frame(features: &[Feature]) -> Frame {
-    let origin = features
+    let bottom: Vec<DVec3> = features
         .iter()
         .filter_map(|f| match f {
             Feature::Axis { origin, dir, radius, hole: true }
-                if dir.z < -0.999_390_827 && origin.z.abs() < 0.5 && (3.2..=6.2).contains(&(2.0 * radius)) =>
+                if dir.z < -0.999_390_827 && origin.z.abs() <= 1.0 && (3.2..=6.2).contains(&(2.0 * radius)) =>
             {
-                Some(DVec3::new(origin.x, origin.y, 0.0))
+                Some(*origin)
             }
             _ => None,
         })
+        .collect();
+    let lowest = bottom.iter().map(|o| o.z).fold(f64::INFINITY, f64::min);
+    let origin = bottom
+        .iter()
+        .filter(|o| o.z - lowest <= 1.0)
+        .map(|o| DVec3::new(o.x, o.y, 0.0))
         .min_by(|a, b| a.length().total_cmp(&b.length()))
         .unwrap_or(DVec3::ZERO);
     Frame { origin, z: DVec3::NEG_Z, x: DVec3::X }
@@ -260,5 +267,16 @@ fn finish(ui: &AppWindow, message: Result<(String, String, String), String>) {
             ui.set_import_error(text.into());
             ui.set_import_step(3);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seat_accepts_a_bottom_hole_just_above_zero() {
+        let hole = Feature::Axis { origin: DVec3::new(5.0, -3.0, 0.62), dir: DVec3::NEG_Z, radius: 3.0, hole: true };
+        assert_eq!(seat_frame(&[hole]).origin, DVec3::new(5.0, -3.0, 0.0));
     }
 }
