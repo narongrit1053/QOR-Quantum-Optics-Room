@@ -787,6 +787,7 @@ pub fn node_view(
     let def = catalog.get(&node.part);
     let attach = match &node.attach {
         Attach::Free => "Free".to_string(),
+        Attach::Constrained { constraints } => format!("Constrained ({})", constraints.len()),
         Attach::Hole { hole } => match holes.and_then(|set| set.label(*hole)) {
             Some(label) => format!("Hole {label}"),
             None => "Hole (outside the grid)".to_string(),
