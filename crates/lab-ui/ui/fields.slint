@@ -8,6 +8,7 @@
 import { Theme } from "theme.slint";
 import { CornerRow, ZoneRow, DoorRow, WallChoice } from "types.slint";
 import { IconButton, PillButton } from "components.slint";
+import { Icon } from "icons.slint";
 
 export global EditState {
     // A focused field holds text that differs from its value. While true, Ctrl+Z / Ctrl+Y
@@ -60,6 +61,8 @@ export component NumberField inherits Rectangle {
     // Borderless until focused (used for titles).
     in property <bool> plain;
     in property <string> placeholder;
+    // Several lines: Enter makes a newline, and the text commits when focus leaves.
+    in property <bool> multiline;
     out property <bool> has-focus: input.has-focus;
 
     // Returns true when the text was accepted (or was a no-op).
@@ -77,7 +80,7 @@ export component NumberField inherits Rectangle {
     preferred-width: root.field-width;
     max-width: root.stretch ? 10000px : root.field-width;
     horizontal-stretch: root.stretch ? 1 : 0;
-    height: max(26px, root.font-size + 13px);
+    height: root.multiline ? 72px : max(26px, root.font-size + 13px);
     border-radius: Theme.radius-field;
     background: root.plain && !input.has-focus ? transparent : Theme.field-bg;
     border-width: Theme.border-width;
@@ -147,12 +150,13 @@ export component NumberField inherits Rectangle {
                 width: 100%;
                 height: 100%;
                 enabled: root.enabled;
-                single-line: true;
+                single-line: !root.multiline;
+                wrap: root.multiline ? TextWrap.word-wrap : TextWrap.no-wrap;
                 color: root.enabled ? Theme.text : Theme.text-tertiary;
                 font-size: root.font-size;
                 font-weight: root.font-weight;
                 horizontal-alignment: root.align-left ? TextHorizontalAlignment.left : TextHorizontalAlignment.right;
-                vertical-alignment: center;
+                vertical-alignment: root.multiline ? TextVerticalAlignment.top : TextVerticalAlignment.center;
                 selection-background-color: Theme.accent.with-alpha(0.45);
                 selection-foreground-color: Theme.text;
 
@@ -524,14 +528,11 @@ export component ZoneList inherits VerticalLayout {
             spacing: 4px;
             HorizontalLayout {
                 spacing: 6px;
-                Text {
-                    text: zone.kind == 0 ? "▭" : "◯";
-                    color: Theme.accent;
-                    font-family: Theme.font-symbol;
-                    font-size: 13px;
+                Icon {
+                    name: zone.kind == 0 ? "square" : "circle";
+                    tint: Theme.accent;
                     width: 14px;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
+                    y: 2px;
                 }
                 TextField {
                     id: "platform.zone." + zone.index + ".name";
@@ -680,13 +681,7 @@ export component DoorList inherits VerticalLayout {
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
-                        Text {
-                            text: "▾";
-                            color: Theme.text-tertiary;
-                            font-family: Theme.font-symbol;
-                            font-size: Theme.font-caption;
-                            vertical-alignment: center;
-                        }
+                        Icon { name: "chevron-down"; tint: Theme.text-tertiary; }
                     }
                     wall-touch := TouchArea {
                         clicked => { wall-popup.show(); }

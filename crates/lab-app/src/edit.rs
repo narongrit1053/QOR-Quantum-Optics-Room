@@ -1631,7 +1631,11 @@ pub fn node_field_edit(cx: &EditContext, catalog: &Catalog, field: &str, text: &
             let Some(name) = field.strip_prefix("node.param.") else {
                 return Err(EditError::UnknownField(field.to_string()));
             };
-            let value = parse_length(t, cx.units)?;
+            let value = if crate::views::is_count_param(name) {
+                t.trim().parse::<f64>().map_err(|_| EditError::Invalid(format!("\"{}\" is not a number.", t.trim())))?
+            } else {
+                parse_length(t, cx.units)?
+            };
             let def = catalog
                 .get(&node.part)
                 .ok_or_else(|| EditError::Invalid(format!("The part {} is not in the library.", node.part)))?;

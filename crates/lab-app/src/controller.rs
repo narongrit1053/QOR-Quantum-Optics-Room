@@ -407,6 +407,12 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 .iter()
                 .filter(|a| !a.shortcut.is_empty())
                 .map(|a| lab_ui::PaletteItem { id: a.id.into(), title: a.title.into(), group: a.group.into(), shortcut: a.shortcut.into() })
+                .chain(NUDGE_KEYS.iter().map(|(title, keys)| lab_ui::PaletteItem {
+                    id: "".into(),
+                    title: (*title).into(),
+                    group: "Edit".into(),
+                    shortcut: (*keys).into(),
+                }))
                 .collect::<Vec<_>>();
             ui.set_shortcut_items(slint::ModelRc::new(slint::VecModel::from(rows)));
             ui.set_shortcuts_open(true);
@@ -553,6 +559,13 @@ fn refuse(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels, id: &s
         ui.set_room_corner_invalid(row);
     }
 }
+
+/// Arrow-key nudge rows for the shortcut sheet (they are not palette actions).
+const NUDGE_KEYS: [(&str, &str); 3] = [
+    ("Nudge selection one hole", "Arrows"),
+    ("Nudge selection 5 mm", "Shift+Arrows"),
+    ("Nudge selection 1 mm", "Alt+Arrows"),
+];
 
 fn apply_preference(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels, change: PreferenceChange) {
     let (settings, walls) = {

@@ -771,6 +771,11 @@ pub fn room_view(doc: &Document, units: LengthUnit) -> RoomViewData {
     }
 }
 
+/// Generator params that are plain counts, not lengths (the rack's `units`).
+pub fn is_count_param(name: &str) -> bool {
+    name == "units"
+}
+
 pub fn node_view(
     doc: &Document,
     catalog: &Catalog,
@@ -880,11 +885,12 @@ pub fn node_view(
     {
         for (name, default) in info.params {
             let value = node.params.get(*name).or_else(|| params.get(*name)).and_then(ParamValue::as_f64).unwrap_or(*default);
+            let counted = is_count_param(name);
             edit_fields.push(EditFieldData {
                 id: format!("node.param.{name}"),
                 label: title_case(name),
-                value: lab_core::units::format_length(value, units),
-                unit: units.suffix().into(),
+                value: if counted { format!("{value}") } else { lab_core::units::format_length(value, units) },
+                unit: if counted { String::new() } else { units.suffix().into() },
                 enabled: true,
                 invalid: false,
             });
