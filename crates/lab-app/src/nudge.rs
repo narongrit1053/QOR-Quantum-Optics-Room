@@ -101,6 +101,7 @@ mod tests {
             params: Default::default(),
             pickable: true,
             locked: false,
+            note: String::new(),
         }
     }
 
