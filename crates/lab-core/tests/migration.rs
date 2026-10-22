@@ -30,8 +30,12 @@ fn m1_fixture_loads_and_validates() {
     assert_eq!(grid.origin, GridOrigin::Auto);
     assert_eq!(grid.pitch, DVec2::splat(25.0));
     assert_eq!(grid.standard(), GridStandard::Metric);
-    // The migrated document is the M1 demo document.
-    assert_eq!(doc, demo_document());
+    // The migrated document is the M1 demo, which since M6 traces its beams instead of drawing
+    // them (POLA-101): same platform, same nodes minus the drawn beams.
+    let demo = demo_document();
+    assert_eq!(doc.platforms, demo.platforms);
+    let names = |d: &Document| d.nodes.iter().filter(|n| n.part != "beam").map(|n| (n.id, n.name.clone())).collect::<Vec<_>>();
+    assert_eq!(names(&doc), names(&demo));
 }
 
 #[test]
@@ -46,8 +50,7 @@ fn m2_node_positions_are_unchanged() {
         assert_eq!(DVec3::new(p[0], p[1], p[2]), node.position, "{}", node.name);
         assert_eq!(v["name"].as_str(), Some(node.name.as_str()));
     }
-    // The M1 demo builds exactly the M0 nodes.
-    assert_eq!(demo_document().nodes, doc.nodes);
+
 }
 
 #[test]
@@ -122,7 +125,7 @@ fn repairs_are_reported() {
     let (doc, report) = Document::from_json(&value.to_string()).unwrap();
     assert_eq!(report.migrated_from, None);
     assert_eq!(report.repairs.len(), 1);
-    assert_eq!(doc.next_free_id(), 41);
+    assert_eq!(doc.next_free_id(), demo_document().next_free_id());
 }
 
 #[test]
