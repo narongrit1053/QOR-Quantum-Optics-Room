@@ -72,7 +72,7 @@ struct Gizmo {
 
 /// Line gizmos drawn without depth test, so handles inside large parts stay visible (POLA-45).
 #[derive(Default, Reflect, GizmoConfigGroup)]
-struct OnTop;
+pub(crate) struct OnTop;
 
 pub(crate) struct GizmoPlugin;
 
@@ -96,7 +96,7 @@ pub(crate) fn handles(doc: &Document, catalog: &Catalog, node: &Node, tool: Tool
     }
     let mate = mate_frames(doc, catalog, node);
     match tool {
-        Tool::Select | Tool::Measure => Vec::new(),
+        Tool::Select | Tool::Measure | Tool::Constrain => Vec::new(),
         // A node on a node can also be dragged off sideways: that unmates it (POLA-104).
         Tool::Move => match node.parent {
             Parent::Node(_) => match (&node.attach, mate) {

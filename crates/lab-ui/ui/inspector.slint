@@ -2,7 +2,7 @@
 // (spec §6.1, §6.4). No std-widgets here (D20): their style clashes with the dark theme.
 
 import { Theme } from "theme.slint";
-import { InspectorField, EditField, SetRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
+import { InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
 import { SectionHeader, SegmentedControl, PillButton, IconButton, Field, ListRow } from "components.slint";
 import { TextField, LabeledField, CornerTable, ZoneList, DoorList } from "fields.slint";
 import { PresetMenu } from "overlays.slint";
@@ -171,6 +171,8 @@ export component NodeInspector inherits Rectangle {
     in property <[InspectorField]> fields;
     in property <[EditField]> edit-fields;
     in property <[SetRow]> set-rows;
+    // M8 Constraints section (constrained nodes only).
+    in property <[ConstraintRow]> constraint-rows;
     // M6 Beam section: laser fields (laser nodes) or the beam at this optic (`beam-text`).
     in property <[EditField]> beam-fields;
     in property <string> beam-text;
@@ -271,6 +273,64 @@ export component NodeInspector inherits Rectangle {
         if root.beam-text != "": HorizontalLayout {
             padding-left: 9px;
             Note { text: root.beam-text; }
+        }
+        if root.constraint-rows.length > 0: Divider { }
+        if root.constraint-rows.length > 0: HorizontalLayout {
+            padding-left: 9px;
+            Text {
+                text: "Constraints";
+                color: Theme.text;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+        }
+        for c in root.constraint-rows: VerticalLayout {
+            spacing: 2px;
+            HorizontalLayout {
+                padding-left: 9px;
+                spacing: 6px;
+                // Cycles through the kinds valid for the picked pair.
+                PillButton {
+                    label: c.kind;
+                    clicked => { root.action("constraint." + c.index + ".kind"); }
+                }
+                if c.kind == "Concentric": PillButton {
+                    label: c.flip ? "Flipped" : "Flip";
+                    primary: c.flip;
+                    clicked => { root.action("constraint." + c.index + ".flip"); }
+                }
+                if c.kind == "Concentric": PillButton {
+                    label: "Lock rotation";
+                    primary: c.lock;
+                    clicked => { root.action("constraint." + c.index + ".lock"); }
+                }
+                Rectangle { }
+                PillButton {
+                    label: "Delete";
+                    destructive: true;
+                    clicked => { root.action("constraint." + c.index + ".delete"); }
+                }
+            }
+            if c.kind == "Mate" || c.kind == "Flush": LabeledField {
+                label: c.offset.label;
+                id: c.offset.id;
+                value: c.offset.value;
+                unit: c.offset.unit;
+                enabled: c.offset.enabled;
+                invalid: c.offset.invalid;
+                committed(i, t) => { return root.field-committed(i, t); }
+                edited(i, t) => { root.field-edited(i, t); }
+            }
+            if c.kind == "Angle" || (c.kind == "Concentric" && c.lock): LabeledField {
+                label: c.angle.label;
+                id: c.angle.id;
+                value: c.angle.value;
+                unit: c.angle.unit;
+                enabled: c.angle.enabled;
+                invalid: c.angle.invalid;
+                committed(i, t) => { return root.field-committed(i, t); }
+                edited(i, t) => { root.field-edited(i, t); }
+            }
         }
         if root.set-rows.length > 0: Divider { }
         if root.set-rows.length > 0: HorizontalLayout {

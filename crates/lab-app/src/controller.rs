@@ -188,6 +188,7 @@ fn refresh_inspector(ui: &AppWindow, app: &AppState, models: &UiModels) {
             Some(node) => {
                 let holes = doc.root_platform(id).and_then(|p| doc.platform(p)).map(|p| app.holes_for(p));
                 ui_models::fill_node(ui, models, node_view(doc, &app.catalog, node, holes.as_deref(), units));
+                ui_models::sync(&models.constraint_rows, crate::constrain::rows(node, units));
                 crate::beams::fill(ui, app, models, id);
                 1
             }
@@ -301,6 +302,8 @@ fn on_field_committed(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<U
             edit::node_field_edit(&cx, &a.catalog, field, text)
         } else if id.starts_with("beam.") {
             crate::beams::field_edit(&a, id, text)
+        } else if id.starts_with("constraint.") {
+            crate::constrain::field_edit(&a, id, text)
         } else if id.starts_with("node.") {
             edit::node_field_edit(&context(&a), &a.catalog, id, text)
         } else {
@@ -437,14 +440,16 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         }
         "import.step" => crate::import::choose_file(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),
-        "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" => {
+        "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" | "tool.constrain" => {
             let (index, tool) = match id {
                 "tool.move" => (1, Tool::Move),
                 "tool.rotate" => (2, Tool::Rotate),
                 "tool.measure" => (3, Tool::Measure),
+                "tool.constrain" => (4, Tool::Constrain),
                 _ => (0, Tool::Select),
             };
             ui.set_tool(index);
+            crate::constrain::reset(ui, tool == Tool::Constrain);
             app.borrow().send(ViewportRequest::SetTool(tool));
         }
         "edit.copy" | "edit.cut" | "edit.paste" | "edit.duplicate" => {
@@ -506,6 +511,10 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             }
         }
         _ if id.starts_with("file.") => files::handle_file_action(ui, app, models, id),
+        _ if id.starts_with("constraint.") => {
+            let outcome = crate::constrain::action_edit(&app.borrow(), id);
+            apply_outcome(ui, app, models, id, outcome);
+        }
         _ => {
             let outcome = {
                 let a = app.borrow();

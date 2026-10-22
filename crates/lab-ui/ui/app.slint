@@ -8,7 +8,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
-import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
@@ -23,7 +23,7 @@ import { ShortcutSheet } from "shortcuts.slint";
 import { ExportSheet } from "export.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 
@@ -178,16 +178,19 @@ export component AppWindow inherits Window {
     in property <[InspectorField]> inspector;
     in property <[EditField]> node-fields;
     in property <[SetRow]> set-rows;
+    in property <[ConstraintRow]> constraint-rows;
     in property <[EditField]> beam-fields;
     in property <string> beam-text;
     in property <bool> beam-laser;
     in property <bool> beam-on;
     // M6 `view.beams` (saved in Settings).
     in property <bool> show-beams: true;
-    // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure.
+    // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure, 4 constrain.
     in-out property <int> tool;
     // Measure readout; empty hides the chip.
     in property <string> measure-text;
+    // Constrain tool step hint, shown in the measure chip's place.
+    in property <string> constrain-hint;
 
     // ── Platform inspector ───────────────────────────────────────────────────
     in property <string> platform-name;
@@ -611,6 +614,14 @@ export component AppWindow inherits Window {
                         root.action("tool.measure");
                         return accept;
                     }
+                    if (event.text == "j" || event.text == "J") {
+                        root.action("tool.constrain");
+                        return accept;
+                    }
+                    if (event.text == Key.Escape && root.tool == 4) {
+                        root.action("tool.select");
+                        return accept;
+                    }
                     // Esc in the measure tool re-selects it, which clears the measurement.
                     if (event.text == Key.Escape && root.tool == 3) {
                         root.action("tool.measure");
@@ -1008,6 +1019,7 @@ export component AppWindow inherits Window {
                     fields: root.inspector;
                     edit-fields: root.node-fields;
                     set-rows: root.set-rows;
+                    constraint-rows: root.constraint-rows;
                     beam-fields: root.beam-fields;
                     beam-text: root.beam-text;
                     beam-laser: root.beam-laser;
@@ -1258,6 +1270,11 @@ export component AppWindow inherits Window {
                     active: root.tool == 3;
                     clicked => { root.action("tool.measure"); }
                 }
+                if !toolbar.compact: ToolButton {
+                    label: "Constrain";
+                    active: root.tool == 4;
+                    clicked => { root.action("tool.constrain"); }
+                }
                 Rectangle {
                     width: 9px;
                     Rectangle {
@@ -1323,7 +1340,7 @@ export component AppWindow inherits Window {
         }
 
         // ── Measure readout (bottom centre, above the toolbar) ───────────────
-        if root.tool == 3 && root.measure-text != "": Rectangle {
+        if (root.tool == 3 && root.measure-text != "") || (root.tool == 4 && root.constrain-hint != ""): Rectangle {
             x: toolbar.x + (toolbar.width - self.width) / 2;
             y: toolbar.y - self.height - 12px;
             height: 26px;
@@ -1336,7 +1353,7 @@ export component AppWindow inherits Window {
                 padding-left: 12px;
                 padding-right: 12px;
                 Text {
-                    text: root.measure-text;
+                    text: root.tool == 4 ? root.constrain-hint : root.measure-text;
                     color: Theme.text;
                     font-size: Theme.font-caption;
                     vertical-alignment: center;

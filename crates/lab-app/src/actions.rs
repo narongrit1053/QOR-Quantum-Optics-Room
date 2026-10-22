@@ -49,6 +49,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("tool.move", "Move Tool", "Tools", "translate drag gizmo", ""),
     a("tool.rotate", "Rotate Tool", "Tools", "turn angle gizmo", ""),
     a("tool.measure", "Measure Tool", "Tools", "distance ruler dimension", "M"),
+    a("tool.constrain", "Constrain", "Tools", "joint mate flush concentric angle align face axis", "J"),
     a("tool.rotate_left", "Rotate −15°", "Tools", "turn nudge counterclockwise", "Q"),
     a("tool.rotate_right", "Rotate +15°", "Tools", "turn nudge clockwise", "E"),
     a("platform.zone.add_rect", "Add Rectangular Zone", "Platform", "keep out area", ""),

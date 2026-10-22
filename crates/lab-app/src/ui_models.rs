@@ -11,7 +11,7 @@ use lab_app::{
     PlatformViewData, PresetRowData, PreviewLabelData, RoomViewData, SceneRowData, WallChoiceData, ZoneRowData,
 };
 use lab_ui::{
-    AppWindow, CornerRow, DoorRow, EditField, InspectorField, LibraryRow, OutlinePreview, PresetRow, PreviewLabel,
+    AppWindow, ConstraintRow, CornerRow, DoorRow, EditField, InspectorField, LibraryRow, OutlinePreview, PresetRow, PreviewLabel,
     SceneRow, SetRow, WallChoice, ZoneRow,
 };
 use slint::{Model, ModelRc, SharedString, VecModel};
@@ -22,6 +22,7 @@ pub struct UiModels {
     pub inspector: Rc<VecModel<InspectorField>>,
     pub node_fields: Rc<VecModel<EditField>>,
     pub set_rows: Rc<VecModel<SetRow>>,
+    pub constraint_rows: Rc<VecModel<ConstraintRow>>,
     pub beam_fields: Rc<VecModel<EditField>>,
     pub platform_outline_fields: Rc<VecModel<EditField>>,
     pub platform_corners: Rc<VecModel<CornerRow>>,
@@ -49,6 +50,7 @@ impl UiModels {
         ui.set_inspector(ModelRc::from(m.inspector.clone()));
         ui.set_node_fields(ModelRc::from(m.node_fields.clone()));
         ui.set_set_rows(ModelRc::from(m.set_rows.clone()));
+        ui.set_constraint_rows(ModelRc::from(m.constraint_rows.clone()));
         ui.set_beam_fields(ModelRc::from(m.beam_fields.clone()));
         ui.set_platform_outline_fields(ModelRc::from(m.platform_outline_fields.clone()));
         ui.set_platform_corners(ModelRc::from(m.platform_corners.clone()));
