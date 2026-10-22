@@ -18,6 +18,7 @@ mod beams;
 mod blueprint;
 mod export;
 mod camera;
+mod feature_pick;
 mod gizmo;
 mod glb;
 mod hole_material;
@@ -168,6 +169,9 @@ pub enum ViewportRequest {
     /// M8 view cube. Ease the 3D camera to this direction (as `CameraOrient` reports it) around
     /// the orbit pivot, keeping the distance. Ignored outside the 3D view.
     ViewDirection { yaw: f32, pitch: f32 },
+    /// M8 constrain tool. Outline this feature (in the target's frame: part frame for a node,
+    /// platform frame for a platform) while the tool is active. `None` clears.
+    HighlightFeature(Option<(SelectionTarget, lab_core::part::Feature)>),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -178,6 +182,8 @@ pub enum Tool {
     Rotate,
     /// POLA-53
     Measure,
+    /// M8. Clicks report [`ViewportEvent::FeaturePoint`] instead of selecting.
+    Constrain,
 }
 
 /// What a library drag carries.
@@ -260,6 +266,9 @@ pub enum ViewportEvent {
     /// M8. The main camera's orientation (render space: eye = focus + d·(cos p sin y, sin p,
     /// cos p cos y), Y up), sent when it turns by > 0.002 rad.
     CameraOrient { yaw: f32, pitch: f32 },
+    /// M8. A click with the constrain tool: hit point and surface normal in the target's frame
+    /// (part frame for a node, platform frame for a platform), mm, +Z up.
+    FeaturePoint { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -306,6 +315,7 @@ pub(crate) enum FrameRequest {
     ExportImage(std::path::PathBuf, u32, u32),
     SetBeams(bool),
     ViewDirection(f32, f32),
+    HighlightFeature(Option<(SelectionTarget, lab_core::part::Feature)>),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

@@ -31,6 +31,11 @@ pub fn on_transform_requested(
         let mut a = app.borrow_mut();
         let session = &mut a.session;
         let Some(node) = session.doc.node(id) else { return };
+        // A constrained node slides along its free degrees of freedom only.
+        let (position, rotation) = match &attach {
+            Attach::Constrained { constraints } => lab_mates::constraints::solve((position, rotation), constraints),
+            _ => (position, rotation),
+        };
         // SetAttach even when only the placement changes: its inverse restores the attach too,
         // and a drag may snap on and off holes before it ends.
         let command = Command::SetAttach { id, parent, attach, position, rotation };

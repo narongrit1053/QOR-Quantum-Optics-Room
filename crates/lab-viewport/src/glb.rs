@@ -33,8 +33,8 @@ pub(crate) struct GlbLod {
     node: NodeId,
     owner: SelectionTarget,
     pickable: bool,
-    /// LOD0: the only LOD that carries `SceneNode`/`PickId`, so outline, picking and framing
-    /// see one copy of the part (POLA-58).
+    /// LOD0: the only LOD that carries `SceneNode`, so outline and framing see one copy of the
+    /// part (POLA-58). Every LOD carries `PickId` (M8: picking at any distance).
     primary: bool,
     ready: bool,
 }
@@ -120,7 +120,8 @@ fn tag_instance(
         if lod.primary {
             piece.insert(SceneNode(lod.node));
         }
-        if lod.pickable && lod.primary {
+        // Every LOD picks, so the constrain tool works at any distance (hidden LODs are skipped).
+        if lod.pickable {
             piece.insert(PickId(lod.owner));
         }
     }

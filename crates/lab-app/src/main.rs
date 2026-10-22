@@ -7,6 +7,7 @@ mod beams;
 mod bom;
 mod bridge;
 mod clipboard;
+mod constrain;
 mod controller;
 mod dialogs;
 mod embed;

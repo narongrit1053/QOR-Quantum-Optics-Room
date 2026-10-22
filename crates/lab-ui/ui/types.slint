@@ -47,6 +47,16 @@ export struct EditField {
     invalid: bool,
 }
 
+// One constraint of a constrained node (M8). `kind`: "Mate", "Flush", "Concentric", "Angle".
+export struct ConstraintRow {
+    index: int,
+    kind: string,
+    offset: EditField,
+    angle: EditField,
+    flip: bool,
+    lock: bool,
+}
+
 // One row of the node inspector's Set list (M6): a member header (`header`, click selects
 // `node`) or one of that member's edit fields.
 export struct SetRow {

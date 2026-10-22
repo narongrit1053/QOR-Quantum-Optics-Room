@@ -102,6 +102,9 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     crate::transform::on_transform_requested(&ui, &app, &models, id, parent, attach, position, rotation, done);
                 }
                 ViewportEvent::PartPoint { point, normal } => crate::wizard::on_part_point(&ui, point, normal),
+                ViewportEvent::FeaturePoint { target, point, normal } => {
+                    crate::constrain::on_feature_point(&ui, &app, &models, target, point, normal);
+                }
                 ViewportEvent::ThumbnailReady { ok, .. } => {
                     if ok {
                         crate::library::fill(&app.borrow(), &models);
