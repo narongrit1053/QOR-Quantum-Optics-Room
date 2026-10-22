@@ -419,6 +419,9 @@ pub struct Node {
     pub pickable: bool,
     #[serde(default)]
     pub locked: bool,
+    /// Free-text user note (M7 D).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

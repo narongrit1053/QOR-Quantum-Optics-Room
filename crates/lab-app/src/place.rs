@@ -107,6 +107,7 @@ pub(crate) fn new_node(
         Geometry::Mesh { .. } => def.meta.get("finish").map(|f| crate::import::finish_from_meta(f)),
     };
     Some(Node {
+        note: String::new(),
         id: NodeId(id),
         name: def.name.clone(),
         part: def.id.clone(),

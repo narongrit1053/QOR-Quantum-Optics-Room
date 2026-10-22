@@ -55,6 +55,10 @@ pub enum Command {
         id: NodeId,
         locked: bool,
     },
+    SetNote {
+        id: NodeId,
+        note: String,
+    },
     AddPlatform {
         platform: Box<Platform>,
         index: Option<usize>,
@@ -431,6 +435,12 @@ impl Command {
                 let old = std::mem::replace(&mut node.locked, locked);
                 Ok((Command::SetLocked { id, locked: old }, node_update(id, changed)))
             }
+            Command::SetNote { id, note } => {
+                let node = doc.node_mut(id).ok_or(CommandError::UnknownNode(id))?;
+                let changed = node.note != note;
+                let old = std::mem::replace(&mut node.note, note);
+                Ok((Command::SetNote { id, note: old }, node_update(id, changed)))
+            }
             Command::AddPlatform { platform, index } => {
                 let id = platform.id;
                 check_new_id(doc, id.0)?;
@@ -596,6 +606,7 @@ impl Command {
             Command::SetLocked { id, locked: false } => format!("Unlock {}", node_name(id)),
             Command::SetPlacement { id, .. } => format!("Move {}", node_name(id)),
             Command::Rename { id, .. } => format!("Rename {}", node_name(id)),
+            Command::SetNote { .. } => "Edit Note".into(),
             Command::AddPlatform { platform, .. } => format!("Add {}", platform.name),
             Command::RemovePlatform(id) => {
                 format!("Delete {}", doc.platform(*id).map_or("Platform", |p| p.name.as_str()))
@@ -1054,6 +1065,7 @@ mod tests {
 
     fn part(id: u64, name: &str, parent: Parent, attach: Attach, z: f64) -> Node {
         Node {
+            note: String::new(),
             id: NodeId(id),
             name: name.into(),
             part: format!("thorlabs:{name}"),
@@ -1128,6 +1140,7 @@ mod tests {
         assert_eq!(mate.label(&doc), "Mate TR50/M");
         round_trip(&doc, mate);
         round_trip(&doc, Command::SetLocked { id: ids[0], locked: true });
+        round_trip(&doc, Command::SetNote { id: ids[0], note: "aligned 2026-10".into() });
         let mut params = crate::part::Params::new();
         params.insert("length".into(), crate::part::ParamValue::Number(75.0));
         round_trip(&doc, Command::SetParams { id: ids[2], params });

@@ -70,6 +70,7 @@ fn apply_inspect(
                             state.saved = cameras.iter().next().map(|(o, ..)| o.target_view());
                         }
                         let node = Node {
+                            note: String::new(),
                             id: NodeId(u64::MAX),
                             name: id.clone(),
                             part: id.clone(),

@@ -1544,6 +1544,12 @@ pub fn node_field_edit(cx: &EditContext, catalog: &Catalog, field: &str, text: &
             }
             Command::Rename { id, name: t.to_string() }
         }
+        "node.note" => {
+            if t == node.note {
+                return Ok(EditOutcome::Nothing);
+            }
+            Command::SetNote { id, note: t.to_string() }
+        }
         "node.x" | "node.y" | "node.z" => {
             if matches!(node.attach, Attach::Mate { .. }) {
                 return Err(EditError::Invalid("A mated part moves with its slide and rotation.".into()));
@@ -2124,6 +2130,7 @@ mod tests {
     fn node_rotation_edit() {
         let mut doc = test_doc();
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(101),
             name: "Post".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),
@@ -2153,6 +2160,7 @@ mod tests {
     fn e8_delete_platform_node_and_room() {
         let mut doc = test_doc();
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),
@@ -2220,6 +2228,7 @@ mod tests {
     fn e9_pinning_rule() {
         let mut doc = test_doc();
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),
@@ -2293,6 +2302,7 @@ mod tests {
     fn regression_origin_x_edit_preserved() {
         let mut doc = test_doc();
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),
@@ -2321,6 +2331,7 @@ mod tests {
     fn regression_preset_apply_pins_grid() {
         let mut doc = test_doc();
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),
@@ -2361,6 +2372,7 @@ mod tests {
             ],
         };
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),
@@ -2389,6 +2401,7 @@ mod tests {
     fn regression_node_selected_platform_edit_returns_stale() {
         let mut doc = test_doc();
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),

@@ -353,6 +353,7 @@ mod tests {
 
     fn part_node(id: u64, parent: Parent, position: DVec3, rotation: DQuat) -> Node {
         Node {
+            note: String::new(),
             id: NodeId(id),
             name: format!("n{id}"),
             part: "test:laser".into(),

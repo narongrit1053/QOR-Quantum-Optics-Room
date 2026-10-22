@@ -380,6 +380,7 @@ mod tests {
 
         let id = NodeId(doc.next_free_id());
         doc.nodes.push(Node {
+            note: String::new(),
             id,
             name: "PH50/M".into(),
             part: "t:PH50/M".into(),

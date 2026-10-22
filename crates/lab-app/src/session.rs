@@ -128,6 +128,7 @@ mod tests {
             support: Support::Fixed,
         });
         doc.nodes.push(lab_core::Node {
+            note: String::new(),
             id: NodeId(1),
             name: "Initial".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),
