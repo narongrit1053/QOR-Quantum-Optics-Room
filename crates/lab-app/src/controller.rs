@@ -402,6 +402,15 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             app.borrow().send(ViewportRequest::SetViewMode(ViewMode::Split));
         }
         "palette.open" => ui.set_palette_open(true),
+        "help.shortcuts" => {
+            let rows = crate::actions::ACTIONS
+                .iter()
+                .filter(|a| !a.shortcut.is_empty())
+                .map(|a| lab_ui::PaletteItem { id: a.id.into(), title: a.title.into(), group: a.group.into(), shortcut: a.shortcut.into() })
+                .collect::<Vec<_>>();
+            ui.set_shortcut_items(slint::ModelRc::new(slint::VecModel::from(rows)));
+            ui.set_shortcuts_open(true);
+        }
         "set.select_root" => {
             let root = match app.borrow().session.selection {
                 Some(SelectionTarget::Node(id)) => lab_app::set_root(&app.borrow().session.doc, id),

@@ -63,7 +63,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // candidates of other runs, the I/O worker.
     let settings = load_settings();
     let args: Vec<String> = std::env::args().collect();
-    let (session, open_error) = files::initial_session(&args, &settings);
+    let has_recovery = !find_recoverable(&default_root(), None).is_empty();
+    let (session, open_error) = files::initial_session(&args, &settings, has_recovery);
     let autosave = AutosaveSession::start(&default_root(), &session.title());
     if let Err(error) = &autosave {
         eprintln!("autosave unavailable: {error}");
@@ -96,6 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     stack::connect(&ui, &app);
     scene::connect(&ui, &app, &models);
     controller::refresh_all(&ui, &app.borrow(), &models);
+    files::show_recent(&ui, &app.borrow().settings);
     library::fill(&app.borrow(), &models);
     stack::fill(&ui, &mut app.borrow_mut());
     if !warnings.is_empty() {

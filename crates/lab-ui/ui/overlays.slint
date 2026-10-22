@@ -377,6 +377,7 @@ component MenuSeparator inherits Rectangle {
 // The project menu under the sidebar header. Items are disabled while file I/O runs.
 export component ProjectMenu inherits PopupWindow {
     in property <bool> busy;
+    in property <[string]> recent;
     callback action(string /* id */);
 
     width: 250px;
@@ -409,6 +410,11 @@ export component ProjectMenu inherits PopupWindow {
                 label: "Open Demo";
                 enabled: !root.busy;
                 clicked => { root.action("file.open_demo"); }
+            }
+            for name[i] in root.recent: MenuRow {
+                label: "↳ " + name;
+                enabled: !root.busy;
+                clicked => { root.action("file.open_recent." + i); }
             }
             MenuSeparator { }
             MenuRow {

@@ -41,6 +41,7 @@ pub enum PendingAction {
     New,
     Open,
     OpenDemo,
+    OpenRecent,
     Close,
 }
 

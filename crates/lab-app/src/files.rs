@@ -61,6 +61,8 @@ struct Flow {
     autosaves: BTreeMap<u64, PendingAutosave>,
     /// Load jobs: ticket → the chosen path (for the error sheet's name).
     loads: BTreeMap<u64, PathBuf>,
+    /// The project chosen in Open Recent, kept while a "Save changes?" sheet is open.
+    recent_target: Option<PathBuf>,
     /// The meaning of each button of the open recovery-flow sheet.
     recovery_buttons: Vec<RecoveryButton>,
 }
@@ -103,6 +105,23 @@ fn run_file_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiMo
         "file.new" => request(ui, app, models, PendingAction::New),
         "file.open" => request(ui, app, models, PendingAction::Open),
         "file.open_demo" => request(ui, app, models, PendingAction::OpenDemo),
+        "file.reopen_last" => {
+            let on = {
+                let mut a = app.borrow_mut();
+                a.settings.reopen_last = !a.settings.reopen_last;
+                a.settings.reopen_last
+            };
+            save_app_settings(app);
+            controller::show_toast(ui, &app.borrow(), if on { "On" } else { "Off" }, false);
+        }
+        _ if action.starts_with("file.open_recent.") => {
+            let index = action["file.open_recent.".len()..].parse::<usize>().ok();
+            let path = index.and_then(|i| recent_files(&app.borrow().settings).into_iter().nth(i));
+            if let Some(path) = path {
+                flow(|f| f.recent_target = Some(path));
+                request(ui, app, models, PendingAction::OpenRecent);
+            }
+        }
         "file.export_png" => crate::export_png::start(ui, app),
         _ => eprintln!("unknown file action {action}"),
     }
@@ -237,11 +256,14 @@ fn exit_on_ui_panic() {
 
 /// The document to start with: the project named on the command line (loaded synchronously),
 /// else the demo. On a load failure the demo is used and the error is returned for display.
-pub fn initial_session(args: &[String], settings: &Settings) -> (Session, Option<String>) {
-    let _ = settings;
+///
+/// With no command-line path and no crash autosave to offer (`has_recovery`), the last project
+/// is reopened when `settings.reopen_last` is on.
+pub fn initial_session(args: &[String], settings: &Settings, has_recovery: bool) -> (Session, Option<String>) {
     let demo = || Session::new_clean(demo_document(), None);
-    let Some(path) = args.get(1) else { return (demo(), None) };
-    match load_project(Path::new(path)) {
+    let reopen = if settings.reopen_last && !has_recovery { recent_files(settings).into_iter().next() } else { None };
+    let Some(path) = args.get(1).map(PathBuf::from).or(reopen) else { return (demo(), None) };
+    match load_project(&path) {
         Ok(project) => {
             // The app's catalog loads after this, so embedded parts are in it.
             let (_, skipped) = crate::embed::unpack(&lab_catalog::Catalog::load_default().0, &project.extras);
@@ -287,6 +309,11 @@ fn perform(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, a
         PendingAction::New => start_over(ui, app, models, Session::new_clean(default_document(), None)),
         PendingAction::OpenDemo => start_over(ui, app, models, Session::new_clean(demo_document(), None)),
         PendingAction::Open => open(ui, app, models),
+        PendingAction::OpenRecent => {
+            if let Some(path) = flow(|f| f.recent_target.take()) {
+                load_path(ui, app, models, path);
+            }
+        }
         PendingAction::Close => {
             quit(app);
             ui.hide().ok();
@@ -307,12 +334,7 @@ fn open(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     dialogs::show_file_dialog_local(dialogs::owner_hwnd(ui.window()), DialogKind::Open, initial_dir, move |result| {
         let Some(ui) = ui_weak.upgrade() else { return };
         match result {
-            DialogResult::Chosen(path) => {
-                let ticket = a.borrow_mut().ticket();
-                flow(|f| f.loads.insert(ticket, path.clone()));
-                set_busy(&ui, &a, &m, true, "Opening…");
-                submit(&a, IoJob::Load { ticket, path });
-            }
+            DialogResult::Chosen(path) => load_path(&ui, &a, &m, path),
             DialogResult::Cancelled => set_busy(&ui, &a, &m, false, ""),
             DialogResult::Failed(message) => {
                 set_busy(&ui, &a, &m, false, "");
@@ -320,6 +342,13 @@ fn open(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
             }
         }
     });
+}
+
+fn load_path(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, path: PathBuf) {
+    let ticket = app.borrow_mut().ticket();
+    flow(|f| f.loads.insert(ticket, path.clone()));
+    set_busy(ui, app, models, true, "Opening…");
+    submit(app, IoJob::Load { ticket, path });
 }
 
 fn on_loaded(
@@ -335,6 +364,7 @@ fn on_loaded(
         Ok(mut project) => {
             let repairs = project.report.repairs.clone();
             remember_dir(app, &project.location);
+            remember_recent(ui, app, &project.location);
             let extras = std::mem::take(&mut project.extras);
             let (added, skipped) = crate::embed::unpack(&app.borrow().catalog, &extras);
             if added > 0 {
@@ -494,6 +524,7 @@ fn on_saved(
                 clean
             };
             remember_dir(app, &location);
+            remember_recent(ui, app, &location);
             if clean {
                 submit(app, IoJob::ClearAutosave);
             }
@@ -772,6 +803,30 @@ pub(crate) fn initial_dir(app: &AppState) -> Option<PathBuf> {
         .or_else(|| app.settings.last_dir.clone())
 }
 
+/// Recent projects that still exist, newest first.
+pub(crate) fn recent_files(settings: &Settings) -> Vec<PathBuf> {
+    settings.recent_files.iter().filter(|p| p.exists()).cloned().collect()
+}
+
+/// Puts the project name list of the Open Recent menu into the window.
+pub(crate) fn show_recent(ui: &AppWindow, settings: &Settings) {
+    let names: Vec<slint::SharedString> = recent_files(settings).iter().map(|p| display_name(p).into()).collect();
+    ui.set_recent_files(slint::ModelRc::new(slint::VecModel::from(names)));
+}
+
+fn remember_recent(ui: &AppWindow, app: &Rc<RefCell<AppState>>, location: &ProjectLocation) {
+    app.borrow_mut().settings.push_recent(&location.path);
+    save_app_settings(app);
+    show_recent(ui, &app.borrow().settings);
+}
+
+fn save_app_settings(app: &Rc<RefCell<AppState>>) {
+    let settings = app.borrow().settings.clone();
+    if let Err(error) = save_settings(&settings) {
+        eprintln!("settings could not be saved: {error}");
+    }
+}
+
 /// Remembers the folder containing `location` as `settings.last_dir`.
 fn remember_dir(app: &Rc<RefCell<AppState>>, location: &ProjectLocation) {
     let Some(dir) = location.path.parent().map(Path::to_path_buf) else { return };
@@ -809,12 +864,12 @@ mod tests {
     #[test]
     fn initial_session_falls_back_to_the_demo() {
         let settings = Settings::default();
-        let (session, error) = initial_session(&["labsetup".into()], &settings);
+        let (session, error) = initial_session(&["labsetup".into()], &settings, false);
         assert!(error.is_none());
         assert!(!session.is_dirty() && session.location.is_none());
 
         let missing = std::env::temp_dir().join("labsetup-T6b-missing.labsetup");
-        let (session, error) = initial_session(&["labsetup".into(), missing.display().to_string()], &settings);
+        let (session, error) = initial_session(&["labsetup".into(), missing.display().to_string()], &settings, false);
         assert!(error.is_some_and(|e| e.contains("does not exist")));
         assert!(!session.is_dirty() && session.location.is_none());
     }
