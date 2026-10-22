@@ -18,6 +18,7 @@ import { ImportDialog } from "import.slint";
 import { Icon } from "icons.slint";
 import { WizardPanel } from "wizard.slint";
 import { CommandPalette } from "palette.slint";
+import { ShortcutSheet } from "shortcuts.slint";
 import { ExportSheet } from "export.slint";
 
 export { Theme }
@@ -294,6 +295,11 @@ export component AppWindow inherits Window {
     in property <[PaletteItem]> palette-items;
     callback palette-query(string);
     callback palette-run(string);
+
+    // Open Recent names and the keyboard shortcut sheet (M7 C).
+    in property <[string]> recent-files;
+    in-out property <bool> shortcuts-open;
+    in property <[PaletteItem]> shortcut-items;
     // "" ok, else error text (the sheet stays open).
     callback paste-corners(string /* target */, string /* text */) -> string;
     callback sheet-button(int);
@@ -384,7 +390,12 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open;
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open;
+    changed shortcuts-open => {
+        if (!root.shortcuts-open) {
+            EditState.focus-viewport += 1;
+        }
+    }
     changed palette-open => {
         if (!root.palette-open) {
             EditState.focus-viewport += 1;
@@ -558,6 +569,10 @@ export component AppWindow inherits Window {
                     if (event.text == "p" || event.text == "P" || event.text == "3") {
                         root.view-mode = 0;
                         root.view-mode-requested(0);
+                        return accept;
+                    }
+                    if (event.text == "?") {
+                        root.action("help.shortcuts");
                         return accept;
                     }
                     if (event.text == "m" || event.text == "M") {
@@ -752,6 +767,7 @@ export component AppWindow inherits Window {
                         x: 0;
                         y: parent.height + 4px;
                         busy: root.busy;
+                        recent: root.recent-files;
                         action(id) => { root.action(id); }
                     }
                 }
@@ -1338,6 +1354,14 @@ export component AppWindow inherits Window {
             palette-query(text) => { root.palette-query(text); }
             palette-run(id) => { root.palette-run(id); }
             palette-close => { root.palette-open = false; }
+        }
+
+        ShortcutSheet {
+            width: root.width;
+            height: root.height;
+            open: root.shortcuts-open;
+            items: root.shortcut-items;
+            close => { root.shortcuts-open = false; }
         }
 
         PasteSheet {

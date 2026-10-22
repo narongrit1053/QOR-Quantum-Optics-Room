@@ -22,6 +22,23 @@ pub struct Settings {
     /// M6: laser beams drawn in the viewport (`view.beams`).
     #[serde(default = "yes")]
     pub show_beams: bool,
+    /// M7: projects opened or saved lately, newest first (at most `MAX_RECENT`).
+    #[serde(default)]
+    pub recent_files: Vec<PathBuf>,
+    /// M7: open `recent_files[0]` on start (`file.reopen_last`).
+    #[serde(default = "yes")]
+    pub reopen_last: bool,
+}
+
+pub const MAX_RECENT: usize = 10;
+
+impl Settings {
+    /// Moves `path` to the front of `recent_files`.
+    pub fn push_recent(&mut self, path: &Path) {
+        self.recent_files.retain(|p| p != path);
+        self.recent_files.insert(0, path.to_path_buf());
+        self.recent_files.truncate(MAX_RECENT);
+    }
 }
 
 fn yes() -> bool {
@@ -36,6 +53,8 @@ impl Default for Settings {
             last_dir: None,
             theme: ThemeMode::default(),
             show_beams: true,
+            recent_files: Vec::new(),
+            reopen_last: true,
         }
     }
 }
@@ -87,4 +106,21 @@ pub fn save_settings_at(path: &Path, settings: &Settings) -> Result<(), FileErro
     }
     let json = serde_json::to_vec_pretty(settings).map_err(|e| FileError::internal(path, e.to_string()))?;
     atomic_write(path, &json)
+}
+
+#[cfg(test)]
+mod recent_tests {
+    use super::*;
+
+    #[test]
+    fn recent_files_are_newest_first_unique_and_capped() {
+        let mut s = Settings::default();
+        for i in 0..12 {
+            s.push_recent(Path::new(&format!("p{i}")));
+        }
+        s.push_recent(Path::new("p5"));
+        assert_eq!(s.recent_files.len(), MAX_RECENT);
+        assert_eq!(s.recent_files[0], Path::new("p5"));
+        assert_eq!(s.recent_files.iter().filter(|p| *p == Path::new("p5")).count(), 1);
+    }
 }
