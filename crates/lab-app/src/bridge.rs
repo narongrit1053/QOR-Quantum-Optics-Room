@@ -98,8 +98,8 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 ViewportEvent::PlaceRequested(request) => {
                     crate::place::on_place_requested(&ui, &app, &models, request);
                 }
-                ViewportEvent::TransformRequested { id, attach, position, rotation, done } => {
-                    crate::transform::on_transform_requested(&ui, &app, &models, id, attach, position, rotation, done);
+                ViewportEvent::TransformRequested { id, parent, attach, position, rotation, done } => {
+                    crate::transform::on_transform_requested(&ui, &app, &models, id, parent, attach, position, rotation, done);
                 }
                 ViewportEvent::PartPoint { point, normal } => crate::wizard::on_part_point(&ui, point, normal),
                 ViewportEvent::ThumbnailReady { ok, .. } => {

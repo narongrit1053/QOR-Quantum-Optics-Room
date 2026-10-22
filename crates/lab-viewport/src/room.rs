@@ -6,10 +6,10 @@
 //! Fading costs frames only while a wall is moving; settled walls are opaque (or hidden) and
 //! the viewport idles again.
 
-use bevy::{light::NotShadowCaster, math::DVec2, math::DVec3, prelude::*};
+use bevy::{camera::visibility::RenderLayers, light::NotShadowCaster, math::DVec2, math::DVec3, prelude::*};
 use lab_core::{Room, SelectionTarget, WallDisplay};
 
-use crate::camera::{OrbitCamera, TopPane, animate_camera};
+use crate::camera::{MAIN_LAYER, OrbitCamera, PANE_LAYER, TopPane, animate_camera};
 use crate::host::{PendingRequests, RedrawState};
 use crate::mesh::trimesh_to_bevy;
 use crate::picking::{HighlightLook, PickId};
@@ -77,6 +77,10 @@ impl WallInfo {
 }
 
 /// AssetId<StandardMaterial> is Copy, so Clone + Copy derive is valid.
+/// The Top pane's copy of a wall body (POLA-104).
+#[derive(Component)]
+pub(crate) struct WallCopy;
+
 #[derive(Component, Clone, Copy, Debug)]
 pub(crate) struct WallState {
     pub alpha: f32,
@@ -146,6 +150,28 @@ pub(crate) fn spawn_room(
                 WallState { alpha: 1.0, target: 1.0, material: handle.id() },
                 Transform::default(),
                 Visibility::Inherited,
+                RenderLayers::layer(MAIN_LAYER),
+            ))
+            .id();
+        // The Top pane of Split sees its own opaque copy: the fade follows the main camera only.
+        let copy_material = materials.add(StandardMaterial {
+            base_color: WALL_COLOR,
+            perceptual_roughness: 0.9,
+            metallic: 0.0,
+            ..default()
+        });
+        let copy = commands
+            .spawn((
+                SceneEntity,
+                Backdrop,
+                WallCopy,
+                Mesh3d(meshes.add(trimesh_to_bevy(&wall.body))),
+                MeshMaterial3d(copy_material.clone()),
+                NotShadowCaster,
+                HighlightLook::Standard { material: copy_material, base_color: WALL_COLOR, owner: SelectionTarget::Room },
+                Transform::default(),
+                Visibility::Inherited,
+                RenderLayers::layer(PANE_LAYER),
             ))
             .id();
         let footprint = commands
@@ -157,7 +183,7 @@ pub(crate) fn spawn_room(
                 Transform::default(),
             ))
             .id();
-        entities.extend([body, footprint]);
+        entities.extend([body, copy, footprint]);
     }
     entities
 }
@@ -250,12 +276,17 @@ fn update_wall_fade(
     index: Res<SceneIndex>,
     cameras: Query<&OrbitCamera, Without<TopPane>>,
     mut walls: Query<(Entity, &WallInfo, Mut<WallState>, &mut Visibility)>,
+    mut copies: Query<&mut Visibility, (With<WallCopy>, Without<WallState>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for request in &pending.0 {
         if let FrameRequest::SetWallDisplay(display) = request {
             fade.display = *display;
         }
+    }
+    let copy_visibility = if fade.display == WallDisplay::Hidden { Visibility::Hidden } else { Visibility::Inherited };
+    for mut visibility in &mut copies {
+        visibility.set_if_neq(copy_visibility);
     }
     let Ok(orbit) = cameras.single() else { return };
     // OrbitCamera::eye() is this frame's pose. GlobalTransform is not: it is propagated in

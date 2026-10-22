@@ -90,6 +90,7 @@ fn step(
                 Msaa::Sample4,
                 *transform,
                 ExportCamera,
+                crate::camera::main_view_layers(),
             ))
             .id();
         exports.current = Some(InFlight { path, camera, image, frames: 0 });

@@ -23,6 +23,10 @@ use crate::scene::{SceneIndex, from_render, part_mesh, to_render};
 use crate::{CatalogRes, FrameRequest, PointerButton, Tool, ViewportEvent, ViewportInput};
 
 const ROTATE_STEP: f64 = std::f64::consts::PI / 12.0;
+/// Rotate ring inner and outer radius, in gizmo radii.
+const RING: (f32, f32) = (1.05, 1.35);
+/// A press this far from the centre (gizmo radii) still grabs the ring, so a near miss does not orbit.
+const RING_GRAB: (f64, f64) = (0.85, 1.6);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Component)]
 pub(crate) enum GizmoHandle {
@@ -93,12 +97,13 @@ pub(crate) fn handles(doc: &Document, catalog: &Catalog, node: &Node, tool: Tool
     let mate = mate_frames(doc, catalog, node);
     match tool {
         Tool::Select | Tool::Measure => Vec::new(),
+        // A node on a node can also be dragged off sideways: that unmates it (POLA-104).
         Tool::Move => match node.parent {
             Parent::Node(_) => match (&node.attach, mate) {
                 (Attach::Mate { .. }, Some((parent, _, range))) if range.0 < range.1 && parent.z.length() > 0.0 => {
-                    vec![GizmoHandle::Slide]
+                    vec![GizmoHandle::Slide, GizmoHandle::Plane]
                 }
-                _ => Vec::new(),
+                _ => vec![GizmoHandle::Plane],
             },
             _ => vec![GizmoHandle::Plane],
         },
@@ -155,12 +160,21 @@ fn room_anchor(doc: &Document, catalog: &Catalog, node: &Node) -> Option<DVec3> 
 
 impl Drag {
     pub(crate) fn new(doc: &Document, catalog: &Catalog, node: &Node, handle: GizmoHandle, grab: DVec3) -> Option<Drag> {
+        let mut start = node.clone();
+        if handle == GizmoHandle::Plane && matches!(node.parent, Parent::Node(_)) {
+            // Moving a node that sits on a node: it continues free on its root, where it is now.
+            let (position, rotation) = doc.node_pose(node.id)?;
+            start.parent = doc.root_platform(node.id).map_or(Parent::Room, Parent::Platform);
+            start.attach = Attach::Free;
+            start.position = position;
+            start.rotation = rotation;
+        }
         Some(Drag {
             handle,
-            start: node.clone(),
+            anchor: room_anchor(doc, catalog, node)?,
+            start,
             root: root_frame(doc, node.id),
             grab,
-            anchor: room_anchor(doc, catalog, node)?,
             last: None,
         })
     }
@@ -261,6 +275,13 @@ fn plane_point((o, d): (DVec3, DVec3), z: f64) -> Option<DVec3> {
     (t > 0.0).then(|| o + d * t)
 }
 
+/// Where a press ray meets the ring's plane, when that is within the ring's grab band.
+fn ring_grab(anchor: DVec3, radius: f64, ray: (DVec3, DVec3)) -> Option<DVec3> {
+    let p = plane_point(ray, anchor.z)?;
+    let d = (p - anchor).truncate().length() / radius.max(1e-9);
+    (RING_GRAB.0..=RING_GRAB.1).contains(&d).then_some(p)
+}
+
 /// Parameter along the line `p + t·axis` of the point closest to `ray`.
 fn line_param(p: DVec3, axis: DVec3, (o, d): (DVec3, DVec3)) -> Option<f64> {
     let d = d.normalize_or_zero();
@@ -319,9 +340,20 @@ fn gizmo_input(
                                     && picks.get(e).is_ok_and(|p| p.0 == SelectionTarget::Node(id)))
                         };
                         let settings = MeshRayCastSettings::default().with_filter(&filter);
-                        let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned() else { continue };
-                        let handle = handles_q.get(entity).copied().unwrap_or(GizmoHandle::Plane);
-                        if let Some(drag) = Drag::new(doc, &catalog.0, node, handle, from_render(hit.point)) {
+                        let grabbed = match ray_cast.cast_ray(ray, &settings).first() {
+                            Some((entity, hit)) => {
+                                Some((handles_q.get(*entity).copied().unwrap_or(GizmoHandle::Plane), from_render(hit.point)))
+                            }
+                            None if available.contains(&GizmoHandle::Ring) => {
+                                let radius = f64::from(gizmo.radius / crate::scene::MM);
+                                room_anchor(doc, &catalog.0, node)
+                                    .and_then(|anchor| ring_grab(anchor, radius, render_ray(ray)))
+                                    .map(|p| (GizmoHandle::Ring, p))
+                            }
+                            None => None,
+                        };
+                        let Some((handle, grab)) = grabbed else { continue };
+                        if let Some(drag) = Drag::new(doc, &catalog.0, node, handle, grab) {
                             gizmo.drag = Some(drag);
                             capture.0 = true;
                         }
@@ -336,6 +368,7 @@ fn gizmo_input(
                             let (attach, position, rotation) = result.clone();
                             events.send(ViewportEvent::TransformRequested {
                                 id: drag.start.id,
+                                parent: drag.start.parent,
                                 attach,
                                 position,
                                 rotation,
@@ -348,10 +381,10 @@ fn gizmo_input(
                     }
                     ViewportInput::PointerUp { button: PointerButton::Left, .. } => {
                         let Some(drag) = gizmo.drag.take() else { continue };
+                        // A press without a move changes nothing (and must not unmate in place).
+                        let Some((attach, position, rotation)) = drag.last else { continue };
                         let s = &drag.start;
-                        let (attach, position, rotation) =
-                            drag.last.unwrap_or((s.attach.clone(), s.position, s.rotation));
-                        events.send(ViewportEvent::TransformRequested { id: s.id, attach, position, rotation, done: true });
+                        events.send(ViewportEvent::TransformRequested { id: s.id, parent: s.parent, attach, position, rotation, done: true });
                     }
                     _ => {}
                 }
@@ -424,7 +457,7 @@ fn update_gizmo(
                 Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
                     .with_translation(Vec3::Y * 0.0005),
             ),
-            GizmoHandle::Ring => (meshes.add(Torus::new(r * 1.1, r * 1.3)), strong.clone(), Transform::default()),
+            GizmoHandle::Ring => (meshes.add(Torus::new(RING.0 * r, RING.1 * r)), strong.clone(), Transform::default()),
             GizmoHandle::Slide => {
                 let axis = slide_axis(doc, &catalog.0, node).unwrap_or(Vec3::Y);
                 let length = r * 1.5;
@@ -457,8 +490,8 @@ fn draw_on_top(gizmo: Res<Gizmo>, handles: Query<(&GizmoHandle, &GlobalTransform
                 lines.circle(flat(global), r * 1.2, color);
             }
             GizmoHandle::Ring => {
-                lines.circle(flat(global), r * 1.1, color);
-                lines.circle(flat(global), r * 1.3, color);
+                lines.circle(flat(global), r * RING.0, color);
+                lines.circle(flat(global), r * RING.1, color);
             }
             GizmoHandle::Slide => {
                 let half = Vec3::Y * 0.75 * r / global.scale().y.max(1e-6);
@@ -591,7 +624,7 @@ mod tests {
             DVec3::new(0.0, 0.0, 45.0),
         );
         doc.nodes.push(post.clone());
-        assert_eq!(handles(&doc, &catalog, &post, Tool::Move), vec![GizmoHandle::Slide]);
+        assert_eq!(handles(&doc, &catalog, &post, Tool::Move), vec![GizmoHandle::Slide, GizmoHandle::Plane]);
         let grab = room(p0.extend(60.0));
         let drag = Drag::new(&doc, &catalog, &post, GizmoHandle::Slide, grab).unwrap();
         // A horizontal ray passing 10.4 mm below the grab point.
@@ -599,5 +632,21 @@ mod tests {
         let (attach, position, _) = drag.update(&doc, &catalog, ray, false, false).unwrap();
         assert!(matches!(attach, Attach::Mate { slide, .. } if slide == -15.0), "{attach:?}");
         assert!((position - DVec3::new(0.0, 0.0, 35.0)).length() < 1e-9);
+
+        // Move sideways: the post leaves the holder and stands free on the platform (POLA-104).
+        let pose = doc.node_pose(post.id).unwrap().0;
+        let drag = Drag::new(&doc, &catalog, &post, GizmoHandle::Plane, room(pose)).unwrap();
+        assert_eq!(drag.start.parent, Parent::Platform(pid));
+        let (attach, position, _) = drag.update(&doc, &catalog, down(room(pose + DVec3::X * 30.0)), true, false).unwrap();
+        assert_eq!(attach, Attach::Free);
+        assert!((position - (pose + DVec3::X * 30.0)).length() < 1e-6, "{position:?}");
+    }
+
+    #[test]
+    fn near_miss_still_grabs_the_ring() {
+        let anchor = DVec3::new(10.0, 0.0, 5.0);
+        assert!(ring_grab(anchor, 40.0, down(anchor + DVec3::X * 60.0)).is_some());
+        assert!(ring_grab(anchor, 40.0, down(anchor + DVec3::X * 20.0)).is_none());
+        assert!(ring_grab(anchor, 40.0, down(anchor + DVec3::X * 80.0)).is_none());
     }
 }
