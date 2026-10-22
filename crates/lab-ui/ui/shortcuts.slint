@@ -61,11 +61,12 @@ export component ShortcutSheet inherits Rectangle {
                 Text { text: "Keyboard shortcuts"; color: Theme.text; font-size: Theme.font-body; font-weight: 700; height: 28px; }
                 for item in root.items: SheetRow { title: item.title; group: item.group; keys: item.shortcut; }
                 Text { text: "Mouse"; color: Theme.text; font-size: Theme.font-body; font-weight: 700; height: 34px; vertical-alignment: bottom; }
-                SheetRow { title: "Orbit"; keys: "Left-drag"; }
-                SheetRow { title: "Pan"; keys: "Right / middle / Shift-drag"; }
-                SheetRow { title: "Zoom"; keys: "Wheel"; }
-                SheetRow { title: "Free placement"; keys: "Shift"; }
-                SheetRow { title: "Fine placement"; keys: "Ctrl"; }
+                SheetRow { title: "Pan"; keys: "Middle-drag"; }
+                SheetRow { title: "Orbit"; keys: "Shift+Middle-drag"; }
+                SheetRow { title: "Zoom to cursor"; keys: "Wheel"; }
+                SheetRow { title: "Select"; keys: "Left-click"; }
+                SheetRow { title: "Move selected part (Shift free, Ctrl 1 mm)"; keys: "Left-drag selected part"; }
+                SheetRow { title: "Menu"; keys: "Right-click"; }
             }
         }
     }

@@ -22,6 +22,8 @@ const SIZE: f32 = 96.0;
 const TOP_PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 /// The default 3D view (camera.rs `spawn_camera`).
 const HOME: (f32, f32) = (0.65, 0.55);
+/// Chamfer band width as a fraction of the face size (edges and corners).
+const BAND: f32 = 0.18;
 
 #[derive(Clone, Debug)]
 pub struct CubeFace {
@@ -40,7 +42,7 @@ fn dot(a: V, b: V) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// The six faces at camera orientation `yaw`/`pitch`, sorted back to front, in a `size`² box
+/// The six faces (each as 9 regions: centre, 4 edge bands, 4 corners) at camera orientation `yaw`/`pitch`, sorted back to front, in a `size`² box
 /// (screen y down).
 pub fn faces(yaw: f32, pitch: f32, size: f32) -> Vec<CubeFace> {
     let (sy, cy) = yaw.sin_cos();
@@ -61,21 +63,35 @@ pub fn faces(yaw: f32, pitch: f32, size: f32) -> Vec<CubeFace> {
         ("Top", [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], (yaw, TOP_PITCH)),
         ("Bottom", [0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], (yaw, -TOP_PITCH)),
     ];
-    let mut out: Vec<CubeFace> = defs
-        .iter()
-        .map(|&(label, n, a, b, (fy, fp))| {
-            let corner = |s: f32, t: f32| project([n[0] + s * a[0] + t * b[0], n[1] + s * a[1] + t * b[1], n[2] + s * a[2] + t * b[2]]);
-            let facing = dot(n, back);
-            CubeFace {
-                label,
-                points: [corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)],
-                front_facing: facing > 1e-3,
-                facing: facing.max(0.0),
-                yaw: fy,
-                pitch: fp,
+    // M9: each face splits into a 3×3 grid: the centre is the face, the chamfer bands (BAND of
+    // the face size) are its edges and the corner squares its corners.
+    let cuts = [-1.0, -1.0 + 2.0 * BAND, 1.0 - 2.0 * BAND, 1.0];
+    let mut out: Vec<CubeFace> = Vec::with_capacity(54);
+    for &(label, n, a, b, (fy, fp)) in &defs {
+        let corner = |s: f32, t: f32| project([n[0] + s * a[0] + t * b[0], n[1] + s * a[1] + t * b[1], n[2] + s * a[2] + t * b[2]]);
+        let facing = dot(n, back);
+        for i in 0..3 {
+            for j in 0..3 {
+                let (s0, s1, t0, t1) = (cuts[i], cuts[i + 1], cuts[j], cuts[j + 1]);
+                let (si, tj) = (i as f32 - 1.0, j as f32 - 1.0);
+                let (yaw, pitch, label) = if si == 0.0 && tj == 0.0 {
+                    (fy, fp, label)
+                } else {
+                    let d = [n[0] + si * a[0] + tj * b[0], n[1] + si * a[1] + tj * b[1], n[2] + si * a[2] + tj * b[2]];
+                    let len = dot(d, d).sqrt();
+                    (d[0].atan2(d[2]), (d[1] / len).asin(), "")
+                };
+                out.push(CubeFace {
+                    label,
+                    points: [corner(s0, t0), corner(s1, t0), corner(s1, t1), corner(s0, t1)],
+                    front_facing: facing > 1e-3,
+                    facing: facing.max(0.0),
+                    yaw,
+                    pitch,
+                });
             }
-        })
-        .collect();
+        }
+    }
     let depth = |f: &CubeFace| if f.front_facing { f.facing } else { -1.0 };
     out.sort_by(|a, b| depth(a).total_cmp(&depth(b)));
     out
@@ -103,7 +119,7 @@ fn inside(q: &[(f32, f32); 4], x: f32, y: f32) -> bool {
 
 thread_local! {
     static ORIENT: Cell<(f32, f32)> = const { Cell::new(HOME) };
-    static HOVER: Cell<Option<usize>> = const { Cell::new(None) };
+    static HOVER: Cell<Option<(f32, f32)>> = const { Cell::new(None) };
 }
 
 fn refresh(ui: &AppWindow) {
@@ -111,9 +127,8 @@ fn refresh(ui: &AppWindow) {
     let hover = HOVER.get();
     let rows: Vec<CubeFaceRow> = faces(yaw, pitch, SIZE)
         .into_iter()
-        .enumerate()
-        .filter(|(_, f)| f.front_facing)
-        .map(|(i, f)| {
+        .filter(|f| f.front_facing)
+        .map(|f| {
             let p = f.points;
             let commands = format!("M {} {} L {} {} L {} {} L {} {} Z", p[0].0, p[0].1, p[1].0, p[1].1, p[2].0, p[2].1, p[3].0, p[3].1);
             let cx = p.iter().map(|q| q.0).sum::<f32>() / 4.0;
@@ -124,7 +139,8 @@ fn refresh(ui: &AppWindow) {
                 cx,
                 cy,
                 show_label: f.facing > 0.35,
-                hovered: hover == Some(i),
+                // An edge or corner lights up on every face that shares it.
+                hovered: hover == Some((f.yaw, f.pitch)),
             }
         })
         .collect();
@@ -142,7 +158,7 @@ pub fn wire(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
     ui.on_view_cube_hover(move |x, y| {
         let Some(ui) = ui_weak.upgrade() else { return };
         let (yaw, pitch) = ORIENT.get();
-        let h = (x >= 0.0).then(|| hit_index(&faces(yaw, pitch, SIZE), x, y)).flatten();
+        let h = (x >= 0.0).then(|| hit(&faces(yaw, pitch, SIZE), x, y)).flatten();
         if h != HOVER.get() {
             HOVER.set(h);
             refresh(&ui);
@@ -169,14 +185,27 @@ mod tests {
     #[test]
     fn front_view_shows_front_and_hits_it() {
         let f = faces(0.0, 0.0, SIZE);
-        let visible: Vec<_> = f.iter().filter(|f| f.front_facing).map(|f| f.label).collect();
+        let visible: Vec<_> = f.iter().filter(|f| f.front_facing && !f.label.is_empty()).map(|f| f.label).collect();
         assert_eq!(visible, ["Front"]);
         assert_eq!(hit(&f, SIZE / 2.0, SIZE / 2.0), Some((0.0, 0.0)));
         assert_eq!(hit(&f, 1.0, 1.0), None);
         // From the home view, Front, Right and Top are visible; the frontmost is last.
         let f = faces(HOME.0, HOME.1, SIZE);
-        let visible: Vec<_> = f.iter().filter(|f| f.front_facing).map(|f| f.label).collect();
+        let visible: Vec<_> = f.iter().filter(|f| f.front_facing && !f.label.is_empty()).map(|f| f.label).collect();
         assert_eq!(visible.len(), 3);
         assert!(visible.contains(&"Top") && visible.contains(&"Front") && visible.contains(&"Right"));
+    }
+
+    #[test]
+    fn corners_and_edges_hit_iso_and_45() {
+        let f = faces(0.0, 0.0, SIZE);
+        // Front seen squarely spans 0.2..0.8 of SIZE; its top-right corner square is the
+        // front-right-top corner.
+        let (yaw, pitch) = hit(&f, SIZE * 0.79, SIZE * 0.21).unwrap();
+        assert!((yaw - std::f32::consts::FRAC_PI_4).abs() < 1e-4);
+        assert!((pitch - (1.0f32 / 3.0).sqrt().asin()).abs() < 1e-4);
+        // Top edge band (centre column): pitch 45°, yaw 0.
+        let (yaw, pitch) = hit(&f, SIZE / 2.0, SIZE * 0.21).unwrap();
+        assert!(yaw.abs() < 1e-4 && (pitch - std::f32::consts::FRAC_PI_4).abs() < 1e-4);
     }
 }
