@@ -28,6 +28,8 @@ const TOP_PITCH: f32 = FRAC_PI_2 - 0.001;
 /// M8: ±(π/2 − 0.01) so the view cube's Bottom works.
 const MIN_PITCH: f32 = -MAX_PITCH;
 const MAX_PITCH: f32 = FRAC_PI_2 - 0.01;
+/// Mouse-drag orbit stays just above the floor; only view-cube clicks reach Bottom.
+const DRAG_MIN_PITCH: f32 = -0.15;
 const ORBIT_RADIANS_PER_PX: f32 = 0.006;
 const DRAG_THRESHOLD_PX: f32 = 4.0;
 const ZOOM_PER_PX: f32 = 0.0025;
@@ -471,7 +473,7 @@ fn drag(orbit: &mut OrbitCamera, press: Press, delta: Vec2, viewport_height: f32
     } else {
         let before = view.transform().rotation;
         view.yaw -= delta.x * ORBIT_RADIANS_PER_PX;
-        view.pitch = (view.pitch + delta.y * ORBIT_RADIANS_PER_PX).clamp(MIN_PITCH, MAX_PITCH);
+        view.pitch = (view.pitch + delta.y * ORBIT_RADIANS_PER_PX).clamp(DRAG_MIN_PITCH.min(view.pitch), MAX_PITCH);
         // M8: eye and focus turn about the pivot, so the pivot stays put on screen.
         if let Some(pivot) = pivot {
             let turn = view.transform().rotation * before.inverse();

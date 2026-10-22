@@ -618,6 +618,10 @@ export component AppWindow inherits Window {
                         root.action("tool.constrain");
                         return accept;
                     }
+                    if (event.text == Key.Escape && root.wizard-open) {
+                        root.wizard-cancel();
+                        return accept;
+                    }
                     if (event.text == Key.Escape && root.tool == 4) {
                         root.action("tool.select");
                         return accept;

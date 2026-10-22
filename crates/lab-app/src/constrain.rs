@@ -87,8 +87,18 @@ pub fn on_feature_point(
             return;
         }
         let Some(node) = doc.node(child) else { return };
-        // A shaft goes into a bore against the bore's direction (both point out of their material).
-        let flip = matches!((&child_feature, &feature), (Feature::Axis { hole: a, .. }, Feature::Axis { hole: b, .. }) if a != b);
+        // Least motion: keep whichever end of the child axis points along the parent axis now
+        // (fitted axis signs are not "out of material").
+        let flip = match (&child_feature, &feature) {
+            (Feature::Axis { dir: cd, .. }, Feature::Axis { dir: pd, .. }) => {
+                let world = |at| lab_mates::constraints::world_pose(doc, at).map(|(_, q)| q);
+                match (world(Parent::Node(child)), world(parent)) {
+                    (Some(cq), Some(pq)) => (cq * *cd).dot(pq * *pd) < 0.0,
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
         let new = Constraint { kind, child: child_feature, parent: feature, offset: 0.0, angle: 0.0, flip, lock_rotation: false };
         let mut constraints = match &node.attach {
             Attach::Constrained { constraints } if node.parent == parent => constraints.clone(),

@@ -1,6 +1,7 @@
 // The connector wizard side panel (M4-PLAN POLA-60). It replaces the inspector while open; the
 // viewport shows only the part. All state lives in Rust (lab-app/src/wizard.rs).
 
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { SectionHeader, SegmentedControl, PillButton, IconButton } from "components.slint";
 import { TextField, LabeledField } from "fields.slint";
@@ -54,22 +55,30 @@ export component WizardPanel inherits VerticalLayout {
         color: Theme.text-tertiary;
         font-size: Theme.font-body;
     }
-    for row[i] in root.rows: HorizontalLayout {
-        height: 28px;
-        spacing: 8px;
-        Text {
-            text: row;
-            color: Theme.text-secondary;
-            font-size: Theme.font-body;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-        }
-        IconButton {
-            icon: "×";
-            size: 24px;
-            destructive: true;
-            clicked => { root.remove(i); }
+    // Scrolls so the form and buttons stay visible with many holes (KM100: 25).
+    ScrollView {
+        vertical-stretch: 1;
+        min-height: 84px;
+        VerticalLayout {
+            alignment: start;
+            for row[i] in root.rows: HorizontalLayout {
+                height: 28px;
+                spacing: 8px;
+                Text {
+                    text: row;
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                IconButton {
+                    icon: "×";
+                    size: 24px;
+                    destructive: true;
+                    clicked => { root.remove(i); }
+                }
+            }
         }
     }
 
@@ -164,7 +173,6 @@ export component WizardPanel inherits VerticalLayout {
         wrap: word-wrap;
     }
 
-    Rectangle { vertical-stretch: 1; }
     HorizontalLayout {
         spacing: 8px;
         alignment: end;

@@ -48,7 +48,7 @@ pub fn constrain(doc: &Document, id: NodeId, parent: Parent, constraints: Vec<Co
 }
 
 /// Room-frame pose of a parent frame: room, platform frame (top surface) or a node's own frame.
-fn world_pose(doc: &Document, at: Parent) -> Option<(DVec3, DQuat)> {
+pub fn world_pose(doc: &Document, at: Parent) -> Option<(DVec3, DQuat)> {
     match at {
         Parent::Room => Some((DVec3::ZERO, DQuat::IDENTITY)),
         Parent::Platform(p) => doc.platform_pose(p).map(|(o, r)| (o, DQuat::from_rotation_z(r))),
