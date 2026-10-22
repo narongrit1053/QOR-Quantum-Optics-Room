@@ -1,194 +1,177 @@
 # M9 plan: Fusion 360 UX (navigation, direct STEP, joints, floating part box, relationships bar)
 
-Board request on POLA-121 (2026-10-22/23), parent POLA-124. Built under [agents/FIRST-DRAFT.md](agents/FIRST-DRAFT.md): every task is built once, checked once (`cargo build --package lab-app --offline` plus the one check in its section), other flaws go to the Defect log (POLA-74, one line each), at most 2 attempts at any failure. Read this top part and your own section; open only the files it names. Worktree `D:/Try/LabSetup-wt/<KEY>` on branch `draft-<KEY>` from the current `draft` (M8 merged, `7c18fd3` or later). The cargo target was cleaned by POLA-126: your first build takes long; wait for the lock.
+New milestone after M8 (board request on POLA-121, 2026-10-22/23; parent POLA-124). Built under [agents/FIRST-DRAFT.md](agents/FIRST-DRAFT.md): every task is built once, checked once (`cargo build --package lab-app --offline` plus the one check in its section), other flaws go to the Defect log (POLA-74, one line each), at most 2 attempts at any failure. Read this top part and your own section; open only the files it names. Branch from the current `draft`.
 
-**Exit criterion (stage 5 walks it once):** (1) drag a KM100 STEP from Explorer onto the table: it appears seated on a hole within a few seconds; a second drag of the same file is instant. (2) The area round a hole on its top face picks as one flat plane. (3) Press J, click the KM100: the floating box opens; spin it, pick the mounting bore's circular edge, then the post's top edge in the main view; choose Revolute, limits 0–90°, Enter. (4) The bar shows "KM100 → Post · Revolute"; dragging the KM100 rotates it about the post only and stops at 90°. (5) Middle-drag pans, Shift+middle orbits, left-dragging the selected post holder moves it hole to hole; typing 50 + Enter while dragging moves it exactly 50 mm. (6) Right-click > Hide works on a body; Ctrl+Z shows "Undid: …". (7) Save, reopen: joints and bar unchanged; idle CPU/GPU back to ~0 % with the floating box closed.
+**Exit criterion (stage 4 walks it once):** (1) drag a KM100 STEP from Explorer onto the table: it appears seated on a hole within a few seconds; a second drag of the same file is instant. (2) The area around a hole on its top face picks as one flat plane. (3) Press J, click the KM100: the floating box opens; spin it, pick the mounting bore's circular edge, then the post's top edge in the main view; choose Revolute, limits 0–90°, Enter. (4) The bar shows "KM100 → Post · Revolute"; dragging the KM100 rotates it about the post only and stops at 90°. (5) Middle-drag pans, Shift+middle orbits, left-dragging the selected post holder moves it hole to hole; typing 50 + Enter while dragging moves it exactly 50 mm. (6) Right-click > Hide works on a body; Ctrl+Z shows "Undid: …". (7) Save and reopen: joints and bar unchanged; idle CPU/GPU returns to ~0 % with the floating box closed.
 
-## What already exists (reuse, do not rebuild)
+## What already exists (do not rebuild)
 
-- **Camera input** (`lab-viewport/src/camera.rs`): `handle_input` (`:314`) turns `ViewportInput` into orbit/pan/zoom; `drag()` (`:466`) pans when `button != Left || shift || Top`, else orbits about `orbit_pivot()` (`:442`, M8 selection pivot). Wheel already zooms toward the cursor (`zoom_toward`, `:488`). Left clicks without drag go to `Clicks` for picking. `GizmoCapture` makes a press belong to the gizmo.
-- **Gizmo drag** (`lab-viewport/src/gizmo.rs`): `handles(doc, catalog, node, tool)` (`:93`); `Tool::Move` grabs the ring *or the selected part itself* as `GizmoHandle::Plane`; `Drag::update` (`:184`) snaps to platform holes (`lab_mates::snap`; Shift free, Ctrl 1 mm), emits `ViewportEvent::TransformRequested { .., done }`. Constrained nodes are re-solved by the app after a drag (POLA-120).
-- **Actions/keys**: `lab-app/src/actions.rs` `ACTIONS` (palette + shortcut sheet); single keys in `lab-ui/ui/app.slint` `key-pressed` (`:585-640`), Ctrl keys in `capture-key-pressed` (`:443-530`, Ctrl+Shift+Z redo already works, Q/E rotate at `:519-526`); sheet `lab-ui/ui/shortcuts.slint` (Mouse block `:63`). Unknown action ids are ignored by `controller.rs` `on_action`.
-- **View cube**: `lab-app/src/view_cube.rs` `faces()`/`hit()`, `view_cube.slint`, `ViewportRequest::ViewDirection { yaw, pitch }`.
-- **Features**: `lab_import::features::{pick_feature, detect}` (`features.rs`), `fit::fit_hole`, `PartDef.features`, `lab_core::part::{Feature, Frame { origin, z, x }}`.
-- **Constraints (M8)**: `Attach::Constrained { constraints }`, `lab_mates::constraints::{solve, default_kind, constrain, world_pose}`, tool UI `lab-app/src/constrain.rs`, `ViewportEvent::FeaturePoint`, `ViewportRequest::HighlightFeature`, `Tool::Constrain`.
-- **Import**: `lab_import::import_step` (blocking, stores the GLB by *output* hash), `lab-app/src/import.rs` `start()` (thread, `detect`, `seat_frame`, `hole_connectors`, `write_part`); LODs via `lod::decimate` (vertex clustering, also used for LOD0 when over `LOD0_BUDGET`).
-- **Placement**: `ViewportRequest::DragPart(PartDrag::Move/Drop { pos, mods })` ghosts a catalog part under the cursor and seats it on a hole → `ViewportEvent::PlaceRequested`. Direct STEP reuses this.
-- **Undo**: `lab_core::History` keeps a label per entry (`execute_labeled`, `execute_coalescing` + `end_gesture`, `undo`); `controller::show_toast(ui, app, text, undo)`.
-- **Walls**: `WallDisplay::{Auto, Always, Hidden}` + `ViewportRequest::SetWallDisplay`. **Isolate**: `ViewportRequest::Isolate(Option<PlatformId>)` (`isolate.rs`). **Lock**: `Node.locked`.
+- **Actions/keys:** `ACTIONS: &[ActionInfo { id, title, group, keywords, shortcut }]` (`lab-app/src/actions.rs:16`). Keys are dispatched in Slint: global `capture-key-pressed` (`app.slint:443-534`: Ctrl+K, Ctrl+Z/Y/Shift+Z, Ctrl+N/O/S/C/X/V/D, Delete, arrows, Q/E) and the viewport `FocusScope` (`app.slint:585-643`: F, Shift+F, T, P/3, ?, M, J, Esc), both → `root.action(id)` → `controller.rs:335 run_action`. Shortcut sheet `lab-ui/ui/shortcuts.slint` (Mouse block `:63-68`), rows filled at `controller.rs:409-423` from `ACTIONS` + `NUDGE_KEYS`.
+- **Camera** (`lab-viewport/src/camera.rs`): `handle_input` `:314` (pointer `:338-373`, scroll `:377-395`), `drag()` `:466` (today `pan = button != Left || shift || Top`), zoom toward cursor already (`zoom_toward` `:488`), selection pivot `orbit_pivot` `:443`. Clicks = left-up without drag → `Clicks` (`:366-371`) → `picking.rs:54 pick`; hover exists (`Selection.hovered`, `picking.rs:89-102`).
+- **Body drag + hole snap:** `gizmo.rs`: `gizmo_input` `:303` (Move mode: press on the selected part = `Plane` handle `:336-345`), `Drag::update(doc, catalog, ray, shift, ctrl)` `:184` (Ctrl = 1 mm, Shift = free, `lab_mates::snap` → `Attach::Hole`) → `ViewportEvent::TransformRequested` → `lab-app/src/transform.rs:19`.
+- **View cube:** `lab-app/src/view_cube.rs` (`CubeFace`, `faces`, `hit_index`, `hit`, `wire` → `ViewportRequest::ViewDirection`), `lab-ui/ui/view_cube.slint`. Six faces + Home only.
+- **M8 constraints:** `Attach::Constrained { constraints }`, `Constraint`, `ConstraintKind` (`lab-core/src/model.rs:400-425`), `lab_mates::constraints::{solve, default_kind, constrain, world_pose}`, tool `lab-app/src/constrain.rs` (thread-local `FIRST`, `on_feature_point`, `resolve`/`snap`), `ViewportEvent::FeaturePoint` (`lab-viewport/src/lib.rs:271`, emitted `feature_pick.rs:86`, handled `bridge.rs:105`), `ViewportRequest::HighlightFeature` (`lib.rs:174`). Inspector rows `inspector.slint:277-311`, `constrain::rows/field_edit/action_edit`.
+- **Import:** `lab_import::import_step` (`lab-import/src/lib.rs:104`), `run_step2glb` `:218`, LODs `:144-148` via `lod.rs:11 decimate` (vertex clustering, `cluster` `:39`). GLB cached by output hash `meshes/<blake3>.glb` (`:152-160`) but step2glb runs every time. App flow `lab-app/src/import.rs`: `choose_file` `:81` → `start` `:108` (thread) → `finish` `:249`; wizard `wizard.rs:127 open`. **No Explorer drag-drop anywhere.**
+- **Library placement:** `library.rs:141 drag` → `ViewportRequest::DragPart(PartDrag::Move/Drop/Cancel)` → `lab-viewport/src/place.rs` (`placement` `:60`, `drag_part` `:201`, ghost `:265`) → `PlaceRequested` → `lab-app/src/place.rs:18`.
+- **Undo:** `lab-core/src/history.rs` (`undo_label`/`redo_label` `:184/188`), `controller.rs:688 undo_redo` toasts "Undo <label>". Toast: `controller.rs:246 show_toast(ui, app, text, undo)`.
+- **Hide/isolate:** no per-node hide. Platform isolate `ViewportRequest::Isolate(Option<PlatformId>)` → `isolate.rs:43`. Walls: `WallDisplay { Auto, Always, Hidden }` (`prefs.rs:18`, `room.rs:287-310`). `Node.locked` (`model.rs:452`). No viewport context menu (only `PartMenu` on library rows, `app.slint:1137`).
+- **Rendering:** Bevy in its own thread rendering into a wgpu texture shown by Slint; `host.rs:311 run_on_demand` blocks when idle (`RedrawState::keep_alive`). Offscreen cameras already exist: `thumbnail.rs` (`RenderTarget::Image`), `export.rs`.
+- File format: serde on `Attach`, `SCHEMA_VERSION = 3` (`model.rs:16`).
 
 ## Decisions
 
-- **Mouse (Fusion):** middle-drag pans; Shift+middle-drag orbits about the M8 pivot; wheel zoom unchanged. Left press on the **selected** body drags it in *every* tool except Measure/Constrain/Joint (the Select tool gets the `Plane` handle; jointed bodies get their DOF drag, stage 4). Left-drag on empty space and right-drag do nothing. In Top view middle-drag pans and Shift+middle also pans. A right click without drag opens the context menu.
-- **Keys:** J Joint, M Move tool, I Measure, H Hide/Show selection, S command palette (Ctrl+K stays), F / Shift+F frame (exist), Ctrl+Shift+Z redo (exists). **Rotate ±15° moves from Q/E to R (+15°) / Shift+R (−15°)** (single keys match the rest; Ctrl+Q reads as quit on many apps). E, L, Q, D are unmapped. M8 Constrain keeps its palette row without a key.
-- **Joints are a new `Attach::Joint`, closed form, no solver.** Child pose = P · offset · motion(values) · C⁻¹ with P, C the two picked origin frames. M8 `Constrained` stays as is and still loads. **Ground = the existing `Node.locked`** (palette row "Ground", no new field). **Rigid Group** = Rigid joints from every other selected node to the first, one undo step.
-- **Joint order** for the bar: `Joint.seq`, assigned `doc max seq + 1` at creation (no schema bump: `#[serde(default)]`). M8 constraint chips follow the joints, in node order.
-- **Live preview without ghosts:** the Joint tool applies the joint for real as a coalescing gesture (`execute_coalescing`, key `"joint"`); every panel edit re-applies it; Enter = `end_gesture`; Esc = `end_gesture` + `undo`. One undo step either way.
-- **Hide and isolate-selection are view state**, not document data: `AppState.hidden: BTreeSet<NodeId>`, not saved, not undoable (Fusion behaves the same).
-- **Direct STEP cache key = blake3 of the STEP bytes**, stored as `PartDef.meta["step_hash"]`; a library part with the same hash is reused without converting. Old imports (no `step_hash`) are not matched, so they get the new decimator on their next drop.
-- **Explorer file drop:** Slint 1.18 does not forward winit's `DroppedFile`. Enable `slint`'s `unstable-winit-030` feature in the workspace `Cargo.toml` (the *only* sanctioned feature change in M9; the winit crate is already in the offline registry) and use `slint::winit_030::WinitWindowAccessor::on_winit_window_event`. Cursor position at drop: Win32 `GetCursorPos` + `ScreenToClient` (winit's `DroppedFile` carries none). If that build fails twice offline, fall back to Insert STEP only and log it.
-- **Floating part box = a second Bevy camera** on its own render layer drawing one node's mesh copy into a second texture; spawned on open, despawned on close (no idle cost). Picks in it send the same `ViewportEvent::FeaturePoint` as the main view, so the Joint tool does not care where a pick came from.
+- **Joints replace M8 constraints for new work; constraints keep loading and working.** J becomes **Joint**; the M8 Constrain tool stays in the palette with no key.
+- **One joint per child node, one parent** (same rule as M8): `Attach::Joint { joint }`. Fusion-style closed form, no iterative solve: child pose in parent frame = `P · T(offset, angle, flip) · D(values) · C⁻¹`, where `P`/`C` are the parent/child joint frames and `D` applies the kind's free DOF values. Drag changes `values` only, clamped to limits.
+- **Ground = the existing `Node.locked`** (menu label Ground/Unground). **Rigid Group = Rigid joints** from each other selected node to the first one at the current relative pose; no new structure.
+- **No schema bump:** new enum variants and `#[serde(default)]` fields only.
+- **Mouse (Fusion):** left-click select; left-drag on the *selected* body drags it (any tool except Measure/Joint/Constrain picking); left-drag on empty space or an unselected body does nothing; **middle-drag pans; Shift+middle-drag orbits** about the M8 pivot; wheel zooms toward the cursor (exists); right-click (no drag) opens the body context menu; right-drag does nothing. Top view: middle-drag pans, Shift+middle does nothing.
+- **Keys:** J Joint, M Move, I Measure, H Hide/Show toggle, Shift+H Show all bodies, S command palette (Ctrl+K stays), Ctrl+Shift+Z redo (Ctrl+Y stays), F / Shift+F frame (exist). **Q/E rotate → R / Shift+R** (+15° / −15°); Q, E, L, D unbound.
+- **Explorer drop uses Win32 directly** (`WM_DROPFILES` via a window subclass, functions declared by hand with `extern "system"`, linked from shell32/comctl32/ole32): no Cargo feature changes (the build rule stands). If winit registered an OLE drop target on the HWND, `RevokeDragDrop` it first.
+- **STEP cache by input hash:** blake3 of the STEP bytes stored in the library entry; a repeat insert of the same bytes reuses the part and skips step2glb.
+- **Plane-preserving LOD:** quadric-error edge collapse (Garland–Heckbert) on a welded mesh, boundary/crease edges penalised; coplanar regions collapse with zero error so they stay flat. Same `decimate` signature.
+- **Floating part box = second Bevy camera rendering to an image** on its own render layer, shown in a Slint floating panel; inactive and not rendered while closed.
 
 ## Stages and owners
 
-| Stage | Issue | Task | Engineer | Owns (new or changed) |
-|---|---|---|---|---|
-| 1 | POLA-125 | Plan | Lead | this file |
-| 1 | POLA-126 | Cleanup (disk) | Engineer Sonnet | worktrees, builds, `target` |
-| 2 | POLA-127 | A. Fusion navigation, keys, view cube edges/corners | Engineer Opus Low | `camera.rs` (`drag`, `handle_input` button rules), `gizmo.rs` `handles()` Select arm only, `actions.rs`, `app.slint` key handlers, `shortcuts.slint`, `view_cube.rs`, `view_cube.slint` |
-| 2 | POLA-128 | B. Direct STEP insert + plane-preserving LOD | Engineer Opus | `lab-import/src/lod.rs`, `lab-import/src/lib.rs` (`import_step` hash), `lab-app/src/import.rs` (`quick_insert`), `lab-app/src/file_drop.rs` (new), workspace `Cargo.toml` slint feature, `main.rs`/`lib.rs` one wiring line each |
-| 2 | POLA-129 | C. Joint model, pose, snaps | Engineer Opus | `lab-core/src/model.rs` (`Attach::Joint`, `Joint`, `JointKind`, `Limit`), `lab-mates/src/joints.rs` (new), `lab-import/src/snaps.rs` (new), their `mod` lines, minimal `match attach` arms elsewhere |
-| 2 | POLA-130 | D. Context menu, hide/isolate/walls, undo toast, hover, tool hint | Engineer Opus Low | `lab-app/src/context_menu.rs` (new), `lab-ui/ui/context_menu.slint` (new), `lab-viewport/src/isolate.rs`, `lab-viewport/src/outline.rs` (hover), `camera.rs` right-click (3 lines) + `picking.rs` `ContextMenu` emission, `lab-core/src/history.rs` (`undo_label`/`redo_label`), undo/redo arms in `controller.rs`, `tool-hint` property + label in `app.slint` |
-| 3 | POLA-131 | Merge stage 2 | Engineer Sonnet | merge commits, `Integration fix:` commits |
-| 4 | POLA-132 | E. Joint tool + panel + inspector | Engineer Opus | `lab-app/src/joint.rs` (new), `lab-ui/ui/joint_panel.slint` (new), inspector Joint section (`inspector.slint`, `ui_models.rs`, `edit.rs`), `Tool::Joint` + hover feature events in `picking.rs`/`feature_pick.rs` |
-| 4 | POLA-133 | E2. DOF drag, numeric entry, DOF glyph | Engineer Opus Low | `gizmo.rs` (`Drag` for `Attach::Joint`, typed value), DOF glyph in `feature_pick.rs` (append-only, E also edits it), numeric field in `overlays.slint`, its `controller.rs` arms |
-| 4 | POLA-134 | F. Floating part box | Engineer Opus | `lab-viewport/src/part_box.rs` (new), `host.rs` (second texture), `lab-ui/ui/part_box.slint` (new) + instance in `app.slint`, `lab-app/src/part_box.rs` (new) |
-| 4 | POLA-135 | G. Relationships bar | Engineer Opus Low | `lab-app/src/relations.rs` (new), `lab-ui/ui/relations_bar.slint` (new) + instance in `app.slint`, `ViewportRequest::HighlightNodes` handling in `outline.rs` (append) |
-| 5 | POLA-136 | Merge stage 4, walkthrough, release `m9-draft` | Engineer Sonnet | merge commits, evidence, release per FIRST-DRAFT.md |
+| Stage | Task | Engineer | Owns (new or changed) |
+|---|---|---|---|
+| 1 | A. Navigation, keymap, view cube corners, numeric entry, undo toast | Engineer Opus Low | `lab-viewport/src/camera.rs`, `lab-viewport/src/gizmo.rs`, `DragValue` in `lab-viewport/src/lib.rs`, `lab-app/src/actions.rs` (remaps), key handlers in `app.slint`, `lab-ui/ui/shortcuts.slint`, `lab-app/src/view_cube.rs` + `view_cube.slint`, `controller.rs` (`undo_redo` text, drag-number arms) |
+| 1 | B. Direct STEP insert + plane-preserving LOD | Engineer Opus | `lab-import/src/lod.rs`, `lab-import/src/lib.rs` (hash cache), `PartDef.source_hash` in `lab-core/src/part.rs`, `lab-app/src/import.rs`, `lab-app/src/drop.rs` (new) + hook in `main.rs`, `PlaceAt` in `lab-viewport/src/lib.rs` + its handling in `place.rs` |
+| 1 | C. Joint model, solver, snap points | Engineer Opus | `Attach::Joint` + joint types in `lab-core/src/model.rs`, `lab-mates/src/joints.rs` (new) + `mod`, `lab-import/src/snaps.rs` (new) + `mod`, minimal `Joint` arms where `match attach` stops compiling |
+| 1 | E. Floating part box | Engineer Opus | `lab-viewport/src/part_box.rs` (new) + plugin registration, `PartBox*` variants in `lab-viewport/src/lib.rs`, `lab-ui/ui/part_box.slint` (new) + instance in `app.slint`, `lab-app/src/part_box.rs` (new) + controller/bridge arms |
+| 2 | Merge stage 1 | Engineer Sonnet | merge commits, `Integration fix:` commits |
+| 3 | D. Joint tool UI, DOF drag, DOF glyph, joint inspector | Engineer Opus | `lab-app/src/joint.rs` (new), `lab-viewport/src/feature_pick.rs` (snap/hover drawing, preview pose), jointed-body branch in `gizmo.rs`, Joint section in `inspector.slint` + `ui_models.rs`, joint panel `lab-ui/ui/joint_panel.slint` (new) |
+| 3 | F. Context menu, Hide, Isolate selection, walls toggle, body hover | Engineer Opus Low | `Node.hidden` + `Command::SetHidden` in `lab-core`, `lab-viewport/src/isolate.rs`, right-click in `camera.rs`/`picking.rs`, `lab-ui/ui/context_menu.slint` (new), `lab-app/src/context.rs` (new) |
+| 3 | G. Relationships bar | Engineer Sonnet | `lab-app/src/relationships.rs` (new), `lab-ui/ui/relationships_bar.slint` (new) + instance in `app.slint`, `ViewportRequest::Highlight` + its drawing (`lab-viewport/src/outline.rs` or wherever the selection outline lives) |
+| 4 | Merge stage 3, walkthrough, release `m9-draft` | Engineer Sonnet | merge commits, evidence, release per FIRST-DRAFT.md |
 
-Tasks in one stage own disjoint files except the shared rows (`ACTIONS`, the `controller.rs` action `match`, `app.slint` instances, `lib.rs` enum variants, `mod` lines): append at the end of their block; Sonnet keeps both sides at merge.
+Same-stage tasks own disjoint files. Shared rows (`ACTIONS`, the controller `match`, `ViewportRequest`/`ViewportEvent` enums, `app.slint` instances, bridge arms) are appended at the end of their block; Sonnet keeps both sides at merge. Each task adds its own `ACTIONS` rows and key branches; only A changes existing ones.
 
-**Shared interfaces fixed now** (add exactly these; the owner implements, others code against them):
+## A. Navigation, keymap, view cube corners, numeric entry, undo toast (Engineer Opus Low)
 
-```rust
-// lab-viewport/src/lib.rs
-pub enum Tool { …, Joint }                               // C adds the variant (stage 2); E gives it behaviour
-pub enum ViewportRequest { …,
-    SetHidden(Vec<lab_core::NodeId>),                    // D: these nodes and their descendants are not drawn or picked
-    IsolateNodes(Option<Vec<lab_core::NodeId>>),         // D: show only these nodes (+descendants, + their root platform); hide room/walls/fixtures like Isolate
-    HighlightNodes(Vec<lab_core::NodeId>),               // G: hover outline on these (empty clears); D draws it with the hover outline
-    PartBox(Option<PartBoxSpec>),                        // F
-    PartBoxInput(ViewportInput),                         // F: input in the box's own physical px
-    DragValue(f64),                                      // E2: typed value (mm or degrees) for the drag in progress; applies exactly and ends it
-}
-pub struct PartBoxSpec { pub node: lab_core::NodeId, pub width: u32, pub height: u32 }
-pub enum ViewportEvent { …,
-    ContextMenu { target: Option<SelectionTarget>, pos: Vec2 },          // D: right click without drag (selects the target first)
-    FeatureHover { target: SelectionTarget, point: DVec3, normal: DVec3 },// E: like FeaturePoint, on pointer move while Tool::Joint/Constrain is active, throttled to one per frame
-    DragStarted { id: lab_core::NodeId, unit: DragUnit },                // E2: a gizmo/DOF drag began (the app shows the numeric field)
-}
-pub enum DragUnit { Mm, Degrees }
-```
-
-New action ids (A adds every row and key, handlers live with their owner; until merged an id is a no-op): `tool.joint` "Joint" J (A's stage-2 handler starts the M8 constrain tool; E replaces it), `tool.measure` I, `tool.move` M, `view.hide` "Hide/Show" H (D), `palette.open` also S, `tool.rotate_right` R, `tool.rotate_left` Shift+R, `view.walls` "Hide Room Walls" (D), `view.isolate_selection` "Isolate Selection" (D), `edit.rotate_90` "Rotate 90°" (D), `tool.ground` "Ground" (E), `tool.rigid_group` "Rigid Group" (E), `view.part_box` "Open Part Box" (F).
-
-## A. Fusion navigation, keys, view cube edges/corners (Engineer Opus Low)
-
-- `camera.rs`: `drag()` pans for `Middle` without Shift (and always in Top), orbits for `Middle`+Shift; a `Left` or `Right` drag that the gizmo did not capture changes nothing (no orbit, no pan, no click). Keep the pivot logic. A right release without drag is D's (leave a clear spot; D adds 3 lines).
-- `gizmo.rs` `handles()`: `Tool::Select` returns the same as `Tool::Move` for the `Plane` handle only (no ring, no slide arrow drawn: the part itself is the handle). Nothing else in gizmo.rs.
-- Keys and rows as listed above; remove Q/E. Shortcut sheet: new rows come from `ACTIONS`; rewrite the Mouse block: "Middle-drag: pan · Shift+Middle-drag: orbit · Wheel: zoom to cursor · Left-click: select · Left-drag selected part: move (Shift free, Ctrl 1 mm) · Right-click: menu".
-- View cube: `faces()` gains the 12 edges and 8 corners as clickable regions (chamfer bands ~18 % of the face size along each edge, corner squares where they meet); `hit()` returns the yaw/pitch of the edge (45° between its two faces) or corner (iso: yaw ±45°/±135°, pitch ±35.26°). Hover accent like the faces.
-- Check: run the app once: middle pans, Shift+middle orbits round the selected node, left-drag on empty does nothing, left-drag on a selected post holder moves it hole to hole, R turns it, a view-cube corner gives an iso view.
+- **Mouse** (`camera.rs`, `gizmo.rs`): implement the mouse decision above. Middle = pan, Shift+middle = orbit (keep the M8 pivot maths in `drag()`), left-drag on empty space / unselected body = nothing (no orbit, no box select), right button = nothing in camera.rs (F adds the menu). Left-press on the selected node in Select tool starts the existing `Plane` drag (hole snap, Shift free, Ctrl 1 mm), exactly like Move mode does today. A node with `Attach::Joint` or `Attach::Constrained`: leave the M8 behaviour; D adds the joint branch.
+- **Keys:** `tool.move` M, `tool.measure` I, `palette.open` also S, `tool.rotate_right` R, `tool.rotate_left` Shift+R, remove Q/E. Keep F, Shift+F, T, P/3, ?, J, Esc. Update the `shortcut` column so the sheet and palette show the new keys, and rewrite the sheet's Mouse block: Select = Left-click · Drag selected body = Left-drag (Shift free, Ctrl fine) · Pan = Middle-drag · Orbit = Shift+Middle-drag · Zoom = Wheel · Context menu = Right-click · Exact value = type a number while dragging, Enter.
+- **Numeric entry:** while a gizmo/body drag (`Plane`, arrow or ring) is held, digit / `.` / `-` / Backspace keys build a number shown in a small overlay near the cursor ("50 mm" or "15°"); Enter sends `ViewportRequest::DragValue(f64)`; the viewport applies it exactly and ends the drag with one `TransformRequested`: Plane = that many mm along the current drag direction (start → current, in the platform plane; zero displacement → +X), no hole snap; arrow = along the arrow; ring = degrees. Esc clears the number (a second Esc cancels the drag as today).
+- **View cube corners and edges** (`view_cube.rs`, `view_cube.slint`): split each face into a 3×3 grid; centre cell = face (today), edge cells = the 12 edge directions (yaw/pitch halfway between the two faces), corner cells = the 8 corners (pitch ±35.26°, yaw ±45°/±135°). Extend `CubeFace` (or add `CubeCell` rows) so Slint highlights the hovered cell; `hit` returns that cell's (yaw, pitch).
+- **Undo toast:** `undo_redo` shows "Undid: <label>" / "Redid: <label>".
+- Check: run once: middle-drag pans, Shift+middle orbits, left-drag on empty space does nothing, left-drag on a selected post holder hops hole to hole, typing 50 Enter moves it 50 mm, click a cube corner, Ctrl+Z shows "Undid: Move".
 
 ## B. Direct STEP insert + plane-preserving LOD (Engineer Opus)
 
-```rust
-// lab-app/src/import.rs
-/// Converts `step` in the background (or reuses the library part with the same STEP hash),
-/// writes the library entry silently, reloads the catalog, then places it at `pos`
-/// (viewport px) with DragPart Move+Drop so it seats on a hole. Toast on error.
-pub fn quick_insert(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, step: PathBuf, pos: Option<Vec2>);
-```
-- Hash: `blake3` of the STEP file bytes. Catalog lookup: any part with `meta["step_hash"] == hex` → place it immediately. Else run the same body as `start()` (factor it out, keep its error handling), with defaults: vendor from the file name (Thorlabs naming as in `choose_file`, else "Imported"), part number/name = cleaned stem, category `imported`, finish anodised black, source up Y; add `meta["step_hash"]`. Progress toast "Converting <name>…". The wizard (Import Vendor Part…) stays as it is.
-- Entry points: `import.step_insert` "Insert STEP…" (file dialog → `quick_insert(.., None)`; `None` = centre of the viewport), and Explorer drop (`file_drop.rs`: `.step`/`.stp` only; others → toast "Only STEP files can be dropped"). See Decisions for the winit hook and cursor position.
-- `lod.rs`: replace vertex clustering with **quadric-error edge collapse** (Garland–Heckbert, on welded vertices 0.001 mm; boundary/crease edges > 30° get penalty planes so silhouettes and hole rims stay; reject collapses that flip a normal). Coplanar regions then stay exactly planar. Same `decimate(mesh, target)` signature; LOD0 over budget uses it too. Keep normals per face group (no smearing across creases > 30°).
-- Check: one unit test in `lod.rs`: a 100×100×10 mm plate with a Ø6 mm hole, decimated to 25 %: every output vertex that came from the top face is within 0.01 mm of z = 10, and `features::pick_feature` 4 mm from the hole edge on the top returns `Plane` with normal +Z. Then drop a STEP file once and drop it again (second is instant).
+- **Drop** (`lab-app/src/drop.rs`): after the window exists (`main.rs`, where the HWND is fetched at `:228-239`), subclass the HWND (`SetWindowSubclass`), `DragAcceptFiles(hwnd, TRUE)`; on `WM_DROPFILES` read every path (`DragQueryFileW`) and the client drop point (`DragQueryPoint`), `DragFinish`, then post to the Slint event loop (`slint::invoke_from_event_loop`) a call `drop::on_files(paths, x, y)` in **physical px → convert to the viewport's logical coords**. Only `.step`/`.stp` (case-insensitive) are handled; others toast "Only STEP files can be dropped". Drop outside the viewport = place at the viewport centre.
+- **Insert STEP** (existing `import.step` action, renamed title "Insert STEP…"): same path as a drop at the viewport centre.
+- **Pipeline** (`lab-app/src/import.rs`): hash the STEP bytes (blake3, hex). If a library part has `source_hash == hash` → place it now. Otherwise toast "Converting <file>…", run the existing background `start` path, and on `finish` write the library entry silently (no wizard prompt; detected holes/seat from M8 as today), toast "Inserted <name>" (wizard stays in the library right-click), then place. Several drops queue one after another.
+- `PartDef` gains `#[serde(default, skip_serializing_if = "Option::is_none")] pub source_hash: Option<String>`.
+- **Placement under the cursor:** `ViewportRequest::PlaceAt { part: PartId, x: f32, y: f32 }` (viewport logical px). The viewport runs the same `placement(...)` as a library drop at that point (hole snap on the platform under the point, seat connector) and emits the normal `PlaceRequested`, so undo/selection behave like a library drop. No platform under the point → floor, like today.
+- **LOD** (`lod.rs`): replace vertex clustering with quadric edge collapse on a welded mesh (weld 0.001 mm): per-vertex quadrics from incident triangle planes (area-weighted), boundary edges get a perpendicular penalty plane, reject a collapse that flips a triangle normal (> 90°) or makes a sliver (min angle < 2°), collapse to the cheaper endpoint or the optimal point when the 3×3 system is well conditioned. Keep `pub fn decimate(mesh: &TriMesh, target: usize) -> TriMesh` and every caller. Recompute normals per output triangle group so flat regions shade flat (this also fixes the LOD1/2 normal smearing on the Defect log).
+- Check: one unit test in `lod.rs`: a 50×50×10 mm plate with a Ø6 hole meshed finely (≥ 20k tris), decimated to 10 %: every output vertex lying in the top face's area stays at z = 10 within 1e-4 mm and the triangle count ≤ target·1.1. Then run once: drag the KM100 STEP from Explorer onto the table (seated on a hole), drag it again (instant, no "Converting" toast).
 
-## C. Joint model, pose, snaps (Engineer Opus)
+## C. Joint model, solver, snap points (Engineer Opus)
 
 ```rust
 // lab-core/src/model.rs
-pub enum Attach { …, Joint(Joint) }
+pub enum Attach { …, Joint { joint: Joint } }
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct JointFrame { pub origin: DVec3, pub z: DVec3, pub x: DVec3 } // in the body's own frame (part frame for a node, platform frame for a platform); z, x unit and ⟂
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JointKind { Rigid, Revolute, Slider, Cylindrical, PinSlot, Planar, Ball }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Limit { pub min: Option<f64>, pub max: Option<f64>, pub rest: Option<f64> }
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Joint {
     pub kind: JointKind,
-    pub child: Frame,                 // joint origin in the child's part frame (z = joint axis)
-    pub parent: Frame,                // in the parent's frame (part frame / platform frame)
-    #[serde(default)] pub offset: DVec3,   // mm, in the parent origin frame
-    #[serde(default)] pub angle: f64,      // rad, about the parent origin z
-    #[serde(default)] pub flip: bool,      // child z runs against parent z
-    #[serde(default)] pub values: [f64; 3],        // current DOF values, order = dofs(kind)
-    #[serde(default)] pub limits: [Option<Limit>; 3],
-    #[serde(default)] pub suppressed: bool,        // pose kept, motion and re-solve off
-    #[serde(default)] pub seq: u64,
+    pub child: JointFrame,
+    pub parent: JointFrame,
+    #[serde(default)] pub offset: Mm,        // along the parent frame's z
+    #[serde(default)] pub angle: f64,        // radians about the parent frame's z
+    #[serde(default)] pub flip: bool,        // child z opposite parent z (rotate π about x)
+    #[serde(default)] pub values: [f64; 3],  // current DOF values (mm / radians), order below
+    #[serde(default)] pub limits: [Limit; 3],
+    #[serde(default)] pub suppressed: bool,  // behaves as Free at the current pose
+    #[serde(default)] pub seq: u64,          // creation order (relationships bar)
 }
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Limit { pub min: f64, pub max: f64, pub rest: f64 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum JointKind { Rigid, Revolute, Slider, Cylindrical, PinSlot, Planar, Ball }
-
-// lab-mates/src/joints.rs
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dof { RotZ, SlideZ, SlideX, SlideY, RotX, RotY }   // in the parent origin frame
-pub fn dofs(kind: JointKind) -> &'static [Dof];   // Revolute [RotZ], Slider [SlideZ], Cylindrical [RotZ, SlideZ], PinSlot [RotZ, SlideX], Planar [SlideX, SlideY, RotZ], Ball [RotX, RotY, RotZ], Rigid []
-pub fn joint_pose(j: &Joint) -> (DVec3, DQuat);   // child pose relative to its parent; values clamped to limits
-pub fn clamp(j: &mut Joint);
-/// SetAttach for `id` jointed to `parent` (seq assigned), pose from `joint_pose`.
-pub fn joint(doc: &Document, id: NodeId, parent: Parent, j: Joint) -> Option<Command>;
-/// Rigid joints from ids[1..] to ids[0] at their current relative poses; one Batch.
-pub fn rigid_group(doc: &Document, ids: &[NodeId]) -> Option<Command>;
-pub fn next_seq(doc: &Document) -> u64;
-
-// lab-import/src/snaps.rs  (part frame, mm)
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SnapKind { FaceCentre, EdgeCentre, Vertex, MidEdge }
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Snap { pub kind: SnapKind, pub frame: Frame }   // z out of the material (face normal / circle axis)
-/// Best snap near a hit, priority: circular edge centre (rim of a fitted cylinder within `radius`),
-/// vertex, mid-edge (sharp edges > 30°) within `radius`, else the centroid of the coplanar region.
-pub fn snap_at(mesh: &TriMesh, point: DVec3, normal: DVec3, radius: f64) -> Option<Snap>;
 ```
-- `Command::label` for a `SetAttach` with `Attach::Joint` reads "Joint <kind>". `match attach` sites that stop compiling get a `Joint(_)` arm behaving like `Free` (E2 adds the real drag). M8 files load unchanged.
-- Add `Tool::Joint` to `lab-viewport/src/lib.rs` and the `handles()` arm (no handles), nothing more.
-- Check: unit tests in `joints.rs`: (1) Revolute, value 90° about a vertical parent axis, turns the child 90° and keeps the axis points coincident; values beyond a 0–90° limit clamp to 90°; (2) Slider value 10 moves 10 mm along the axis; (3) serde round trip of `Attach::Joint` in the project format; plus one `snaps.rs` test: a generated post's top rim returns `EdgeCentre` on the axis at the top.
-
-## D. Context menu, hide/isolate/walls, undo toast, hover, tool hint (Engineer Opus Low)
-
-- `ContextMenu` event (see interfaces): `camera.rs` pushes right releases without drag to a new `RightClicks` resource; `picking.rs` resolves the target like a left click, selects it, sends the event. Also Shift+F10 / the Menu key on the selection opens it at the node's projected origin.
-- Menu (`context_menu.slint`, a Slint `PopupWindow` at `pos`): Joint, Move, Rotate 90°, Duplicate, Hide, Isolate, Delete for a node; Isolate Plate, Hide Room Walls for a platform; Hide Room Walls / Show All for empty space. Rows dispatch action ids.
-- Hide: `view.hide` toggles the selection in `AppState.hidden` → `SetHidden`; with nothing selected it shows all. `view.isolate_selection` → `IsolateNodes(Some(selection))`; Esc / Show All releases both. `view.walls` toggles `WallDisplay::Hidden` ↔ the previous setting. `edit.rotate_90`: reuse the rotate-nudge path with 90°.
-- Undo toast: `History::undo_label(&self) -> Option<&str>` / `redo_label` (peek before undo); toast "Undid: <label>" / "Redid: <label>".
-- Hover: outline the node under the cursor (thinner/fainter than the selection outline, same `outline.rs` machinery), plus `HighlightNodes`. Tool hint: a `tool-hint` string property shown bottom-centre of the viewport while non-empty; `controller::set_hint(ui, &str)`; the constrain and measure tools set their step text there instead of toasts.
-- Check: run the app once: right-click a post > Hide hides it, H shows it again, Ctrl+Z after a move shows "Undid: Move …".
-
-## Stage 3: Merge stage 2 (Engineer Sonnet)
-
-Merge `draft-POLA-127` … `draft-POLA-130` into `draft` (`--no-ff`), keeping both sides of shared-row conflicts (both edits in `camera.rs` survive). `cargo build --workspace --offline` and `cargo test -p lab-core -p lab-mates -p lab-import -p lab-app --offline` once. Report merge commits and results.
-
-## E. Joint tool + panel + inspector (Engineer Opus)
-
-- `tool.joint` (J) sets `Tool::Joint`; hint "Pick a joint origin on the part to move". While active, pointer moves send `FeatureHover`; the app (`joint.rs`) runs `snaps::snap_at` (radius 3 mm, CPU mesh as `constrain.rs` gets it; platform hit → nearest hole centre with z = +Z, else hit point) and shows it with `HighlightFeature` (extend `feature_pick.rs` with a snap glyph: small circle for edge centre, dot for vertex/mid-edge, square for face centre).
-- First pick (body 1, child) → open the part box (`part_box::open(ui, app, id)`, F) → hint "Pick the origin to join to". Picks from the box or the main view both arrive as `FeaturePoint`; a pick on body 1 again replaces origin 1. Second pick on another body or platform (reject body 1's descendants, toast) → close the box, apply the joint as a coalescing gesture (Decisions), open `joint_panel.slint` next to the inspector: type (7 kinds), offset x/y/z mm, angle °, flip, per-DOF min/max/rest, Enter/OK, Esc/Cancel. Each edit re-applies.
-- Default kind: axis–axis (edge centres) → Revolute; face–face → Rigid; else Rigid. Body 1's start values = its current pose projected onto the DOFs (no jump beyond the joint itself).
-- Inspector: a Joint section for `Attach::Joint` nodes (same fields as the panel, each edit one `SetAttach`, delete → `Free` at the current pose). `tool.ground` toggles `locked` on the selection; `tool.rigid_group` runs `joints::rigid_group` on a multi-selection (≥ 2, else toast).
-- Check: run the app once: J on a post holder, pick its bore edge, pick a post's top edge, Revolute, Enter; the panel closes and the inspector shows the joint; Esc in a second try leaves nothing changed.
-
-## E2. DOF drag, numeric entry, DOF glyph (Engineer Opus Low)
-
-- `gizmo.rs`: for a selected `Attach::Joint` node (not suppressed, not locked), a left press on the body starts a joint drag: one DOF → `RotZ` = angle of the cursor ray's hit on the plane ⟂ the axis through the joint origin, `Slide*` = `line_param` along that axis; two/three DOFs → the DOF whose screen direction best matches the first 6 px of movement. Values go through `joints::clamp` and `joint_pose`; emit `TransformRequested` with the updated `Attach::Joint`. Shift free, else 1 mm / 5° steps. Rigid: no drag. Send `DragStarted` on every gizmo/joint drag start.
-- Numeric entry: on `DragStarted` the app shows a small field at the cursor (`overlays.slint`); digits, `.`, `-` and Backspace go into it while the pointer is down; Enter sends `DragValue(v)`: a plane drag moves exactly `v` mm along the current drag direction from the start, a ring/RotZ drag turns `v`°, a slide sets `v` mm; it ends the drag (`done: true`). Esc clears the field.
-- DOF glyph (`feature_pick.rs`, append): on the selected jointed node draw `Gizmos<OnTop>` arrows for each `Slide*` and an arc for each `Rot*` at the joint origin, only while selected (no continuous redraw when idle).
-- Check: one unit test for the plane drag with `DragValue(50.0)` (exactly 50 mm), then run the app once: a revolute body drags round its axis and stops at its limit.
-
-## F. Floating part box (Engineer Opus)
+DOF order per kind (axes of the joint frame after offset/angle/flip): Rigid none · Revolute [rot z] · Slider [trans z] · Cylindrical [rot z, trans z] · PinSlot [rot z, trans x] · Planar [trans x, trans y, rot z] · Ball [rot z, rot x, rot y] (applied in that order).
 
 ```rust
-// lab-app/src/part_box.rs
-pub fn open(ui: &AppWindow, app: &Rc<RefCell<AppState>>, node: NodeId);   // also `view.part_box` on the selected node
-pub fn close(ui: &AppWindow, app: &Rc<RefCell<AppState>>);
+// lab-mates/src/joints.rs
+pub enum Dof { Rot(Axis), Trans(Axis) }  pub enum Axis { X, Y, Z }
+pub fn dofs(kind: JointKind) -> &'static [Dof];
+/// Child pose in the parent's frame: P · T(offset, angle, flip) · D(values) · C⁻¹.
+pub fn local_pose(j: &Joint) -> (DVec3, DQuat);
+pub fn clamp(j: &Joint, values: [f64; 3]) -> [f64; 3];
+/// DOF values that bring the grabbed child point (child frame) closest to the ray (parent frame), clamped.
+/// Rotation: angle of the ray's hit on the plane ⟂ the axis through the grab point; translation: closest point on the axis/plane.
+pub fn drag_values(j: &Joint, grab: DVec3, ray: (DVec3, DVec3)) -> [f64; 3];
+/// SetAttach to `parent` with `seq = max seq in doc + 1` and values = rest (or 0), pose = local_pose.
+pub fn joint(doc: &Document, id: NodeId, parent: Parent, joint: Joint) -> Option<Command>;
+/// Rigid joints from ids[1..] to ids[0] at their current relative poses (identity-like frames), one Batch.
+pub fn rigid_group(doc: &Document, ids: &[NodeId]) -> Option<Command>;
 ```
-- `lab-viewport/src/part_box.rs`: on `PartBox(Some(spec))` spawn a camera (own `RenderLayers`, own `OrbitCamera` framed on the part, iso start) rendering a copy of that node's meshes (identity pose, part frame) into a `spec.width × spec.height` texture; on `None` despawn everything. `PartBoxInput` drives its orbit (left-drag orbits here: it is a part viewer; wheel zooms) and its left clicks raycast the copy and send `ViewportEvent::FeaturePoint { target: Node(id), .. }` (and `FeatureHover` while `Tool::Joint`). The main camera ignores the copy's layer.
-- `host.rs`: deliver the box texture to the UI next to the main one (same recycle path); render frames on demand only while the box is open.
-- `part_box.slint`: a floating, draggable panel (~320×320 px, title = part name, close button) over the viewport, an `Image` of the texture, pointer events forwarded as `PartBoxInput`.
-- Check: run the app once: select a part, run "Open Part Box", orbit inside it (the room does not turn), click a face (the app logs/toasts the `FeaturePoint`), close it; `scripts/dev/idle.ps1` shows ~0 % afterwards.
+```rust
+// lab-import/src/snaps.rs  (part space, mm)
+pub enum SnapKind { FaceCentre, CircleCentre, Vertex, MidEdge }
+pub struct Snap { pub kind: SnapKind, pub frame: JointFrame } // z = face normal / circle axis, out of the material
+/// Joint-origin candidates for a click, nearest first: the clicked planar region's centroid, the
+/// centre of the nearest circular edge (end ring of the cylinder fit under/near the click, axis as z),
+/// and sharp-edge (dihedral > 30°) vertices and mid-edges within 3 mm of the hit.
+pub fn joint_snaps(mesh: &TriMesh, point: DVec3, normal: DVec3) -> Vec<Snap>;
+```
+- Reuse `features.rs`'s welding, region growing and cylinder fit; do not duplicate them.
+- `match attach` sites that stop compiling get a `Joint { .. }` arm that behaves like `Constrained` today (keeps the attach; D adds drag).
+- Check: unit tests in `joints.rs`: (1) Revolute with limits 0..90° — `drag_values` for a ray at 120° returns 90°, `local_pose` keeps the child origin on the parent axis; (2) Slider moves exactly along z; (3) serde round trip of `Attach::Joint` through the project file format; plus one `snaps.rs` test: a box with a Ø6 through hole → a click near the hole's top rim yields a `CircleCentre` on the axis at the top face within 0.1 mm.
 
-## G. Relationships bar (Engineer Opus Low)
+## E. Floating part box (Engineer Opus)
 
-- `relations.rs`: `pub fn chips(doc: &Document) -> Vec<Chip { node: NodeId, parent: Parent, label: String, icon: String, suppressed: bool }>`: every `Attach::Joint` by `seq`, then every M8 `Constrained` constraint in node order; label "<child name> → <parent name> · <kind>".
-- `relations_bar.slint`: a strip along the viewport bottom (above the status line, hidden when there are no chips), horizontally scrollable chips. Hover → `HighlightNodes([child, parent node])`; click → select the child; double-click → select it and scroll the inspector to its Joint/Constraints section; right-click menu: Suppress/Unsuppress (toggle `suppressed`, one `SetAttach`; M8 constraints: Suppress disabled), Delete (attach → `Free` at the current pose), Select bodies (select child; parent node if any).
-- Refresh on every document change (same place the scene list refreshes).
-- Check: one unit test for `chips` order on a document with two joints and one constraint, then run the app once and hover/click a chip.
+```rust
+// lab-viewport/src/lib.rs
+ViewportRequest::PartBox(Option<NodeId>),   // open for this node (replaces any open one) / close
+ViewportRequest::PartBoxPointer { kind: PointerKind, x: f32, y: f32, button: PointerButton, shift: bool, delta: f32 }, // box-local logical px; reuse the main viewport's pointer types
+ViewportEvent::FeatureHover { target: SelectionTarget, hit: Option<(DVec3, DVec3)> },  // part frame, mm
+// clicks in the box emit the existing ViewportEvent::FeaturePoint with the same frames as the main view
+#[derive(GizmoConfigGroup, Default, Reflect)] pub struct BoxGizmos;  // drawn only by the box camera, in part space
+```
+- On open: spawn copies of the node's visible LOD0 meshes (identity transform, part space) on a dedicated `RenderLayers` layer, a key light, and a camera with `RenderTarget::Image` (320×320 logical × scale factor) on that layer, orbiting the part's bbox centre (start: iso view, frame the bbox). Left-drag orbits, middle-drag pans, wheel zooms; left-click without drag ray-casts only the box copies and emits `FeaturePoint { target: Node(id), .. }`; hover emits `FeatureHover`. Close despawns everything; while closed nothing renders and idle stays ~0 (camera gone, no `keep_alive`).
+- Hand the image to Slint the same way the main viewport texture reaches Slint (follow `host.rs`/`main.rs:124`); if that is impossible for a second texture, copy the image to a `slint::Image` once per rendered frame (only while interacting).
+- `part_box.slint`: floating panel over the viewport's top-left, title "Pick on <name>", ✕ close, draggable by the title bar, image + TouchArea forwarding pointer events → `lab-app/src/part_box.rs` → `PartBoxPointer`. Action `view.part_box` (palette only, no key) opens it for the selected node, for the check.
+- Check: run once: select a part, palette "Part box": the box shows the part, orbits without moving the room, a click logs a `FeaturePoint`; close it and `scripts/dev/idle.ps1` reads ~0 %.
 
-## Stage 5: Merge stage 4, walkthrough, release (Engineer Sonnet)
+## Stage 2: Merge stage 1 (Engineer Sonnet)
 
-Merge `draft-POLA-132` … `draft-POLA-135` into `draft`, `cargo build --workspace --offline` and `cargo test -p lab-core -p lab-mates -p lab-import -p lab-app --offline` once. Walk the exit criterion once and report each step met / not met (not met → Defect log, no fix loop). Then the release per FIRST-DRAFT.md with tag `m9-draft`.
+Merge A, B, C, E branches into `draft` (`--no-ff`), keeping both sides of shared-row conflicts. `cargo build --workspace --offline` and `cargo test -p lab-core -p lab-mates -p lab-import --offline` once. Report merge commits and results.
+
+## D. Joint tool UI, DOF drag, DOF glyph, joint inspector (Engineer Opus)
+
+- Action `tool.joint` "Joint", key J (take J from `tool.constrain`, which stays in the palette without a key). Step hints in the existing hint area: "Pick a joint origin on the part to move" → "Pick the joint origin to attach to" → "Choose the joint type · Enter to accept, Esc to cancel".
+- **Step 1:** a click on an unlocked node selects it as body 1 and opens the part box for it (`PartBox(Some(id))`). In both views, `FeatureHover` / main-view hover → `lab_import::snaps::joint_snaps` on the CPU mesh (generated: merged `PartMesh`; imported: `wizard::part_mesh`) → draw all candidates as small dots, the nearest bigger, plus its plane outline or axis line (`BoxGizmos` in the box, `Gizmos<OnTop>` in the main view). A click takes the nearest candidate as the child `JointFrame`. Platform targets: top-plane centre under the click or the nearest hole's axis (reuse `constrain.rs` platform logic).
+- **Step 2:** pick on another node or a platform in the main view (cycle → toast, as M8). Close the box. Body 1 jumps to the joint pose as a live preview (`ViewportRequest::PreviewPose { id, position, rotation }` / clear), and the joint panel (`joint_panel.slint`, bottom-left of the viewport) opens: type (7 kinds, default Rigid), offset mm, angle °, flip, and per DOF min/max/rest. Every edit re-previews. Enter → `lab_mates::joints::joint(..)` as one command labelled "Joint"; Esc → clear preview, pose unchanged. Context-menu "Joint" (F) starts at step 1 with the right-clicked body.
+- **DOF drag** (`gizmo.rs` branch): left-drag on a selected `Attach::Joint` body → `drag_values` from the grab point and the cursor ray, preview the pose, one `SetAttach` on release ("Move joint"); limits stop it; numeric entry (A's `DragValue`) sets the first DOF exactly (mm or °). Locked or Rigid bodies don't move.
+- **DOF glyph:** selected jointed body → at the joint origin, a double arrow per translation DOF and an arc with arrowheads per rotation DOF (`Gizmos<OnTop>`), greyed past a limit.
+- **Inspector:** Joint section for `Attach::Joint` nodes: kind, offset, angle, flip, current values, limits, suppressed, Delete (→ `Free` at the current pose). One `SetAttach` per edit. The M8 Constraints section stays.
+- Rigid Group: action `joint.rigid_group` (palette + context menu when 2+ nodes are selected) → `rigid_group`.
+- Check: run the exit criterion's steps 3–4 once (KM100 on a post, Revolute 0–90°, drag stops at 90°).
+
+## F. Context menu, Hide, Isolate selection, walls toggle, body hover (Engineer Opus Low)
+
+- `Node` gains `#[serde(default, skip_serializing_if = "std::ops::Not::not")] pub hidden: bool`; `Command::SetHidden { ids: Vec<NodeId>, hidden: bool }` (label "Hide"/"Show", undoable). The viewport hides those entities and their descendants and excludes them from picking/snapping. Actions `edit.hide_toggle` H (selection), `view.show_all_bodies` Shift+H.
+- **Isolate selection:** `view.isolate` with node(s) selected → `ViewportRequest::IsolateNodes(Vec<NodeId>)`: only those nodes and their descendants stay visible (room, walls, platforms hidden like the platform isolate); `view.show_all` / Esc restores. Platform isolate unchanged.
+- **Walls toggle:** action `view.toggle_walls` "Hide room walls" (palette + an icon toggle next to the view switcher): `Hidden` ↔ the previous `WallDisplay`.
+- **Context menu:** right-click without drag (< 4 px) on a body: select it, `ViewportEvent::ContextMenu { target: SelectionTarget, x: f32, y: f32 }` (add the right-click to `camera.rs`' click path and `picking.rs`), and `context_menu.slint` at the cursor: Joint, Move, Rotate 90°, Duplicate, Ground/Unground (`locked`), Hide, Isolate, Delete; Rigid Group when 2+ nodes are selected. Each item runs the existing action id (`tool.joint`, `tool.move`, new `edit.rotate_90` = +90° about Z through the existing rotate command, `edit.duplicate`, new `edit.ground_toggle`, `edit.hide_toggle`, `view.isolate`, `edit.delete`, `joint.rigid_group`). Ids from D that are not merged yet just do nothing until stage 4. Esc / click elsewhere closes it.
+- **Body hover:** the node under the cursor gets a light outline/tint (lighter than selection) when no tool is picking; skip if it already does that.
+- Check: run once: right-click a post > Hide (gone), Ctrl+Z (back, "Undid: Hide"), Isolate it, Esc, walls toggle.
+
+## G. Relationships bar (Engineer Sonnet)
+
+- `lab-app/src/relationships.rs`: `pub fn chips(doc: &Document) -> Vec<Chip { text, kind, child: NodeId, parent: Parent, joint: bool, index: usize, suppressed: bool }>`: M8 constraints first (one chip per constraint, node order), then joints by `seq`. Text: `"<child name> → <parent name> · <Kind>"` (kind name as in the joint panel: Rigid, Revolute, Slider, Cylindrical, Pin-slot, Planar, Ball; constraints: Mate, Flush, Concentric, Angle). Rebuilt whenever the document changes.
+- `relationships_bar.slint`: a strip along the bottom of the viewport area (chip height ~24 px, horizontal scroll, Theme colours, a small type glyph per kind, suppressed chips dimmed); hidden when there are no chips.
+- Hover a chip → `ViewportRequest::Highlight(Vec<NodeId>)` (child + parent node) drawn like hover; leaving clears it. Click → select the child. Double-click → select the child and scroll the inspector to its Joint/Constraints section. Right-click → menu: Suppress/Unsuppress (joints only; one `SetAttach` toggling `suppressed`), Delete (joint → child `Free` at its current pose; constraint → remove that row, last row → `Free`), Select bodies (child + parent if the selection supports several, else the child).
+- Check: run once with one M8 constraint and one joint (via a quick unit test of `chips` if the joint tool is not merged yet): chips show in order, hover highlights both, Delete removes one.
+
+## Stage 4: Merge stage 3, walkthrough, release (Engineer Sonnet)
+
+Merge D, F, G branches into `draft`, `cargo build --workspace --offline` and `cargo test -p lab-core -p lab-mates -p lab-import -p lab-app --offline` once. Walk the exit criterion once (steps 1–7) and report each step met / not met (not met → Defect log, no fix loop). Then the release per FIRST-DRAFT.md with tag `m9-draft`.
