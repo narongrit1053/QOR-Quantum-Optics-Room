@@ -431,6 +431,33 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             ui.set_tool(index);
             app.borrow().send(ViewportRequest::SetTool(tool));
         }
+        "edit.copy" | "edit.cut" | "edit.paste" | "edit.duplicate" => {
+            let pasted = {
+                let mut a = app.borrow_mut();
+                let selected = match a.session.selection {
+                    Some(SelectionTarget::Node(n)) => vec![n],
+                    _ => Vec::new(),
+                };
+                if id != "edit.paste" && selected.is_empty() {
+                    return;
+                }
+                let copied = crate::clipboard::copy(&a.session.doc, &selected);
+                if id == "edit.duplicate" {
+                    crate::clipboard::paste(&a.session.doc, &copied)
+                } else {
+                    if id != "edit.paste" {
+                        a.clipboard = copied;
+                    }
+                    if id == "edit.paste" { crate::clipboard::paste(&a.session.doc, &a.clipboard) } else { None }
+                }
+            };
+            if id == "edit.cut" {
+                run_action(ui, app, models, "selection.delete");
+            } else if let Some((command, roots)) = pasted {
+                let label = if id == "edit.paste" { "Paste" } else { "Duplicate" };
+                execute(ui, app, models, id, command, label.into(), roots.first().map(|r| SelectionTarget::Node(*r)), Vec::new());
+            }
+        }
         _ if id.starts_with("file.") => files::handle_file_action(ui, app, models, id),
         _ => {
             let outcome = {

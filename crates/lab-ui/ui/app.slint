@@ -470,6 +470,12 @@ export component AppWindow inherits Window {
                     root.action(event.modifiers.shift ? "file.save_as" : "file.save");
                     return accept;
                 }
+                if (!EditState.text-focused && !event.modifiers.shift) {
+                    if (event.text == "c" || event.text == "C") { root.action("edit.copy"); return accept; }
+                    if (event.text == "x" || event.text == "X") { root.action("edit.cut"); return accept; }
+                    if (event.text == "v" || event.text == "V") { root.action("edit.paste"); return accept; }
+                    if (event.text == "d" || event.text == "D") { root.action("edit.duplicate"); return accept; }
+                }
                 return reject;
             }
             if (event.text == Key.Delete || event.text == Key.Backspace) {

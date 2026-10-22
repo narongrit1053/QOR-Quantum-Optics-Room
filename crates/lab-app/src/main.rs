@@ -6,6 +6,7 @@ mod app_state;
 mod beams;
 mod bom;
 mod bridge;
+mod clipboard;
 mod controller;
 mod dialogs;
 mod embed;
