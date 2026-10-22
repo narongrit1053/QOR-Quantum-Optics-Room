@@ -1,6 +1,7 @@
 //! Vendor STEP import (DESIGN.md §5, §13): runs the step2glb sidecar, merges and re-bases the
 //! mesh, builds three LODs and stores the GLB under the library by its BLAKE3 content hash.
 
+pub mod features;
 pub mod fit;
 mod glb;
 mod lod;
@@ -388,6 +389,7 @@ mod tests {
             }],
             optical_ports: vec![],
             meta: [("finish".to_string(), "anodized_black".to_string())].into(),
+            features: Vec::new(),
         };
         let p = write_part(&lib.0, &def).unwrap();
         assert!(p.ends_with("parts/imported/thorlabs_FMMP1_M.toml"));

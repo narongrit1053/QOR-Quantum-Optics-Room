@@ -171,6 +171,7 @@ mod tests {
             connectors: vec![],
             optical_ports: vec![],
             meta: Default::default(),
+            features: Vec::new(),
         }
     }
 

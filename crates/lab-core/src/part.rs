@@ -28,6 +28,20 @@ pub struct PartDef {
     pub optical_ports: Vec<OpticalPort>,
     #[serde(default)]
     pub meta: BTreeMap<String, String>,
+    /// Planes and axes detected on import (M8-PLAN A), for snapping feature picks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<Feature>,
+}
+
+/// A face or axis of a part, in the part frame (mm, +Z up).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Feature {
+    /// `normal` points out of the material.
+    Plane { origin: DVec3, normal: DVec3 },
+    /// `hole` = concave (bore), else shaft. `origin` is the opening (hole) or the free end
+    /// (shaft) and `dir` points out of the material there.
+    Axis { origin: DVec3, dir: DVec3, radius: f64, hole: bool },
 }
 
 fn default_version() -> u32 {

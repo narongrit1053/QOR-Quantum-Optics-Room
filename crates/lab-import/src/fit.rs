@@ -137,7 +137,7 @@ fn circle3(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> Option<(f64, f64, f64
 }
 
 /// Least-squares circle (Kåsa): solves x² + y² + D x + E y + F = 0.
-fn kasa(points: impl Iterator<Item = (f64, f64)>) -> Option<(f64, f64, f64)> {
+pub(crate) fn kasa(points: impl Iterator<Item = (f64, f64)>) -> Option<(f64, f64, f64)> {
     let (mut s, mut b) = ([[0.0f64; 3]; 3], [0.0f64; 3]);
     for (x, y) in points {
         let row = [x, y, 1.0];
@@ -160,14 +160,14 @@ fn kasa(points: impl Iterator<Item = (f64, f64)>) -> Option<(f64, f64, f64)> {
 }
 
 /// Σ area · n nᵀ.
-fn scatter(normals: impl Iterator<Item = (DVec3, f64)>) -> glam::DMat3 {
+pub(crate) fn scatter(normals: impl Iterator<Item = (DVec3, f64)>) -> glam::DMat3 {
     normals.fold(glam::DMat3::ZERO, |m, (n, a)| {
         m + glam::DMat3::from_cols(n * n.x, n * n.y, n * n.z) * a
     })
 }
 
 /// Eigenvector of the smallest eigenvalue: power iteration on tr(M)·I − M.
-fn smallest_eigenvector(m: glam::DMat3, start: DVec3) -> DVec3 {
+pub(crate) fn smallest_eigenvector(m: glam::DMat3, start: DVec3) -> DVec3 {
     let shifted = glam::DMat3::from_diagonal(DVec3::splat(m.x_axis.x + m.y_axis.y + m.z_axis.z)) - m;
     let mut v = start.normalize_or(DVec3::Z);
     for _ in 0..100 {
@@ -190,7 +190,7 @@ fn eigenvectors(m: glam::DMat3) -> [DVec3; 3] {
 }
 
 /// Two unit vectors perpendicular to `n` and to each other.
-fn basis(n: DVec3) -> (DVec3, DVec3) {
+pub(crate) fn basis(n: DVec3) -> (DVec3, DVec3) {
     let helper = if n.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
     let u = n.cross(helper).normalize();
     (u, n.cross(u))
