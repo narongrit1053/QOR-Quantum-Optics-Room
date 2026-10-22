@@ -15,6 +15,7 @@ import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay } from "overlays.slint";
 import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
+import { ViewCube, CubeFaceRow } from "view_cube.slint";
 import { Icon } from "icons.slint";
 import { WizardPanel } from "wizard.slint";
 import { CommandPalette } from "palette.slint";
@@ -312,6 +313,11 @@ export component AppWindow inherits Window {
     callback viewport-scroll(length, length, length, length);
     callback viewport-left();
     callback view-mode-requested(int);
+    // M8 view cube (view_cube.rs): faces drawn front-to-back; positions in the cube's own px.
+    in property <[CubeFaceRow]> cube-faces;
+    callback view-cube-hover(length, length);
+    callback view-cube-clicked(length, length);
+    callback view-cube-home();
     callback clear-selection();
     // Library sidebar. drag kind: 0 move, 1 drop, 2 cancel; x/y in window coordinates.
     callback library-search(string);
@@ -1117,6 +1123,16 @@ export component AppWindow inherits Window {
             x: root.library-menu-x;
             y: root.library-menu-y;
             edit-connectors => { root.library-edit(root.library-menu-part); }
+        }
+
+        // M8 view cube: top-right of the viewport, left of the inspector; 3D only.
+        if root.view-mode == 0: ViewCube {
+            x: (root.wizard-open ? wizard-panel.x : inspector-panel.shown ? inspector-panel.x : root.width) - self.width - Theme.inset;
+            y: Theme.inset + 44px;
+            faces: root.cube-faces;
+            hover(x, y) => { root.view-cube-hover(x, y); }
+            clicked(x, y) => { root.view-cube-clicked(x, y); }
+            home => { root.view-cube-home(); }
         }
 
         // ── View switcher and units (top centre) ─────────────────────────────

@@ -24,6 +24,7 @@ mod stack;
 mod thumbs;
 mod scene;
 mod ui_models;
+mod view_cube;
 mod wizard;
 
 use std::cell::{Cell, RefCell};

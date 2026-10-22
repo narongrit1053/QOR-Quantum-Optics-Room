@@ -17,15 +17,16 @@ use bevy::{
 use lab_core::{Document, SelectionTarget};
 
 use crate::gizmo::GizmoCapture;
-use crate::host::{MsaaSamples, PendingRequests, RedrawState, TargetSize, ViewportSize};
+use crate::host::{EventSender, MsaaSamples, PendingRequests, RedrawState, TargetSize, ViewportSize};
 use crate::picking::{PickId, Selection};
 use crate::scene::{SceneIndex, SceneNode, to_render};
-use crate::{FrameRequest, FrameTarget, Modifiers, PointerButton, ViewMode, ViewportInput};
+use crate::{ViewportEvent, FrameRequest, FrameTarget, Modifiers, PointerButton, ViewMode, ViewportInput};
 
 /// Vertical field of view (≈34°): narrow enough to look calm, wide enough for a room.
 const FOV: f32 = 0.6;
 const TOP_PITCH: f32 = FRAC_PI_2 - 0.001;
-const MIN_PITCH: f32 = -0.15;
+/// M8: ±(π/2 − 0.01) so the view cube's Bottom works.
+const MIN_PITCH: f32 = -MAX_PITCH;
 const MAX_PITCH: f32 = FRAC_PI_2 - 0.01;
 const ORBIT_RADIANS_PER_PX: f32 = 0.006;
 const DRAG_THRESHOLD_PX: f32 = 4.0;
@@ -190,7 +191,7 @@ impl Plugin for CameraPlugin {
         app.init_resource::<PointerState>()
             .init_resource::<Clicks>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (layout_panes, handle_input, animate_camera, top_shadows).chain())
+            .add_systems(Update, (layout_panes, handle_input, animate_camera, report_orient, top_shadows).chain())
             .add_systems(PostUpdate, tag_shadow_casters.before(bevy::camera::visibility::VisibilitySystems::CheckVisibility));
     }
 }
@@ -346,8 +347,9 @@ pub(crate) fn handle_input(
                     if press.dragging && !press.gizmo {
                         let delta = pos - press.last;
                         let press = *press;
+                        let pivot = orbit_pivot(selected, &sources);
                         if let Ok((_, mut orbit, ..)) = cameras.get_mut(press.camera) {
-                            drag(&mut orbit, press, delta, viewport_height);
+                            drag(&mut orbit, press, delta, viewport_height, pivot);
                         }
                     }
                     if let Some(press) = pointer.press.as_mut() {
@@ -412,6 +414,21 @@ pub(crate) fn handle_input(
                     orbit.reduce_motion = *on;
                 }
             }
+            FrameRequest::ViewDirection(yaw, pitch) => {
+                let pivot = orbit_pivot(selected, &sources);
+                if let Ok((_, mut orbit, ..)) = cameras.get_mut(main)
+                    && orbit.mode == ViewMode::Perspective
+                {
+                    let mut view = orbit.target;
+                    // Turn the shortest way round.
+                    view.yaw += (*yaw - view.yaw + std::f32::consts::PI).rem_euclid(TAU) - std::f32::consts::PI;
+                    view.pitch = pitch.clamp(MIN_PITCH, MAX_PITCH);
+                    if let Some(p) = pivot {
+                        view.focus = p;
+                    }
+                    orbit.ease_to(view);
+                }
+            }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
             FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) | FrameRequest::RenderThumbnail(..) | FrameRequest::ExportImage(..) | FrameRequest::SetBeams(_) => {}
@@ -419,7 +436,32 @@ pub(crate) fn handle_input(
     }
 }
 
-fn drag(orbit: &mut OrbitCamera, press: Press, delta: Vec2, viewport_height: f32) {
+/// M8: what orbiting turns around: the selected node's origin, a selected platform's top-surface
+/// centre, else the room centre (render space). `None` without a document or a spawned node.
+fn orbit_pivot(selected: Option<SelectionTarget>, sources: &FrameSources) -> Option<Vec3> {
+    let doc = sources.index.snapshot.as_ref()?;
+    let room = || {
+        let (lo, hi) = room_box(doc);
+        (lo + hi) / 2.0
+    };
+    match selected {
+        Some(SelectionTarget::Node(id)) => sources.nodes.iter().find(|(n, ..)| n.0 == id).map(|(_, _, t)| t.translation()),
+        Some(SelectionTarget::Platform(id)) => platform_box(doc, id).map(|(lo, hi)| Vec3::new((lo.x + hi.x) / 2.0, hi.y, (lo.z + hi.z) / 2.0)),
+        _ => Some(room()),
+    }
+}
+
+/// M8: reports the main camera's orientation to the view cube when it turned by > 0.002 rad.
+fn report_orient(events: Res<EventSender>, cameras: Query<&OrbitCamera, Without<TopPane>>, mut last: Local<Option<(f32, f32)>>) {
+    let Some(orbit) = cameras.iter().next() else { return };
+    let now = (orbit.current.yaw, orbit.current.pitch);
+    if last.is_none_or(|(y, p)| (y - now.0).abs() > 0.002 || (p - now.1).abs() > 0.002) {
+        *last = Some(now);
+        events.send(ViewportEvent::CameraOrient { yaw: now.0, pitch: now.1 });
+    }
+}
+
+fn drag(orbit: &mut OrbitCamera, press: Press, delta: Vec2, viewport_height: f32, pivot: Option<Vec3>) {
     let pan = press.button != PointerButton::Left || press.mods.shift || orbit.mode == ViewMode::Top;
     let view = &mut orbit.current;
     if pan {
@@ -427,8 +469,14 @@ fn drag(orbit: &mut OrbitCamera, press: Press, delta: Vec2, viewport_height: f32
         let scale = view.world_per_px(viewport_height);
         view.focus += (-transform.right() * delta.x + transform.up() * delta.y) * scale;
     } else {
+        let before = view.transform().rotation;
         view.yaw -= delta.x * ORBIT_RADIANS_PER_PX;
         view.pitch = (view.pitch + delta.y * ORBIT_RADIANS_PER_PX).clamp(MIN_PITCH, MAX_PITCH);
+        // M8: eye and focus turn about the pivot, so the pivot stays put on screen.
+        if let Some(pivot) = pivot {
+            let turn = view.transform().rotation * before.inverse();
+            view.focus = pivot + turn * (view.focus - pivot);
+        }
     }
     // Direct manipulation: no easing while the pointer is down.
     orbit.target = orbit.current;

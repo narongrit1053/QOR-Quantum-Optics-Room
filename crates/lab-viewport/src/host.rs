@@ -403,6 +403,7 @@ fn run_on_demand(
                 ViewportRequest::InspectPart(id) => pending.push(FrameRequest::InspectPart(id)),
                 ViewportRequest::InspectMarkers(frames) => pending.push(FrameRequest::InspectMarkers(frames)),
                 ViewportRequest::SetBeams(on) => pending.push(FrameRequest::SetBeams(on)),
+                ViewportRequest::ViewDirection { yaw, pitch } => pending.push(FrameRequest::ViewDirection(yaw, pitch)),
                 ViewportRequest::RenderThumbnail { part, path } => {
                     pending.push(FrameRequest::RenderThumbnail(part, path))
                 }

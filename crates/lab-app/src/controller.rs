@@ -108,6 +108,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         };
         a.borrow().send(ViewportRequest::SetViewMode(mode));
     });
+    crate::view_cube::wire(ui, app);
     app.borrow().send(ViewportRequest::SetReduceMotion(reduce_motion()));
 }
 
