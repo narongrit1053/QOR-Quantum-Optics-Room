@@ -24,6 +24,11 @@ pub fn facing(dir: DVec3) -> DQuat {
     DQuat::from_rotation_z(dir.y.atan2(dir.x)) * DQuat::from_rotation_y(FRAC_PI_2)
 }
 
+/// Yaw that turns local +Y (a catalog part's optical axis) to the horizontal direction `dir`.
+fn yaw_y(dir: DVec3) -> DQuat {
+    DQuat::from_rotation_z(dir.y.atan2(dir.x) - FRAC_PI_2)
+}
+
 struct Builder<'a> {
     doc: &'a mut Document,
     platform: PlatformId,
@@ -113,7 +118,7 @@ impl Builder<'_> {
             label,
             "generic:mirror-1in",
             centre,
-            DQuat::from_rotation_z(normal.y.atan2(normal.x) - FRAC_PI_2),
+            yaw_y(normal),
             Shape::Part,
             Finish::Mirror,
         );
@@ -142,25 +147,20 @@ impl Builder<'_> {
             Shape::Cylinder { radius: ring_radius, length: ring_length },
             Finish::AnodizedBlack,
         );
-        self.add(
-            label,
-            part,
-            at.extend(BEAM_HEIGHT),
-            rot,
-            Shape::Cylinder { radius: 12.7, length: ring_length + 1.0 },
-            Finish::Glass,
-        );
+        // A catalog part (its optical port faces local +Y), so the beam trace acts on it.
+        self.add(label, part, at.extend(BEAM_HEIGHT), yaw_y(axis), Shape::Part, Finish::Glass);
     }
 
     fn detector(&mut self, label: &str, col: u32, row: u32, facing_dir: DVec3) {
         let at = self.hole(col, row);
-        self.post_stack(label, at, facing_dir.y.atan2(facing_dir.x), BEAM_HEIGHT - 20.0);
+        self.post_stack(label, at, facing_dir.y.atan2(facing_dir.x), BEAM_HEIGHT - 25.0);
+        // The catalog photodiode takes light travelling along local +Y at 25 mm up, and stops it.
         self.add(
             label,
-            "generic:photodiode",
-            at.extend(BEAM_HEIGHT),
-            facing(facing_dir),
-            Shape::Box { size: DVec3::new(40.0, 40.0, 25.0) },
+            "thorlabs:PDA36A/M",
+            at.extend(BEAM_HEIGHT - 25.0),
+            yaw_y(-facing_dir),
+            Shape::Part,
             Finish::Painted { rgb: [44, 48, 56] },
         );
     }
@@ -188,13 +188,13 @@ pub fn demo_document() -> Document {
     let mut b = Builder { doc: &mut doc, platform: table, holes };
 
     // Laser head sitting directly on the table, beam leaving its +X face.
-    // The catalog laser head emits along local +Y from 100 mm ahead, 40 mm up: turned to +X and
-    // raised so the beam leaves at beam height; traced live (lab-optics), so no drawn beams.
+    // The catalog laser head emits along local +Y from 100 mm ahead at beam height, turned to +X;
+    // traced live (lab-optics), so no drawn beams.
     let laser_centre = b.hole(6, 8);
     b.add(
         "Laser (ECDL, 780 nm)",
         "generic:laser-head",
-        laser_centre.extend(BEAM_HEIGHT - 40.0),
+        laser_centre.extend(0.0),
         DQuat::from_rotation_z(-FRAC_PI_2),
         Shape::Part,
         Finish::Painted { rgb: [58, 64, 74] },
@@ -204,8 +204,8 @@ pub fn demo_document() -> Document {
     let y = DVec3::Y;
     b.mirror("M1", 18, 8, -x + y);
     b.mirror("M2", 18, 24, x - y);
-    b.ring_optic("L1 (f = 100 mm)", "generic:lens-1in-f100", 26, 24, x, 19.0, 8.0);
-    b.ring_optic("HWP", "generic:half-wave-plate-1in", 30, 24, x, 22.0, 14.0);
+    b.ring_optic("L1 (f = 100 mm)", "generic:lens-1in", 26, 24, x, 19.0, 8.0);
+    b.ring_optic("HWP", "generic:hwp-1in", 30, 24, x, 22.0, 14.0);
 
     let pbs_at = b.hole(34, 24);
     b.post_stack("PBS", pbs_at, 0.0, BEAM_HEIGHT - 12.7 - 5.0);
@@ -222,7 +222,7 @@ pub fn demo_document() -> Document {
         "generic:pbs-cube-1in",
         pbs_at.extend(BEAM_HEIGHT),
         DQuat::IDENTITY,
-        Shape::Box { size: DVec3::splat(25.4) },
+        Shape::Part,
         Finish::Glass,
     );
 
@@ -263,7 +263,7 @@ mod tests {
         let doc = demo_document();
         for post in doc.nodes.iter().filter(|n| n.name.ends_with("· post")) {
             let top = post.position.z + post.shape.half_height();
-            assert!(top > HOLDER_TOP && top < BEAM_HEIGHT, "{} top at {top}", post.name);
+            assert!(top >= HOLDER_TOP && top < BEAM_HEIGHT, "{} top at {top}", post.name);
         }
     }
 

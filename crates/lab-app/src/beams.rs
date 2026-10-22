@@ -190,7 +190,22 @@ mod tests {
         assert!(after(&doc).dot(before) < 0.99, "beam after M1 did not turn");
     }
 
-    /// Exit-walkthrough scene: laser (raised 35 mm so its 40 mm axis is at 75 mm), two mirror sets
+    /// POLA-103: the demo beam is focused by L1, split by the PBS and ends on both detectors.
+    #[test]
+    fn demo_beam_ends_on_the_detectors() {
+        let (catalog, _) = Catalog::load_default();
+        let doc = lab_core::sample::demo_document();
+        let t = lab_optics::trace_document(&doc, &|p| catalog.get(p).cloned());
+        let id = |name: &str| doc.nodes.iter().find(|n| n.name.starts_with(name) && !n.name.contains('·')).unwrap().id;
+        for name in ["M1", "M2", "L1", "HWP", "PBS", "D1", "D2"] {
+            assert!(t.radius_at(id(name)).is_some(), "{name} not hit");
+        }
+        assert!(t.segments.iter().any(|s| s.waist.is_some()), "no focus after L1");
+        let ends: Vec<_> = t.segments.iter().filter(|s| s.depth > 0).filter_map(|s| s.hit.as_ref().map(|h| h.0)).collect();
+        assert!(ends.contains(&id("D1")) && ends.contains(&id("D2")));
+    }
+
+    /// Exit-walkthrough scene: laser (its 75 mm axis is at beam height), two mirror sets
     /// folding the beam, a lens set focusing it. `LABSETUP_BEAM_SCENE=<path>` writes it as a project.
     #[test]
     fn beam_through_mirror_and_lens_sets() {
@@ -215,7 +230,7 @@ mod tests {
             100,
             Parent::Platform(PlatformId(1)),
             Attach::Free,
-            DVec3::new(0.0, -300.0, 35.0),
+            DVec3::new(0.0, -300.0, 0.0),
             DQuat::IDENTITY,
         )
         .unwrap();
