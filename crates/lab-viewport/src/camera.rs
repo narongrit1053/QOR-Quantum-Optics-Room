@@ -7,7 +7,7 @@
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 use bevy::{
-    camera::{ClearColorConfig, ScalingMode, Viewport, primitives::Aabb},
+    camera::{ClearColorConfig, ScalingMode, Viewport, primitives::Aabb, visibility::RenderLayers},
     ecs::system::SystemParam,
     light::ShadowFilteringMethod,
     math::DVec3,
@@ -34,6 +34,18 @@ const ZOOM_PER_PX: f32 = 0.0025;
 const EASE_RATE: f32 = 12.0;
 /// Duration of view-mode changes and framing (DESIGN §7 Motion), cubic ease-out.
 const TRANSITION_SECS: f32 = 0.35;
+/// Remaining motion (px) below which the ease snaps to its target.
+const SETTLE_PX: f32 = 0.5;
+
+/// Render layers (POLA-104): layer 0 is seen by both panes; `MAIN_LAYER` only by the main camera
+/// (and exports), `PANE_LAYER` only by the Top pane. Shadow casters sit on both private layers so
+/// each pane's key light (one with, one without shadows) sees them.
+pub(crate) const MAIN_LAYER: usize = 1;
+pub(crate) const PANE_LAYER: usize = 2;
+
+pub(crate) fn main_view_layers() -> RenderLayers {
+    RenderLayers::from_layers(&[0, MAIN_LAYER])
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct View {
@@ -59,11 +71,14 @@ impl View {
         2.0 * self.distance * (FOV / 2.0).tan() / viewport_height_px.max(1.0)
     }
 
-    fn settled_at(&self, target: &View) -> bool {
-        self.focus.distance(target.focus) < 1e-5
-            && (self.yaw - target.yaw).abs() < 1e-4
-            && (self.pitch - target.pitch).abs() < 1e-4
-            && (self.distance / target.distance - 1.0).abs() < 1e-4
+    /// Whether what is left of the move shifts the picture by less than `SETTLE_PX`: the tail of
+    /// the exponential ease is invisible but would keep frames coming for ~1 s (POLA-104).
+    fn settled_at(&self, target: &View, viewport_height_px: f32) -> bool {
+        let h = viewport_height_px.max(1.0);
+        let px = (self.focus.distance(target.focus) / self.world_per_px(h))
+            .max((self.distance / target.distance - 1.0).abs() * h / 2.0)
+            .max((self.yaw - target.yaw).abs().max((self.pitch - target.pitch).abs()) * h / FOV);
+        px < SETTLE_PX
     }
 
     /// `k` of the way from `self` to `to`; distance in log space so zoom feels even.
@@ -175,7 +190,8 @@ impl Plugin for CameraPlugin {
         app.init_resource::<PointerState>()
             .init_resource::<Clicks>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (layout_panes, handle_input, animate_camera, top_shadows).chain());
+            .add_systems(Update, (layout_panes, handle_input, animate_camera, top_shadows).chain())
+            .add_systems(PostUpdate, tag_shadow_casters.before(bevy::camera::visibility::VisibilitySystems::CheckVisibility));
     }
 }
 
@@ -194,6 +210,7 @@ fn spawn_camera(mut commands: Commands, samples: Res<MsaaSamples>) {
         Projection::Perspective(PerspectiveProjection { fov: FOV, near: 0.01, far: 100.0, ..default() }),
         view.transform(),
         OrbitCamera::new(view),
+        main_view_layers(),
     ));
     // POLA-51: the Top pane of the split view (right half), inactive outside Split. It renders
     // after the main camera into the same texture and keeps the left half (no clear).
@@ -206,7 +223,23 @@ fn spawn_camera(mut commands: Commands, samples: Res<MsaaSamples>) {
         view.transform(),
         OrbitCamera::new(view),
         TopPane,
+        RenderLayers::from_layers(&[0, PANE_LAYER]),
     ));
+}
+
+/// Puts new scene shadow casters on both pane layers, so the main key light casts their shadows
+/// and the pane's does not. Meshes under an entity with its own layers (thumbnails) are left alone.
+fn tag_shadow_casters(
+    mut commands: Commands,
+    added: Query<Entity, (Added<Mesh3d>, Without<RenderLayers>, Without<bevy::light::NotShadowCaster>)>,
+    parents: Query<&ChildOf>,
+    layered: Query<(), With<RenderLayers>>,
+) {
+    for entity in &added {
+        if !parents.iter_ancestors(entity).any(|a| layered.contains(a)) {
+            commands.entity(entity).insert(RenderLayers::from_layers(&[MAIN_LAYER, PANE_LAYER]));
+        }
+    }
 }
 
 /// Marks the second camera, the Top pane of [`ViewMode::Split`]. Systems that need "the" camera
@@ -576,8 +609,15 @@ pub(crate) fn frame_box(orbit: &mut OrbitCamera, camera: &Camera, min: Vec3, max
     orbit.start_tween();
 }
 
-/// No shadow blobs in the Top projection: the key light casts shadows only while the main camera
-/// is not in Top.
+/// Orthographic in Top once (almost) straight down, and for the whole of a tween that leaves Top,
+/// so the projection switches at the end of the turn, not on its first frame (POLA-52/104).
+fn orthographic(orbit: &OrbitCamera) -> bool {
+    let leaving_top = orbit.mode != ViewMode::Top && orbit.tween.is_some_and(|t| t.from.pitch > (TOP_PITCH + MAX_PITCH) / 2.0);
+    leaving_top || (orbit.mode == ViewMode::Top && orbit.current.pitch > FRAC_PI_2 - 0.02)
+}
+
+/// No shadow blobs in the Top projection: the main key light casts shadows only while the main
+/// camera is not in Top. The Top pane has its own key light, without shadows (POLA-104).
 pub(crate) fn top_shadows(
     quality: Res<crate::Quality>,
     cameras: Query<&OrbitCamera, Without<TopPane>>,
@@ -598,13 +638,20 @@ pub(crate) fn animate_camera(
 ) {
     for (mut orbit, camera, transform, projection) in &mut cameras {
         if camera.is_active {
-            animate_one(&time, &mut redraw, &mut orbit, transform, projection);
+            let height = camera.physical_viewport_size().map_or(1.0, |s| s.y as f32);
+            animate_one(&time, &mut redraw, &mut orbit, transform, projection, height);
         }
     }
 }
 
-fn animate_one(time: &Time, redraw: &mut RedrawState, orbit: &mut OrbitCamera, mut transform: Mut<Transform>, mut projection: Mut<Projection>) {
-
+fn animate_one(
+    time: &Time,
+    redraw: &mut RedrawState,
+    orbit: &mut OrbitCamera,
+    mut transform: Mut<Transform>,
+    mut projection: Mut<Projection>,
+    viewport_height: f32,
+) {
     // After an idle period the frame delta is huge; cap it so animations still play.
     let dt = time.delta_secs().min(1.0 / 30.0);
     if let Some(tween) = orbit.tween.as_mut() {
@@ -618,7 +665,7 @@ fn animate_one(time: &Time, redraw: &mut RedrawState, orbit: &mut OrbitCamera, m
         }
         redraw.keep_alive = true;
         redraw.moving = true;
-    } else if orbit.current.settled_at(&orbit.target) {
+    } else if orbit.current.settled_at(&orbit.target, viewport_height) {
         orbit.current = orbit.target;
     } else {
         let k = 1.0 - (-dt * EASE_RATE).exp();
@@ -634,10 +681,7 @@ fn animate_one(time: &Time, redraw: &mut RedrawState, orbit: &mut OrbitCamera, m
 
     // The top view switches to orthographic once the camera is (almost) straight down, scaled
     // so the focal plane keeps its size.
-    // Also while a tween leaves Top, so the projection switches at the end of the turn, not on its
-    // first frame (POLA-52). Orbiting is clamped below this pitch, so 3D stays perspective.
-    let orthographic = (orbit.mode == ViewMode::Top || orbit.tween.is_some()) && orbit.current.pitch > FRAC_PI_2 - 0.02;
-    if orthographic {
+    if orthographic(orbit) {
         let viewport_height = 2.0 * orbit.current.distance * (FOV / 2.0).tan();
         let up_to_date = matches!(
             &*projection,
@@ -677,5 +721,34 @@ mod tests {
         assert_eq!(orbit.target.yaw, TAU);
         assert_eq!(orbit.target.pitch, TOP_PITCH);
         assert!(orbit.tween.is_some());
+    }
+
+    #[test]
+    fn leaving_top_stays_orthographic_until_the_turn_ends() {
+        let view = View { focus: Vec3::ZERO, yaw: 0.0, pitch: 0.5, distance: 2.0 };
+        let mut orbit = OrbitCamera::new(view);
+        set_mode(&mut orbit, ViewMode::Top);
+        orbit.current = orbit.target;
+        orbit.tween = None;
+        assert!(orthographic(&orbit));
+        set_mode(&mut orbit, ViewMode::Perspective);
+        orbit.current = orbit.current.lerp(&orbit.target, 0.5);
+        assert!(orthographic(&orbit), "mid-turn");
+        orbit.tween = None;
+        assert!(!orthographic(&orbit), "turn finished");
+        // A framing tween in 3D, even looking almost straight down, stays perspective.
+        orbit.current.pitch = MAX_PITCH;
+        orbit.start_tween();
+        assert!(!orthographic(&orbit));
+    }
+
+    #[test]
+    fn ease_settles_below_half_a_pixel() {
+        let target = View { focus: Vec3::ZERO, yaw: 0.0, pitch: 0.5, distance: 2.0 };
+        assert!(target.settled_at(&target, 1000.0));
+        let close = View { distance: 2.0 * (1.0 + 0.4 / 500.0), ..target };
+        assert!(close.settled_at(&target, 1000.0));
+        let far = View { distance: 2.0 * 1.01, ..target };
+        assert!(!far.settled_at(&target, 1000.0));
     }
 }

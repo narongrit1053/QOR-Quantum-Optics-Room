@@ -107,12 +107,20 @@ impl Plugin for ScenePlugin {
 pub(crate) struct KeyLight;
 
 fn spawn_lighting(mut commands: Commands, quality: Res<Quality>) {
+    let key = Transform::from_xyz(2.5, 6.0, 3.5).looking_at(Vec3::new(0.0, 0.8, 0.0), Vec3::Y);
     commands.spawn((
         KeyLight,
         DirectionalLight { illuminance: 9_000.0, shadow_maps_enabled: quality.shadows(), ..default() },
-        Transform::from_xyz(2.5, 6.0, 3.5).looking_at(Vec3::new(0.0, 0.8, 0.0), Vec3::Y),
+        key,
         // One cascade over the working area keeps shadows affordable on integrated GPUs.
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 8.0, ..default() }.build(),
+        bevy::camera::visibility::RenderLayers::layer(crate::camera::MAIN_LAYER),
+    ));
+    // The same key light for the Top pane of Split, never with shadows (POLA-104).
+    commands.spawn((
+        DirectionalLight { illuminance: 9_000.0, shadow_maps_enabled: false, ..default() },
+        key,
+        bevy::camera::visibility::RenderLayers::layer(crate::camera::PANE_LAYER),
     ));
     // Cool fill from the opposite side, no shadows.
     commands.spawn((

@@ -109,9 +109,10 @@ fn resize_outline(
     }
 }
 
-/// Uniform scale about the piece's box centre so its largest half-extent grows by `OUTLINE_PX`.
-/// shortcut: uniform scale makes thin sides of elongated pieces thinner than 2 px; use a
-/// normal-extruded hull mesh if that looks wrong.
+/// Per-axis scale about the piece's box centre so every half-extent grows by `OUTLINE_PX`, also
+/// on the thin sides of elongated pieces (POLA-104).
+/// shortcut: exact for box-like pieces; curved or rotated-inside-the-piece shapes get a rim that
+/// varies around them. Use a normal-extruded hull mesh if that looks wrong.
 fn hull_transform((camera, eye, projection): CameraView, aabb: &Aabb, global: &GlobalTransform) -> Transform {
     let centre = Vec3::from(aabb.center);
     let world_centre = global.transform_point(centre);
@@ -121,7 +122,7 @@ fn hull_transform((camera, eye, projection): CameraView, aabb: &Aabb, global: &G
         Projection::Orthographic(o) => o.area.height(),
         _ => 0.0,
     } / height_px;
-    let radius = (Vec3::from(aabb.half_extents) * global.scale()).max_element().max(1e-6);
-    let k = 1.0 + OUTLINE_PX * world_per_px / radius;
-    Transform { translation: centre * (1.0 - k), scale: Vec3::splat(k), ..default() }
+    let half = (Vec3::from(aabb.half_extents) * global.scale().abs()).max(Vec3::splat(1e-6));
+    let k = Vec3::ONE + OUTLINE_PX * world_per_px / half;
+    Transform { translation: centre * (Vec3::ONE - k), scale: k, ..default() }
 }

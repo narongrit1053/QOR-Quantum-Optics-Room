@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lab_core::glam::{DQuat, DVec3};
-use lab_core::{Attach, Command, NodeId};
+use lab_core::{Attach, Command, NodeId, Parent};
 use lab_ui::AppWindow;
 
 use crate::app_state::AppState;
@@ -21,6 +21,7 @@ pub fn on_transform_requested(
     app: &Rc<RefCell<AppState>>,
     models: &Rc<UiModels>,
     id: NodeId,
+    parent: Parent,
     attach: Attach,
     position: DVec3,
     rotation: DQuat,
@@ -32,7 +33,7 @@ pub fn on_transform_requested(
         let Some(node) = session.doc.node(id) else { return };
         // SetAttach even when only the placement changes: its inverse restores the attach too,
         // and a drag may snap on and off holes before it ends.
-        let command = Command::SetAttach { id, parent: node.parent, attach, position, rotation };
+        let command = Command::SetAttach { id, parent, attach, position, rotation };
         let verb = if rotation.angle_between(node.rotation) > 1e-9 { "Rotate" } else { "Move" };
         let label = format!("{verb} {}", node.name);
         let result = session.history.execute_coalescing(&mut session.doc, command, label, GESTURE);

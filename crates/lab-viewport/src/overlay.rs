@@ -39,17 +39,20 @@ fn send_overlay(
     let top = cameras.iter().find(|(o, c, _)| c.is_active && o.mode() == ViewMode::Top);
     let items = match (top, &index.snapshot) {
         (Some((_, camera, transform)), Some(doc)) => {
-            let project = |p: DVec3| {
-                let v = camera.world_to_viewport(transform, to_render(p)).ok()?;
-                let size = camera.logical_target_size()?;
-                Some(if full.0.x > 0.0 && full.0.y > 0.0 { v * full.0 / size } else { v })
+            let to_full = |v: Vec2| match camera.logical_target_size() {
+                Some(size) if full.0.x > 0.0 && full.0.y > 0.0 => v * full.0 / size,
+                _ => v,
             };
+            let project = |p: DVec3| Some(to_full(camera.world_to_viewport(transform, to_render(p)).ok()?));
+            // In Split only the pane's half may be drawn on (POLA-104).
+            let pane = camera.logical_viewport_rect().map(|r| Rect::from_corners(to_full(r.min), to_full(r.max)));
+            let inside = |p: Vec2| pane.is_none_or(|r| r.contains(p));
             let kept = isolated.0.map(|root| kept_platforms(doc, root));
             let shown = |p: lab_core::PlatformId| kept.as_ref().is_none_or(|k| k.contains(&p));
             let mut items = Vec::new();
             let mut labels: Vec<Vec2> = Vec::new();
             let mut label = |items: &mut Vec<OverlayItem>, target, pos: Vec2| {
-                if labels.len() < MAX_LABELS && labels.iter().all(|l| l.distance(pos) >= MIN_LABEL_GAP_PX) {
+                if inside(pos) && labels.len() < MAX_LABELS && labels.iter().all(|l| l.distance(pos) >= MIN_LABEL_GAP_PX) {
                     labels.push(pos);
                     items.push(OverlayItem::Label { target, pos });
                 }
@@ -70,10 +73,11 @@ fn send_overlay(
                     let n = if n.dot((a + b) / 2.0 - centre) < 0.0 { -n } else { n };
                     (a + n * DIMENSION_OFFSET_PX, b + n * DIMENSION_OFFSET_PX)
                 };
-                let (a, b) = offset(tl, tr);
-                items.push(OverlayItem::Dimension { a, b, length_mm: hi.x - lo.x });
-                let (a, b) = offset(bl, tl);
-                items.push(OverlayItem::Dimension { a, b, length_mm: hi.y - lo.y });
+                for ((a, b), length_mm) in [(offset(tl, tr), hi.x - lo.x), (offset(bl, tl), hi.y - lo.y)] {
+                    if let Some((a, b)) = pane.map_or(Some((a, b)), |r| clip_segment(a, b, r)) {
+                        items.push(OverlayItem::Dimension { a, b, length_mm });
+                    }
+                }
                 label(&mut items, SelectionTarget::Platform(p.id), tl);
             }
             for n in &doc.nodes {
@@ -91,5 +95,37 @@ fn send_overlay(
     if items != last.0 {
         events.send(ViewportEvent::Overlay(items.clone()));
         last.0 = items;
+    }
+}
+
+/// The part of segment `a`–`b` inside `rect` (Liang–Barsky), `None` when it misses the rect.
+fn clip_segment(a: Vec2, b: Vec2, rect: Rect) -> Option<(Vec2, Vec2)> {
+    let d = b - a;
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    for (p, q) in [(-d.x, a.x - rect.min.x), (d.x, rect.max.x - a.x), (-d.y, a.y - rect.min.y), (d.y, rect.max.y - a.y)] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+        } else {
+            let t = q / p;
+            if p < 0.0 { t0 = t0.max(t) } else { t1 = t1.min(t) }
+        }
+    }
+    (t0 <= t1).then(|| (a + d * t0, a + d * t1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segments_clip_to_the_pane() {
+        let pane = Rect::new(100.0, 0.0, 200.0, 100.0);
+        let inside = (Vec2::new(120.0, 50.0), Vec2::new(180.0, 50.0));
+        assert_eq!(clip_segment(inside.0, inside.1, pane), Some(inside));
+        assert_eq!(clip_segment(Vec2::new(50.0, 50.0), Vec2::new(150.0, 50.0), pane), Some((Vec2::new(100.0, 50.0), Vec2::new(150.0, 50.0))));
+        assert_eq!(clip_segment(Vec2::new(10.0, 50.0), Vec2::new(90.0, 50.0), pane), None);
+        assert_eq!(clip_segment(Vec2::new(150.0, -50.0), Vec2::new(150.0, -10.0), pane), None);
     }
 }

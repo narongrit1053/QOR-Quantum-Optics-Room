@@ -232,6 +232,8 @@ pub enum ViewportEvent {
     /// gesture: the app closes the undo step.
     TransformRequested {
         id: lab_core::NodeId,
+        /// Usually the node's own parent; its root (platform or room) when a move unmates it.
+        parent: lab_core::Parent,
         attach: lab_core::Attach,
         position: bevy::math::DVec3,
         rotation: bevy::math::DQuat,
