@@ -6,7 +6,7 @@ tags = ["laser", "source"]
 [geometry]
 kind = "parametric"
 generator = "laser_head"
-params = { length = 200, width = 80, height = 60, axis_height = 40 }
+params = { length = 200, width = 80, height = 95, axis_height = 75 }
 
 [[connectors]]
 name = "seat"
@@ -17,4 +17,4 @@ frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
 name = "output"
 kind = "source"
 clear_aperture = 3
-frame = { origin = [0, 100, 40], z = [0, 1, 0], x = [1, 0, 0] }
+frame = { origin = [0, 100, 75], z = [0, 1, 0], x = [1, 0, 0] }
