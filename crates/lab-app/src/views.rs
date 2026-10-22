@@ -851,6 +851,14 @@ pub fn node_view(
         _ => node_yaw(node),
     };
     let mut edit_fields = vec![
+        EditFieldData {
+            id: "node.note".into(),
+            label: "Note".into(),
+            value: node.note.clone(),
+            unit: String::new(),
+            enabled: true,
+            invalid: false,
+        },
         length("node.x", "X", node.position.x, !mated),
         length("node.y", "Y", node.position.y, !mated),
         length("node.z", "Height", node.position.z, !mated),
@@ -1231,6 +1239,7 @@ mod tests {
     fn v3_scene_rows() {
         let mut doc = test_doc();
         doc.nodes.push(Node {
+            note: String::new(),
             id: NodeId(10),
             name: "Laser · head".into(),
             parent: lab_core::Parent::Platform(PlatformId(1)),

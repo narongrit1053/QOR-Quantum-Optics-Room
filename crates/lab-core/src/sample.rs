@@ -43,6 +43,7 @@ impl Builder<'_> {
     ) -> NodeId {
         let id = NodeId(self.doc.allocate_id());
         self.doc.nodes.push(Node {
+            note: String::new(),
             id,
             name: name.into(),
             part: part.into(),

@@ -222,6 +222,7 @@ mod tests {
     fn new_node(doc: &Document, platform: PlatformId, rng: &mut Rng) -> Node {
         let id = doc.next_free_id();
         Node {
+            note: String::new(),
             id: NodeId(id),
             name: format!("Part {id}"),
             part: "generic:post-12.7-50".into(),

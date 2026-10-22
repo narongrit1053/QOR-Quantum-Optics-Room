@@ -523,6 +523,7 @@ mod tests {
 
     fn node(id: u64, part: &str, parent: Parent, attach: Attach, position: DVec3) -> Node {
         Node {
+            note: String::new(),
             id: NodeId(id),
             name: part.into(),
             part: part.into(),

@@ -19,6 +19,8 @@ pub struct BomRow {
     pub vendor: String,
     pub part_number: String,
     pub name: String,
+    /// Node names that differ from the part's default name, sorted, joined with `, `.
+    pub labels: String,
     pub spec: String,
     pub quantity: u32,
 }
@@ -34,9 +36,14 @@ fn fmt_param(value: &ParamValue) -> String {
 /// One row per (vendor, part_number, spec); sorted by vendor, part number, spec. Pure.
 pub fn rows(doc: &Document, catalog: &Catalog) -> Vec<BomRow> {
     let mut map: BTreeMap<(String, String, String), BomRow> = BTreeMap::new();
-    let mut add = |vendor: String, part_number: String, name: String, spec: String| {
-        map.entry((vendor.clone(), part_number.clone(), spec.clone()))
-            .or_insert(BomRow { vendor, part_number, name, spec, quantity: 0 })
+    let mut labels: BTreeMap<(String, String, String), Vec<String>> = BTreeMap::new();
+    let mut add = |vendor: String, part_number: String, name: String, spec: String, label: Option<&str>| {
+        let key = (vendor.clone(), part_number.clone(), spec.clone());
+        if let Some(l) = label.filter(|l| *l != name) {
+            labels.entry(key.clone()).or_default().push(l.to_string());
+        }
+        map.entry(key)
+            .or_insert(BomRow { vendor, part_number, name, labels: String::new(), spec, quantity: 0 })
             .quantity += 1;
     };
     for node in &doc.nodes {
@@ -55,9 +62,9 @@ pub fn rows(doc: &Document, catalog: &Catalog) -> Vec<BomRow> {
                 } else {
                     def.part_number.clone()
                 };
-                add(vendor, number, def.name.clone(), spec);
+                add(vendor, number, def.name.clone(), spec, Some(&node.name));
             }
-            None => add("Generic".into(), id.to_string(), readable(id), spec),
+            None => add("Generic".into(), id.to_string(), readable(id), spec, Some(&node.name)),
         }
     }
     for platform in &doc.platforms {
@@ -65,7 +72,13 @@ pub fn rows(doc: &Document, catalog: &Catalog) -> Vec<BomRow> {
         let size = format!("{}×{}", max.x - min.x, max.y - min.y);
         let spec = format!("{size}×{} mm", platform.thickness);
         // Platforms carry no preset id or vendor in the model.
-        add("Generic".into(), String::new(), format!("{} {size}", platform.name), spec);
+        add("Generic".into(), String::new(), format!("{} {size}", platform.name), spec, None);
+    }
+    for (key, mut l) in labels {
+        l.sort();
+        if let Some(row) = map.get_mut(&key) {
+            row.labels = l.join(", ");
+        }
     }
     map.into_values().collect()
 }
@@ -93,13 +106,13 @@ fn field(text: &str) -> String {
     if text.contains([',', '"', '\n', '\r']) { format!("\"{}\"", text.replace('"', "\"\"")) } else { text.to_string() }
 }
 
-/// RFC 4180: header `Vendor,Part number,Name,Spec,Quantity`, fields with `,` `"` or newlines
+/// RFC 4180: header `Vendor,Part number,Name,Labels,Spec,Quantity`, fields with `,` `"` or newlines
 /// quoted, CRLF line ends, UTF-8 with BOM (Excel). Pure.
 pub fn to_csv(rows: &[BomRow]) -> String {
-    let mut out = String::from("\u{feff}Vendor,Part number,Name,Spec,Quantity\r\n");
+    let mut out = String::from("\u{feff}Vendor,Part number,Name,Labels,Spec,Quantity\r\n");
     for r in rows {
         let q = r.quantity.to_string();
-        let line = [&r.vendor, &r.part_number, &r.name, &r.spec, &q].map(|f| field(f)).join(",");
+        let line = [&r.vendor, &r.part_number, &r.name, &r.labels, &r.spec, &q].map(|f| field(f)).join(",");
         out.push_str(&line);
         out.push_str("\r\n");
     }
@@ -170,8 +183,9 @@ mod tests {
         let mut doc = Document::new("t");
         let mut add = |part: &str, len: Option<f64>| {
             let mut n = Node {
+                note: String::new(),
                 id: NodeId(doc.nodes.len() as u64 + 1),
-                name: part.into(),
+                name: if part == "thorlabs:KM100" { "Mount".into() } else { part.into() },
                 part: part.into(),
                 parent: Parent::Room,
                 attach: Attach::Free,
@@ -193,13 +207,15 @@ mod tests {
         add("thorlabs:KM100", None);
         add("thorlabs:KM100", None);
         add("mystery:x", None);
+        doc.nodes[3].name = "M3".into();
         let r = rows(&doc, &catalog);
+        assert_eq!(r.iter().find(|r| r.part_number == "KM100").unwrap().labels, "M3");
         assert_eq!(r.len(), 4);
         assert!(r.iter().any(|r| r.vendor == "Generic" && r.name == "X"));
         assert_eq!(r.iter().find(|r| r.part_number == "KM100").unwrap().quantity, 2);
         let csv = to_csv(&r);
         assert!(csv.contains("\"Post, 1\"\"\""));
-        assert!(csv.starts_with("\u{feff}Vendor,"));
+        assert!(csv.starts_with("\u{feff}Vendor,Part number,Name,Labels,Spec,Quantity\r\n"));
     }
 
     #[test]
