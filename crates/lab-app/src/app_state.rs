@@ -103,6 +103,12 @@ pub struct AppState {
     pub beams: lab_optics::Trace,
     /// M7 A: copied set nodes (in-app clipboard).
     pub clipboard: Vec<lab_core::Node>,
+    /// M9 D: hidden nodes (view state: not saved, not undoable).
+    pub hidden: std::collections::BTreeSet<lab_core::NodeId>,
+    /// M9 D: `view.isolate_selection` is active.
+    pub isolated_nodes: bool,
+    /// M9 D: `view.walls` hides the walls over the saved preference.
+    pub walls_hidden: bool,
 }
 
 impl AppState {
@@ -133,6 +139,9 @@ impl AppState {
             pending_exports: Vec::new(),
             beams: Default::default(),
             clipboard: Vec::new(),
+            hidden: Default::default(),
+            isolated_nodes: false,
+            walls_hidden: false,
         }
     }
 

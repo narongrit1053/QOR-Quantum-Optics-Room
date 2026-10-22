@@ -18,6 +18,9 @@ thread_local! {
 
 pub fn on_measured(ui: &AppWindow, app: &Rc<RefCell<AppState>>, m: Option<Measurement>) {
     LAST.with(|l| l.set(m));
+    if m.is_some() {
+        crate::controller::set_hint(ui, "");
+    }
     refresh(ui, app.borrow().units());
 }
 

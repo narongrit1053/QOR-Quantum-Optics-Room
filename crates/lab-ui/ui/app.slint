@@ -21,6 +21,7 @@ import { WizardPanel } from "wizard.slint";
 import { CommandPalette } from "palette.slint";
 import { ShortcutSheet } from "shortcuts.slint";
 import { ExportSheet } from "export.slint";
+import { ContextMenu } from "context_menu.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
@@ -189,8 +190,13 @@ export component AppWindow inherits Window {
     in-out property <int> tool;
     // Measure readout; empty hides the chip.
     in property <string> measure-text;
-    // Constrain tool step hint, shown in the measure chip's place.
-    in property <string> constrain-hint;
+    // M9 D. Tool step hint (bottom centre), shown in the measure chip's place while non-empty.
+    in property <string> tool-hint;
+    // M9 D. Context menu rows (id, title, shortcut) and its position in the viewport (logical px).
+    in property <[PaletteItem]> context-rows;
+    in property <length> context-x;
+    in property <length> context-y;
+    public function open-context-menu() { context-menu.show(); }
 
     // ── Platform inspector ───────────────────────────────────────────────────
     in property <string> platform-name;
@@ -631,6 +637,10 @@ export component AppWindow inherits Window {
                         root.action("tool.measure");
                         return accept;
                     }
+                    if ((event.text == Key.F10 && event.modifiers.shift) || event.text == Key.Menu) {
+                        root.action("view.context_menu");
+                        return accept;
+                    }
                     if (event.text == Key.Escape) {
                         if (root.isolated-name != "" && root.tool == 0) {
                             root.action("view.show_all");
@@ -692,6 +702,13 @@ export component AppWindow inherits Window {
                         clicked => { root.action("view.show_all"); }
                     }
                 }
+            }
+
+            context-menu := ContextMenu {
+                x: root.context-x;
+                y: root.context-y;
+                rows: root.context-rows;
+                chosen(id) => { root.action(id); }
             }
         }
 
@@ -1344,7 +1361,7 @@ export component AppWindow inherits Window {
         }
 
         // ── Measure readout (bottom centre, above the toolbar) ───────────────
-        if (root.tool == 3 && root.measure-text != "") || (root.tool == 4 && root.constrain-hint != ""): Rectangle {
+        if (root.tool == 3 && root.measure-text != "") || root.tool-hint != "": Rectangle {
             x: toolbar.x + (toolbar.width - self.width) / 2;
             y: toolbar.y - self.height - 12px;
             height: 26px;
@@ -1357,7 +1374,7 @@ export component AppWindow inherits Window {
                 padding-left: 12px;
                 padding-right: 12px;
                 Text {
-                    text: root.tool == 4 ? root.constrain-hint : root.measure-text;
+                    text: root.tool-hint != "" ? root.tool-hint : root.measure-text;
                     color: Theme.text;
                     font-size: Theme.font-caption;
                     vertical-alignment: center;

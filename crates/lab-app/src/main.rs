@@ -8,6 +8,7 @@ mod bom;
 mod bridge;
 mod clipboard;
 mod constrain;
+mod context_menu;
 mod controller;
 mod dialogs;
 mod embed;

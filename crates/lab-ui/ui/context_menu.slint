@@ -1,0 +1,44 @@
+// M9 D. Right-click menu over the viewport: one row per action id.
+import { Theme } from "theme.slint";
+import { PaletteItem } from "types.slint";
+
+export component ContextMenu inherits PopupWindow {
+    in property <[PaletteItem]> rows;
+    callback chosen(string /* action id */);
+
+    width: 180px;
+    Rectangle {
+        border-radius: 8px;
+        background: Theme.panel-bg;
+        border-width: Theme.border-width;
+        border-color: Theme.panel-border;
+        VerticalLayout {
+            padding: 4px;
+            for row in root.rows: Rectangle {
+                height: 28px;
+                border-radius: 5px;
+                background: area.has-hover ? Theme.accent-soft : transparent;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    Text {
+                        text: row.title;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: row.shortcut;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
+                }
+                area := TouchArea {
+                    clicked => { root.chosen(row.id); }
+                }
+            }
+        }
+    }
+}

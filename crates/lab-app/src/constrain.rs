@@ -34,7 +34,7 @@ thread_local! {
 /// `SetTool` clears the viewport highlight.
 pub fn reset(ui: &AppWindow, active: bool) {
     FIRST.with(|f| *f.borrow_mut() = None);
-    ui.set_constrain_hint(if active { HINT_FIRST } else { "" }.into());
+    controller::set_hint(ui, if active { HINT_FIRST } else { "" });
 }
 
 pub fn on_feature_point(
@@ -63,7 +63,7 @@ pub fn on_feature_point(
             return;
         }
         FIRST.with(|f| *f.borrow_mut() = Some((id, feature.clone())));
-        ui.set_constrain_hint(HINT_SECOND.into());
+        controller::set_hint(ui, HINT_SECOND);
         app.borrow().send(ViewportRequest::HighlightFeature(Some((target, feature))));
         return;
     };
