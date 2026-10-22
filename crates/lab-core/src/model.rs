@@ -8,7 +8,7 @@ use crate::holes::{HoleGrid, LatticeIndex};
 use crate::limits::{LEG_MAX_SPAN, MAX_LEGS};
 use crate::migrate::{LoadError, LoadReport};
 use crate::outline::{Outline, OutlineError};
-use crate::part::Params;
+use crate::part::{Feature, Params};
 use crate::room::Room;
 use crate::units::Mm;
 
@@ -396,6 +396,37 @@ pub enum Attach {
     Hole { hole: LatticeIndex },
     /// Connector to connector (docs/M2-PLAN.md, "Mate pose").
     Mate { self_conn: String, parent_conn: String, slide: Mm, twist: f64 },
+    /// Feature-to-feature constraints to the parent (docs/M8-PLAN.md B); solved by `lab_mates::constraints`.
+    Constrained { constraints: Vec<Constraint> },
+}
+
+/// One constraint between a child feature and a parent feature (docs/M8-PLAN.md B).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Constraint {
+    pub kind: ConstraintKind,
+    /// In the child's part frame.
+    pub child: Feature,
+    /// In the parent's frame (part frame for a node, platform frame for a platform).
+    pub parent: Feature,
+    /// Mate/Flush: gap along the parent normal. Concentric: unused in v1 (the axial slide stays free).
+    #[serde(default)]
+    pub offset: Mm,
+    /// Radians: Angle kind, or the Concentric twist when `lock_rotation`.
+    #[serde(default)]
+    pub angle: f64,
+    /// Concentric: the child axis runs against the parent axis.
+    #[serde(default)]
+    pub flip: bool,
+    #[serde(default)]
+    pub lock_rotation: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConstraintKind {
+    Mate,
+    Flush,
+    Concentric,
+    Angle,
 }
 
 /// A placed object: a catalog part, or (M0/M1) a primitive shape.

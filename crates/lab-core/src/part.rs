@@ -140,3 +140,13 @@ pub struct OpticalPort {
     pub clear_aperture: Option<f64>,
     pub frame: Frame,
 }
+
+/// A detected or picked model feature, in the part frame (mm, +Z up) (docs/M8-PLAN.md A).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Feature {
+    /// `normal` points out of the material.
+    Plane { origin: DVec3, normal: DVec3 },
+    /// `hole` = concave (bore), else shaft.
+    Axis { origin: DVec3, dir: DVec3, radius: f64, hole: bool },
+}
