@@ -24,6 +24,7 @@ import { ExportSheet } from "export.slint";
 import { ContextMenu } from "context_menu.slint";
 import { JointPanel } from "joint_panel.slint";
 import { PartBox } from "part_box.slint";
+import { ConstrainPanel } from "constrain_panel.slint";
 import { RelationsBar, RelationChip } from "relations_bar.slint";
 
 export { Theme }
@@ -220,6 +221,16 @@ export component AppWindow inherits Window {
     callback part-box-pointer(int, int, length, length, bool, bool, bool);
     callback part-box-scroll(length, length, length, length);
     callback part-box-close();
+    // POLA-147. Constrain Components panel (docked right of the part box).
+    in property <bool> constrain-open;
+    in property <int> constrain-kind: -1;
+    in property <string> constrain-name1;
+    in property <string> constrain-geometry1;
+    in property <string> constrain-name2;
+    in property <string> constrain-geometry2;
+    in property <int> constrain-next;
+    in property <bool> constrain-solve-all: true;
+    in property <int> constrain-row: -1;
     // M9 G. Relationships bar.
     in property <[RelationChip]> relation-chips;
     callback relation-hovered(int);
@@ -669,6 +680,14 @@ export component AppWindow inherits Window {
                         root.wizard-cancel();
                         return accept;
                     }
+                    if (event.text == Key.Escape && root.constrain-open) {
+                        root.action("cpanel.cancel");
+                        return accept;
+                    }
+                    if (event.text == Key.Return && root.constrain-open) {
+                        root.action("cpanel.ok");
+                        return accept;
+                    }
                     if (event.text == Key.Escape && root.joint-editing) {
                         root.action("joint.cancel");
                         return accept;
@@ -778,6 +797,22 @@ export component AppWindow inherits Window {
                 pointer(kind, button, x, y, shift, ctrl, alt) => { root.part-box-pointer(kind, button, x, y, shift, ctrl, alt); }
                 scroll(dx, dy, x, y) => { root.part-box-scroll(dx, dy, x, y); }
                 close => { root.part-box-close(); }
+            }
+
+            if root.constrain-open: ConstrainPanel {
+                x: 300px + 336px + 8px;
+                y: 80px;
+                kind: root.constrain-kind;
+                name1: root.constrain-name1;
+                geometry1: root.constrain-geometry1;
+                name2: root.constrain-name2;
+                geometry2: root.constrain-geometry2;
+                next-slot: root.constrain-next;
+                solve-all: root.constrain-solve-all;
+                selected-row: root.constrain-row;
+                rows: root.constraint-rows;
+                action(id) => { root.action(id); }
+                field-committed(id, text) => { return root.field-committed(id, text); }
             }
         }
 

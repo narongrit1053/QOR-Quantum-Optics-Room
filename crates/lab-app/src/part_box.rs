@@ -30,6 +30,7 @@ pub fn close(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
     ui.set_part_box_open(false);
     ui.set_part_box_texture(slint::Image::default());
     app.borrow().send(ViewportRequest::PartBox(None));
+    crate::constrain::part_box_closed(ui, app);
 }
 
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {

@@ -1,5 +1,5 @@
-//! The constrain tool (M8-PLAN D): pick a face or axis on the part to move, then one on a part
-//! or platform to constrain it to. The inspector's Constraints rows edit, re-solve and delete.
+//! The constrain tool (M8-PLAN D) as the Constrain Components panel (POLA-147): pick a face or
+//! axis per component; the constraint applies live as one gesture, OK keeps it, Cancel undoes it. The inspector's Constraints rows edit, re-solve and delete.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,7 +9,7 @@ use lab_catalog::Catalog;
 use lab_core::glam::DVec3;
 use lab_core::part::{Feature, Geometry, PartDef};
 use lab_core::units::{LengthUnit, format_angle_deg, format_length, parse_angle_deg, parse_length};
-use lab_core::{Attach, Command, Constraint, ConstraintKind, Document, Node, NodeId, Parent, SelectionTarget, compute_holes};
+use lab_core::{Attach, Command, Constraint, ConstraintKind, Document, Node, Parent, SelectionTarget, compute_holes};
 use lab_geom::TriMesh;
 use lab_mates::constraints::{constrain, default_kind, solve};
 use lab_ui::{AppWindow, ConstraintRow, EditField};
@@ -19,22 +19,127 @@ use crate::app_state::AppState;
 use crate::controller::{self, show_toast};
 use crate::ui_models::UiModels;
 
-const HINT_FIRST: &str = "Pick a face or axis on the part to move";
-const HINT_SECOND: &str = "Pick a face or axis to constrain to";
+const KINDS: [ConstraintKind; 4] = [ConstraintKind::Mate, ConstraintKind::Flush, ConstraintKind::Concentric, ConstraintKind::Angle];
+const GESTURE: &str = "constrain";
 /// A detected feature wins over the clicked triangles within 2 mm / 3°.
 const SNAP_MM: f64 = 2.0;
 const SNAP_DEG: f64 = 3.0;
 
-thread_local! {
-    /// The moving part and its picked feature, after the first pick.
-    static FIRST: RefCell<Option<(NodeId, Feature)>> = const { RefCell::new(None) };
+/// The Constrain Components panel (POLA-147). Slot 0 = Component 1 (always a node), slot 1 =
+/// Component 2 (node or platform); each with its picked feature.
+#[derive(Default)]
+struct Panel {
+    open: bool,
+    slots: [(Option<SelectionTarget>, Option<Feature>); 2],
+    next: usize,
+    kind: Option<ConstraintKind>,
+    /// Constraints of Component 1 before the new one (re-applies start from these).
+    base: Option<Vec<Constraint>>,
+    /// The gesture has an undo entry.
+    applied: bool,
+    solve_all: bool,
+    row: i32,
+    models: Option<Rc<UiModels>>,
 }
 
-/// The tool was switched (to any tool): forget the first pick and show the matching hint.
-/// `SetTool` clears the viewport highlight.
-pub fn reset(ui: &AppWindow, active: bool) {
-    FIRST.with(|f| *f.borrow_mut() = None);
-    controller::set_hint(ui, if active { HINT_FIRST } else { "" });
+thread_local! {
+    static PANEL: RefCell<Panel> = RefCell::new(Panel::default());
+}
+
+/// The tool was switched: Constrain opens the panel (Component 1 = the selected node), any other
+/// tool closes it keeping what was applied (as OK).
+pub fn reset(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, active: bool) {
+    let open = PANEL.with(|p| p.borrow().open);
+    if !active {
+        if open {
+            finish(ui, app, false);
+        }
+        return;
+    }
+    if open {
+        return;
+    }
+    let selected = match app.borrow().session.selection {
+        Some(SelectionTarget::Node(n)) => Some(n),
+        _ => None,
+    };
+    PANEL.with(|p| {
+        *p.borrow_mut() = Panel {
+            open: true,
+            slots: [(selected.map(SelectionTarget::Node), None), (None, None)],
+            solve_all: ui.get_constrain_solve_all(),
+            row: -1,
+            models: Some(models.clone()),
+            ..Panel::default()
+        }
+    });
+    if let Some(n) = selected {
+        crate::part_box::open(ui, app, n);
+    }
+    ui.set_constrain_open(true);
+    show(ui, app);
+}
+
+/// The part box was closed (its ×): Cancel.
+pub fn part_box_closed(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
+    if PANEL.with(|p| p.borrow().open) {
+        finish(ui, app, true);
+    }
+}
+
+/// OK (`undo` false) or Cancel: ends the gesture (Cancel undoes it), closes panel and part box.
+fn finish(ui: &AppWindow, app: &Rc<RefCell<AppState>>, undo: bool) {
+    let (applied, models) = PANEL.with(|p| {
+        let mut p = p.borrow_mut();
+        p.open = false;
+        (std::mem::take(&mut p.applied), p.models.take())
+    });
+    app.borrow_mut().session.history.end_gesture();
+    ui.set_constrain_open(false);
+    crate::part_box::close(ui, app);
+    controller::set_hint(ui, "");
+    let Some(models) = models else { return };
+    if undo && applied {
+        controller::run_action(ui, app, &models, "edit.undo");
+    } else {
+        if applied {
+            show_toast(ui, &app.borrow(), "Constrained", false);
+        }
+        controller::refresh(ui, app, &models);
+    }
+    if ui.get_tool() == 4 {
+        controller::run_action(ui, app, &models, "tool.select");
+    }
+}
+
+/// Pushes the panel state into the UI properties.
+fn show(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
+    let a = app.borrow();
+    let doc = &a.session.doc;
+    let name = |t: Option<SelectionTarget>| -> String {
+        match t {
+            Some(SelectionTarget::Node(n)) => doc.node(n).map(|n| n.name.clone()).unwrap_or_default(),
+            Some(SelectionTarget::Platform(p)) => doc.platform(p).map(|p| p.name.clone()).unwrap_or_default(),
+            _ => String::new(),
+        }
+    };
+    let geometry = |f: &Option<Feature>| match f {
+        Some(Feature::Plane { .. }) => "Face",
+        Some(Feature::Axis { .. }) => "Axis",
+        None => "",
+    };
+    PANEL.with(|p| {
+        let p = p.borrow();
+        ui.set_constrain_name1(name(p.slots[0].0).into());
+        ui.set_constrain_geometry1(geometry(&p.slots[0].1).into());
+        ui.set_constrain_name2(name(p.slots[1].0).into());
+        ui.set_constrain_geometry2(geometry(&p.slots[1].1).into());
+        ui.set_constrain_next(p.next as i32);
+        ui.set_constrain_kind(p.kind.and_then(|k| KINDS.iter().position(|x| *x == k)).map_or(-1, |i| i as i32));
+        ui.set_constrain_solve_all(p.solve_all);
+        ui.set_constrain_row(p.row);
+        controller::set_hint(ui, if p.next == 0 { "Pick a face or axis for Component 1" } else { "Pick a face or axis for Component 2" });
+    });
 }
 
 pub fn on_feature_point(
@@ -45,6 +150,9 @@ pub fn on_feature_point(
     point: DVec3,
     normal: DVec3,
 ) {
+    if !PANEL.with(|p| p.borrow().open) {
+        return;
+    }
     let feature = {
         let a = app.borrow();
         resolve(&a.session.doc, &a.catalog, target, point, normal)
@@ -53,18 +161,61 @@ pub fn on_feature_point(
         show_toast(ui, &app.borrow(), "No face or axis there", false);
         return;
     };
-    let Some((child, child_feature)) = FIRST.with(|f| f.borrow().clone()) else {
+    let slot = PANEL.with(|p| p.borrow().next);
+    if slot == 0 {
         let SelectionTarget::Node(id) = target else {
-            show_toast(ui, &app.borrow(), HINT_FIRST, false);
+            show_toast(ui, &app.borrow(), "Pick a face or axis on the part to move", false);
             return;
         };
         if app.borrow().session.doc.node(id).is_some_and(|n| n.locked) {
             show_toast(ui, &app.borrow(), "Part is locked", false);
             return;
         }
-        FIRST.with(|f| *f.borrow_mut() = Some((id, feature.clone())));
-        controller::set_hint(ui, HINT_SECOND);
-        app.borrow().send(ViewportRequest::HighlightFeature(Some((target, feature))));
+        let retarget = PANEL.with(|p| {
+            let mut p = p.borrow_mut();
+            let retarget = p.slots[0].0 != Some(target);
+            if retarget {
+                // A new Component 1 starts a new constraint.
+                p.base = None;
+                p.row = -1;
+            }
+            p.slots[0] = (Some(target), Some(feature));
+            p.next = if p.slots[1].1.is_none() { 1 } else { 0 };
+            retarget
+        });
+        if retarget {
+            {
+                let mut a = app.borrow_mut();
+                a.session.history.end_gesture();
+                a.session.selection = Some(target);
+                a.send(ViewportRequest::Select(Some(target)));
+            }
+            crate::part_box::open(ui, app, id);
+            controller::refresh(ui, app, models);
+        }
+    } else {
+        if !matches!(target, SelectionTarget::Node(_) | SelectionTarget::Platform(_)) {
+            return;
+        }
+        PANEL.with(|p| {
+            let mut p = p.borrow_mut();
+            p.slots[1] = (Some(target), Some(feature));
+            p.next = if p.slots[0].1.is_none() { 0 } else { 1 };
+        });
+    }
+    let both = PANEL.with(|p| p.borrow().slots.iter().all(|s| s.1.is_some()));
+    if both {
+        apply_new(ui, app, models, None);
+    }
+    show(ui, app);
+}
+
+/// Applies (or re-applies) the new constraint from the two picks: `kind` or `default_kind`.
+fn apply_new(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, kind: Option<ConstraintKind>) {
+    let (Some(SelectionTarget::Node(child)), Some(child_feature), Some(target), Some(feature), base) = PANEL.with(|p| {
+        let p = p.borrow();
+        (p.slots[0].0, p.slots[0].1.clone(), p.slots[1].0, p.slots[1].1.clone(), p.base.clone())
+    }) else {
         return;
     };
     let parent = match target {
@@ -72,11 +223,12 @@ pub fn on_feature_point(
         SelectionTarget::Platform(p) => Parent::Platform(p),
         _ => return,
     };
-    let Some(kind) = default_kind(&child_feature, &feature) else {
+    let Some(default) = default_kind(&child_feature, &feature) else {
         show_toast(ui, &app.borrow(), "Pick two faces or two axes", false);
         return;
     };
-    let command = {
+    let kind = kind.unwrap_or(default);
+    let (command, base) = {
         let a = app.borrow();
         let doc = &a.session.doc;
         if let Parent::Node(n) = parent
@@ -100,16 +252,126 @@ pub fn on_feature_point(
             _ => false,
         };
         let new = Constraint { kind, child: child_feature, parent: feature, offset: 0.0, angle: 0.0, flip, lock_rotation: false };
-        let mut constraints = match &node.attach {
+        let base = base.unwrap_or_else(|| match &node.attach {
             Attach::Constrained { constraints } if node.parent == parent => constraints.clone(),
             _ => Vec::new(),
-        };
+        });
+        let mut constraints = base.clone();
         constraints.push(new);
-        constrain(doc, child, parent, constraints)
+        (constrain(doc, child, parent, constraints), base)
     };
     let Some(command) = command else { return };
-    controller::execute(ui, app, models, "tool.constrain", command, "Constrain".into(), Some(SelectionTarget::Node(child)), Vec::new());
-    controller::run_action(ui, app, models, "tool.select");
+    PANEL.with(|p| {
+        let mut p = p.borrow_mut();
+        p.kind = Some(kind);
+        p.row = base.len() as i32;
+        p.base = Some(base);
+    });
+    live(ui, app, models, command, "Constrain".into());
+}
+
+/// Runs `command` inside the open constrain gesture (one undo step until OK / `+`).
+fn live(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, command: Command, label: String) -> bool {
+    let result = {
+        let mut a = app.borrow_mut();
+        let session = &mut a.session;
+        let result = session.history.execute_coalescing(&mut session.doc, command, label, GESTURE);
+        result.map(|changes| (!changes.is_empty()).then(|| (Box::new(session.doc.clone()), changes)))
+    };
+    match result {
+        Ok(Some((snapshot, changes))) => {
+            PANEL.with(|p| p.borrow_mut().applied = true);
+            app.borrow().send(ViewportRequest::ApplyChanges { snapshot, changes });
+            controller::refresh(ui, app, models);
+            crate::files::arm_autosave(app);
+            true
+        }
+        Ok(None) => true,
+        Err(error) => {
+            show_toast(ui, &app.borrow(), &error.to_string(), false);
+            false
+        }
+    }
+}
+
+/// Runs an inspector-style edit outcome inside the gesture.
+fn live_outcome(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, outcome: Result<EditOutcome, EditError>) -> bool {
+    match outcome {
+        Ok(EditOutcome::Command { command, label, .. }) => live(ui, app, models, command, label),
+        Ok(_) => true,
+        Err(error) => {
+            show_toast(ui, &app.borrow(), &error.to_string(), false);
+            false
+        }
+    }
+}
+
+/// `cpanel.constraint.<i>.offset` committed in the panel table.
+pub fn panel_field(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str, text: &str) -> bool {
+    let id = id.trim_start_matches("cpanel.");
+    let outcome = field_edit(&app.borrow(), id, text);
+    live_outcome(ui, app, models, outcome)
+}
+
+/// `cpanel.*` clicked.
+pub fn panel_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str) {
+    let id = id.trim_start_matches("cpanel.");
+    match id {
+        "ok" => return finish(ui, app, false),
+        "cancel" => return finish(ui, app, true),
+        "select.0" => PANEL.with(|p| p.borrow_mut().next = 0),
+        "select.1" => PANEL.with(|p| p.borrow_mut().next = 1),
+        "solve_all" => PANEL.with(|p| {
+            let mut p = p.borrow_mut();
+            p.solve_all = !p.solve_all;
+        }),
+        "add" => {
+            // Keep what was applied as its own step; the next pair starts a new constraint.
+            app.borrow_mut().session.history.end_gesture();
+            PANEL.with(|p| {
+                let mut p = p.borrow_mut();
+                p.slots[1] = (None, None);
+                p.base = None;
+                p.kind = None;
+                p.next = 1;
+                p.row = -1;
+            });
+        }
+        "delete" => {
+            let row = PANEL.with(|p| p.borrow().row);
+            if row >= 0 {
+                let outcome = action_edit(&app.borrow(), &format!("constraint.{row}.delete"));
+                if live_outcome(ui, app, models, outcome) {
+                    PANEL.with(|p| {
+                        let mut p = p.borrow_mut();
+                        p.row = -1;
+                        // The table changed under the new constraint: picks start over.
+                        p.base = None;
+                        p.slots[1] = (None, None);
+                        p.next = 1;
+                    });
+                }
+            }
+        }
+        _ if id.starts_with("row.") => {
+            let row = id[4..].parse().unwrap_or(-1);
+            PANEL.with(|p| p.borrow_mut().row = row);
+        }
+        _ if id.starts_with("kind.") => {
+            let Some(&kind) = id[5..].parse::<usize>().ok().and_then(|i| KINDS.get(i)) else { return };
+            if PANEL.with(|p| p.borrow().base.is_some()) {
+                apply_new(ui, app, models, Some(kind));
+            } else {
+                PANEL.with(|p| p.borrow_mut().kind = Some(kind));
+            }
+        }
+        _ if id.starts_with("constraint.") => {
+            let outcome = action_edit(&app.borrow(), id);
+            live_outcome(ui, app, models, outcome);
+        }
+        _ => {}
+    }
+    show(ui, app);
 }
 
 /// The feature under a click, in the target's frame: a detected feature of the part when one is

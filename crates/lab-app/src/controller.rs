@@ -341,6 +341,9 @@ fn on_field_committed(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<U
     if id.starts_with("joint.") {
         return crate::joint::field_committed(ui, app, models, id, text);
     }
+    if id.starts_with("cpanel.") {
+        return crate::constrain::panel_field(ui, app, models, id, text);
+    }
     let outcome = {
         let a = app.borrow();
         if let Some((node, field)) = set_field(id) {
@@ -449,11 +452,8 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             a.send(ViewportRequest::Isolate(None));
         }
         "view.part_box" => {
-            let selection = app.borrow().session.selection;
-            match selection {
-                Some(SelectionTarget::Node(n)) => crate::part_box::open(ui, app, n),
-                _ => show_toast(ui, &app.borrow(), "Select a part to open it in the part box", false),
-            }
+            // Opens the part box with the Constrain Components panel (POLA-147).
+            run_action(ui, app, models, "tool.constrain");
         }
         "view.hide" => {
             let mut a = app.borrow_mut();
@@ -547,7 +547,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 _ => (0, Tool::Select),
             };
             ui.set_tool(index);
-            crate::constrain::reset(ui, tool == Tool::Constrain);
+            crate::constrain::reset(ui, app, models, tool == Tool::Constrain);
             crate::joint::reset(ui, app, models, tool == Tool::Joint);
             if tool == Tool::Measure {
                 set_hint(ui, "Click the first point");
@@ -617,6 +617,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         "tool.ground" => crate::joint::ground(ui, app, models),
         "tool.rigid_group" => crate::joint::rigid(ui, app, models),
         _ if id.starts_with("joint.") => crate::joint::action(ui, app, models, id),
+        _ if id.starts_with("cpanel.") => crate::constrain::panel_action(ui, app, models, id),
         _ if id.starts_with("relation.") => crate::relations::run(ui, app, models, id),
         _ if id.starts_with("constraint.") => {
             let outcome = crate::constrain::action_edit(&app.borrow(), id);
