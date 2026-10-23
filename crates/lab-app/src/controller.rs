@@ -440,12 +440,12 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         }
         "import.step" => crate::import::choose_file(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),
-        "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" | "tool.constrain" => {
+        "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" | "tool.constrain" | "tool.joint" => {
             let (index, tool) = match id {
                 "tool.move" => (1, Tool::Move),
                 "tool.rotate" => (2, Tool::Rotate),
                 "tool.measure" => (3, Tool::Measure),
-                "tool.constrain" => (4, Tool::Constrain),
+                "tool.constrain" | "tool.joint" => (4, Tool::Constrain), // M9 A: J starts M8 constrain until E
                 _ => (0, Tool::Select),
             };
             ui.set_tool(index);

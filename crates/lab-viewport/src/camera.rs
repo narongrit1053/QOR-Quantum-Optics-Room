@@ -370,6 +370,7 @@ pub(crate) fn handle_input(
                     {
                         clicks.0.push(pos);
                     }
+                    // M9: a right release without drag opens the context menu (POLA-130 adds it here).
                 }
                 ViewportInput::PointerLeave => {
                     pointer.position = None;
@@ -464,7 +465,11 @@ fn report_orient(events: Res<EventSender>, cameras: Query<&OrbitCamera, Without<
 }
 
 fn drag(orbit: &mut OrbitCamera, press: Press, delta: Vec2, viewport_height: f32, pivot: Option<Vec3>) {
-    let pan = press.button != PointerButton::Left || press.mods.shift || orbit.mode == ViewMode::Top;
+    // M9 Fusion: middle pans, Shift+middle orbits (Top always pans); left/right drags do nothing.
+    if press.button != PointerButton::Middle {
+        return;
+    }
+    let pan = !press.mods.shift || orbit.mode == ViewMode::Top;
     let view = &mut orbit.current;
     if pan {
         let transform = view.transform();

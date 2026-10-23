@@ -505,7 +505,7 @@ export component AppWindow inherits Window {
                 root.action("selection.delete");
                 return accept;
             }
-            // Arrows nudge the selected set (Shift: 5 holes, Alt: 1 mm); Q / E turn it 15°.
+            // Arrows nudge the selected set (Shift: 5 holes, Alt: 1 mm); R / Shift+R turn it 15°.
             if (!EditState.text-focused && !event.modifiers.control && !event.modifiers.meta) {
                 if (event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.UpArrow || event.text == Key.DownArrow) {
                     if (root.selection-kind != 1) { return reject; }
@@ -516,12 +516,9 @@ export component AppWindow inherits Window {
                         : (event.modifiers.shift && !event.modifiers.alt ? "0:-5" : "0:-1")));
                     return accept;
                 }
-                if (!event.modifiers.alt && !event.modifiers.shift && (event.text == "q" || event.text == "Q")) {
-                    root.action("tool.rotate_left");
-                    return accept;
-                }
-                if (!event.modifiers.alt && !event.modifiers.shift && (event.text == "e" || event.text == "E")) {
-                    root.action("tool.rotate_right");
+                // R turns +15°, Shift+R −15° (M9).
+                if (!event.modifiers.alt && (event.text == "r" || event.text == "R")) {
+                    root.action(event.modifiers.shift ? "tool.rotate_left" : "tool.rotate_right");
                     return accept;
                 }
             }
@@ -610,12 +607,24 @@ export component AppWindow inherits Window {
                         root.action("help.shortcuts");
                         return accept;
                     }
-                    if (event.text == "m" || event.text == "M") {
+                    if (event.text == "i" || event.text == "I") {
                         root.action("tool.measure");
                         return accept;
                     }
+                    if (event.text == "m" || event.text == "M") {
+                        root.action("tool.move");
+                        return accept;
+                    }
                     if (event.text == "j" || event.text == "J") {
-                        root.action("tool.constrain");
+                        root.action("tool.joint");
+                        return accept;
+                    }
+                    if (event.text == "h" || event.text == "H") {
+                        root.action("view.hide");
+                        return accept;
+                    }
+                    if (event.text == "s" || event.text == "S") {
+                        root.action("palette.open");
                         return accept;
                     }
                     if (event.text == Key.Escape && root.wizard-open) {
