@@ -411,6 +411,11 @@ export component ProjectMenu inherits PopupWindow {
                 enabled: !root.busy;
                 clicked => { root.action("file.open_demo"); }
             }
+            MenuRow {
+                label: "Start Page";
+                enabled: !root.busy;
+                clicked => { root.action("file.start_page"); }
+            }
             for name[i] in root.recent: MenuRow {
                 label: "↳ " + name;
                 enabled: !root.busy;

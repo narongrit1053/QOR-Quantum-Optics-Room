@@ -20,6 +20,7 @@ import { Icon } from "icons.slint";
 import { WizardPanel } from "wizard.slint";
 import { CommandPalette } from "palette.slint";
 import { ShortcutSheet } from "shortcuts.slint";
+import { StartPage, StartEntry } from "start_page.slint";
 import { ExportSheet } from "export.slint";
 import { ContextMenu } from "context_menu.slint";
 import { JointPanel } from "joint_panel.slint";
@@ -32,6 +33,7 @@ export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow,
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 export { RelationChip } from "relations_bar.slint";
+export { StartEntry } from "start_page.slint";
 
 // One scene-tree row: chevron, label (double-click to rename), lock and delete on hover.
 component SceneItem inherits Rectangle {
@@ -348,6 +350,11 @@ export component AppWindow inherits Window {
 
     // Open Recent names and the keyboard shortcut sheet (M7 C).
     in property <[string]> recent-files;
+    // Start page (POLA-149).
+    in-out property <bool> start-page-visible;
+    in property <bool> start-page-closable;
+    in property <[StartEntry]> start-recent;
+    in property <string> start-error;
     in-out property <bool> shortcuts-open;
     in property <[PaletteItem]> shortcut-items;
     // "" ok, else error text (the sheet stays open).
@@ -1572,6 +1579,17 @@ export component AppWindow inherits Window {
             open: root.shortcuts-open;
             items: root.shortcut-items;
             close => { root.shortcuts-open = false; }
+        }
+
+        StartPage {
+            width: root.width;
+            height: root.height;
+            open: root.start-page-visible;
+            closable: root.start-page-closable;
+            recent: root.start-recent;
+            error: root.start-error;
+            action(id) => { root.action(id); }
+            close => { root.start-page-visible = false; }
         }
 
         PasteSheet {

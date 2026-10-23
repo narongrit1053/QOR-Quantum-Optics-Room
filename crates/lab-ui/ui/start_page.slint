@@ -1,0 +1,170 @@
+// Start page (POLA-149): shown at launch without a project, and from File ▸ Start Page.
+
+import { Theme } from "theme.slint";
+import { PillButton } from "components.slint";
+
+export struct StartEntry {
+    name: string,
+    folder: string, // parent folder of the project
+    path: string,
+    modified: string, // "YYYY-MM-DD HH:MM", "" if unknown
+}
+
+component RecentRow inherits Rectangle {
+    in property <StartEntry> entry;
+    callback clicked();
+    height: 44px;
+    border-radius: Theme.radius-control;
+    background: touch.has-hover ? Theme.control-bg : transparent;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.entry.name; color: Theme.text; font-size: Theme.font-body; overflow: elide; }
+            Text { text: root.entry.path; color: Theme.text-secondary; font-size: Theme.font-caption; overflow: elide; }
+        }
+        Text {
+            text: root.entry.modified;
+            color: Theme.text-secondary;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+            horizontal-stretch: 0;
+        }
+    }
+}
+
+export component StartPage inherits Rectangle {
+    in property <bool> open;
+    // A document is behind the page: Esc and Close return to it.
+    in property <bool> closable;
+    in property <[StartEntry]> recent;
+    in property <string> error;
+    callback action(string /* id */);
+    callback close();
+
+    visible: root.open;
+    background: Theme.window-bg;
+    changed open => {
+        if (root.open) {
+            focus-scope.focus();
+        }
+    }
+
+    TouchArea {
+        scroll-event(event) => { accept }
+    }
+
+    focus-scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape && root.closable) { root.close(); }
+            accept
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(parent.width - 80px, 640px);
+        height: min(parent.height - 80px, 600px);
+        background: Theme.panel-bg;
+        border-radius: Theme.radius-control;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: Theme.shadow-strong;
+        clip: true;
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "LabSetup";
+                    color: Theme.text;
+                    font-size: Theme.font-title * 1.6;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if root.closable: PillButton {
+                    label: "Close";
+                    hint: "Esc";
+                    clicked => { root.close(); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                PillButton { label: "New Project"; primary: true; clicked => { root.action("file.new"); } }
+                PillButton { label: "Open…"; clicked => { root.action("file.open"); } }
+                PillButton { label: "Open Demo"; clicked => { root.action("file.open_demo"); } }
+            }
+
+            if root.error != "": Text {
+                text: root.error;
+                color: Theme.danger;
+                font-size: Theme.font-body;
+                wrap: word-wrap;
+            }
+
+            if root.recent.length > 0: VerticalLayout {
+                spacing: 6px;
+                Text { text: "Latest project"; color: Theme.text-secondary; font-size: Theme.font-caption; }
+                Rectangle {
+                    height: 64px;
+                    border-radius: Theme.radius-control;
+                    border-width: 1px;
+                    border-color: Theme.panel-border;
+                    background: latest-touch.has-hover ? Theme.control-bg : Theme.subtle-bg-2;
+                    latest-touch := TouchArea { clicked => { root.action("file.open_recent.0"); } }
+                    HorizontalLayout {
+                        padding: 12px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            Text { text: root.recent[0].name; color: Theme.text; font-size: Theme.font-title; overflow: elide; }
+                            Text {
+                                text: root.recent[0].folder + (root.recent[0].modified == "" ? "" : "  ·  " + root.recent[0].modified);
+                                color: Theme.text-secondary;
+                                font-size: Theme.font-caption;
+                                overflow: elide;
+                            }
+                        }
+                        PillButton {
+                            label: "Open";
+                            primary: true;
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.action("file.open_recent.0"); }
+                        }
+                    }
+                }
+            }
+
+            Text { text: "Recent files"; color: Theme.text-secondary; font-size: Theme.font-caption; }
+            if root.recent.length <= 1: Text {
+                text: "No recent projects yet.";
+                color: Theme.text-secondary;
+                font-size: Theme.font-body;
+            }
+            Flickable {
+                vertical-stretch: 1;
+                mouse-drag-pan-enabled: false;
+                content-height: list.preferred-height;
+                list := VerticalLayout {
+                    alignment: start;
+                    for entry[i] in root.recent: RecentRow {
+                        // Entry 0 is the latest-project card above.
+                        visible: i > 0;
+                        height: i > 0 ? 44px : 0px;
+                        entry: entry;
+                        clicked => { root.action("file.open_recent." + i); }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -123,6 +123,7 @@ fn run_file_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiMo
             }
         }
         "file.export_png" => crate::export_png::start(ui, app),
+        "file.start_page" => show_start_page(ui, &app.borrow().settings, None, true),
         _ => eprintln!("unknown file action {action}"),
     }
 }
@@ -267,14 +268,15 @@ fn skipped_text(n: usize) -> String {
 }
 
 /// The document to start with: the project named on the command line (loaded synchronously),
-/// else the demo. On a load failure the demo is used and the error is returned for display.
+/// else an empty room behind the Start page (the `bool`). On a load failure the empty room and
+/// the Start page are used and the error is returned for display.
 ///
 /// With no command-line path and no crash autosave to offer (`has_recovery`), the last project
 /// is reopened when `settings.reopen_last` is on.
-pub fn initial_session(args: &[String], settings: &Settings, has_recovery: bool) -> (Session, Option<String>) {
-    let demo = || Session::new_clean(demo_document(), None);
+pub fn initial_session(args: &[String], settings: &Settings, has_recovery: bool) -> (Session, Option<String>, bool) {
+    let empty = || Session::new_clean(default_document(), None);
     let reopen = if settings.reopen_last && !has_recovery { recent_files(settings).into_iter().next() } else { None };
-    let Some(path) = args.get(1).map(PathBuf::from).or(reopen) else { return (demo(), None) };
+    let Some(path) = args.get(1).map(PathBuf::from).or(reopen) else { return (empty(), None, true) };
     match load_project(&path) {
         Ok(project) => {
             // The app's catalog loads after this, so embedded parts are in it.
@@ -283,9 +285,9 @@ pub fn initial_session(args: &[String], settings: &Settings, has_recovery: bool)
                 eprintln!("embedded parts skipped (local versions used): {skipped:?}");
                 STARTUP_SKIPPED.set(Some(skipped_text(skipped.len())));
             }
-            (Session::from_loaded(project), None)
+            (Session::from_loaded(project), None, false)
         }
-        Err(error) => (demo(), Some(error.to_string())),
+        Err(error) => (empty(), Some(error.to_string()), true),
     }
 }
 
@@ -711,12 +713,33 @@ fn answer_recovery(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiMo
 
 /// "HH:MM" in local time.
 fn clock_time(time: SystemTime) -> String {
-    let (hour, minute) = local_hour_minute(time);
+    let [_, _, _, hour, minute] = local_parts(time);
     format!("{hour:02}:{minute:02}")
 }
 
+/// "YYYY-MM-DD HH:MM" in local time.
+fn date_time(time: SystemTime) -> String {
+    let [year, month, day, hour, minute] = local_parts(time);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
+}
+
+/// [year, month, day, hour, minute] in UTC.
+fn utc_parts(time: SystemTime) -> [u16; 5] {
+    let secs = time.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    // Civil date from days since 1970-01-01 (Howard Hinnant's days_from_civil inverse).
+    let z = (secs / 86_400) as i64 + 719_468;
+    let (era, doe) = (z.div_euclid(146_097), z.rem_euclid(146_097));
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    [year as u16, month as u16, day as u16, ((secs / 3600) % 24) as u16, ((secs / 60) % 60) as u16]
+}
+
 #[cfg(windows)]
-fn local_hour_minute(time: SystemTime) -> (u16, u16) {
+fn local_parts(time: SystemTime) -> [u16; 5] {
     #[repr(C)]
     #[derive(Default)]
     struct FileTime {
@@ -741,10 +764,7 @@ fn local_hour_minute(time: SystemTime) -> (u16, u16) {
         fn SystemTimeToTzSpecificLocalTime(zone: *const u8, utc: *const SystemTimeW, local: *mut SystemTimeW) -> i32;
     }
 
-    let utc_fallback = || {
-        let secs = time.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        (((secs / 3600) % 24) as u16, ((secs / 60) % 60) as u16)
-    };
+    let utc_fallback = || utc_parts(time);
     // FILETIME: 100 ns intervals since 1601-01-01.
     let Ok(since_1601) = time.duration_since(SystemTime::UNIX_EPOCH).map(|d| d + Duration::from_secs(11_644_473_600))
     else {
@@ -759,13 +779,12 @@ fn local_hour_minute(time: SystemTime) -> (u16, u16) {
         FileTimeToSystemTime(&file_time, &mut utc) != 0
             && SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) != 0
     };
-    if ok { (local.hour, local.minute) } else { utc_fallback() }
+    if ok { [local.year, local.month, local.day, local.hour, local.minute] } else { utc_fallback() }
 }
 
 #[cfg(not(windows))]
-fn local_hour_minute(time: SystemTime) -> (u16, u16) {
-    let secs = time.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    (((secs / 3600) % 24) as u16, ((secs / 60) % 60) as u16)
+fn local_parts(time: SystemTime) -> [u16; 5] {
+    utc_parts(time)
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────────
@@ -775,6 +794,7 @@ fn local_hour_minute(time: SystemTime) -> (u16, u16) {
 fn replace(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, session: Session) {
     flow(|f| f.generation += 1);
     controller::replace_document(ui, app, models, session);
+    ui.set_start_page_visible(false);
 }
 
 fn submit(app: &Rc<RefCell<AppState>>, job: IoJob) {
@@ -827,6 +847,29 @@ pub(crate) fn show_recent(ui: &AppWindow, settings: &Settings) {
     ui.set_recent_files(slint::ModelRc::new(slint::VecModel::from(names)));
 }
 
+/// Shows the Start page with the recent projects; `closable` when Esc / Close may return to the
+/// document behind it (opened with `file.start_page`).
+pub(crate) fn show_start_page(ui: &AppWindow, settings: &Settings, error: Option<&str>, closable: bool) {
+    let entries: Vec<lab_ui::StartEntry> = recent_files(settings)
+        .iter()
+        .map(|p| {
+            // A folder project's `project.json` is known by its folder; show that folder's parent.
+            let is_json = p.file_name().is_some_and(|n| n.eq_ignore_ascii_case(lab_file::PROJECT_JSON));
+            let named = if is_json { p.parent().unwrap_or(p) } else { p.as_path() };
+            lab_ui::StartEntry {
+                name: display_name(p).into(),
+                folder: named.parent().map_or_else(String::new, |d| d.display().to_string()).into(),
+                path: p.display().to_string().into(),
+                modified: std::fs::metadata(p).and_then(|m| m.modified()).map_or_else(|_| String::new(), date_time).into(),
+            }
+        })
+        .collect();
+    ui.set_start_recent(slint::ModelRc::new(slint::VecModel::from(entries)));
+    ui.set_start_error(error.unwrap_or("").into());
+    ui.set_start_page_closable(closable);
+    ui.set_start_page_visible(true);
+}
+
 fn remember_recent(ui: &AppWindow, app: &Rc<RefCell<AppState>>, location: &ProjectLocation) {
     app.borrow_mut().settings.push_recent(&location.path);
     save_app_settings(app);
@@ -875,15 +918,22 @@ mod tests {
     }
 
     #[test]
-    fn initial_session_falls_back_to_the_demo() {
+    fn initial_session_falls_back_to_the_start_page() {
         let settings = Settings::default();
-        let (session, error) = initial_session(&["labsetup".into()], &settings, false);
-        assert!(error.is_none());
+        let (session, error, start) = initial_session(&["labsetup".into()], &settings, false);
+        assert!(error.is_none() && start);
         assert!(!session.is_dirty() && session.location.is_none());
+        assert_ne!(session.doc, demo_document());
 
         let missing = std::env::temp_dir().join("labsetup-T6b-missing.labsetup");
-        let (session, error) = initial_session(&["labsetup".into(), missing.display().to_string()], &settings, false);
-        assert!(error.is_some_and(|e| e.contains("does not exist")));
+        let (session, error, start) = initial_session(&["labsetup".into(), missing.display().to_string()], &settings, false);
+        assert!(error.is_some_and(|e| e.contains("does not exist")) && start);
         assert!(!session.is_dirty() && session.location.is_none());
+    }
+
+    #[test]
+    fn utc_dates() {
+        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1_709_210_096); // 2024-02-29 12:34:56 UTC
+        assert_eq!(utc_parts(t), [2024, 2, 29, 12, 34]);
     }
 }

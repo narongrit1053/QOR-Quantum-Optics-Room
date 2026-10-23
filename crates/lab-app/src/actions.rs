@@ -17,6 +17,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("file.new", "New Project", "File", "create blank", "Ctrl+N"),
     a("file.open", "Open…", "File", "load project", "Ctrl+O"),
     a("file.open_demo", "Open Demo Project", "File", "example sample", ""),
+    a("file.start_page", "Start Page", "File", "home welcome recent projects", ""),
     a("file.reopen_last", "Reopen Last Project on Start", "File", "startup restore recent", ""),
     a("file.save", "Save", "File", "write", "Ctrl+S"),
     a("file.save_as", "Save As…", "File", "write copy", "Ctrl+Shift+S"),
