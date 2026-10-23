@@ -22,6 +22,7 @@ import { CommandPalette } from "palette.slint";
 import { ShortcutSheet } from "shortcuts.slint";
 import { ExportSheet } from "export.slint";
 import { ContextMenu } from "context_menu.slint";
+import { PartBox } from "part_box.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
@@ -197,6 +198,13 @@ export component AppWindow inherits Window {
     in property <length> context-x;
     in property <length> context-y;
     public function open-context-menu() { context-menu.show(); }
+    // M9 F. Floating part box: shown while open, its texture and title.
+    in property <bool> part-box-open;
+    in property <image> part-box-texture;
+    in property <string> part-box-title;
+    callback part-box-pointer(int, int, length, length, bool, bool, bool);
+    callback part-box-scroll(length, length, length, length);
+    callback part-box-close();
 
     // ── Platform inspector ───────────────────────────────────────────────────
     in property <string> platform-name;
@@ -718,6 +726,16 @@ export component AppWindow inherits Window {
                 y: root.context-y;
                 rows: root.context-rows;
                 chosen(id) => { root.action(id); }
+            }
+
+            if root.part-box-open: PartBox {
+                x: 300px;
+                y: 80px;
+                texture: root.part-box-texture;
+                title: root.part-box-title;
+                pointer(kind, button, x, y, shift, ctrl, alt) => { root.part-box-pointer(kind, button, x, y, shift, ctrl, alt); }
+                scroll(dx, dy, x, y) => { root.part-box-scroll(dx, dy, x, y); }
+                close => { root.part-box-close(); }
             }
         }
 

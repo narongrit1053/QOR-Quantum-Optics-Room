@@ -408,6 +408,13 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             a.send(ViewportRequest::IsolateNodes(None));
             a.send(ViewportRequest::Isolate(None));
         }
+        "view.part_box" => {
+            let selection = app.borrow().session.selection;
+            match selection {
+                Some(SelectionTarget::Node(n)) => crate::part_box::open(ui, app, n),
+                _ => show_toast(ui, &app.borrow(), "Select a part to open it in the part box", false),
+            }
+        }
         "view.hide" => {
             let mut a = app.borrow_mut();
             match a.session.selection {

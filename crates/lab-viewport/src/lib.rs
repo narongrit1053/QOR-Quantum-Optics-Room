@@ -29,6 +29,7 @@ mod measure;
 mod mesh;
 mod outline;
 mod overlay;
+mod part_box;
 mod picking;
 mod place;
 mod platform;
@@ -179,6 +180,21 @@ pub enum ViewportRequest {
     IsolateNodes(Option<Vec<lab_core::NodeId>>),
     /// M9 G. Hover outline on these nodes (empty clears).
     HighlightNodes(Vec<lab_core::NodeId>),
+    /// M9 F. Open the floating part box on this node (`None` closes it). Its frames arrive on
+    /// [`ViewportHandle::part_box_textures`].
+    PartBox(Option<PartBoxSpec>),
+    /// M9 F. Input in the box's own physical px.
+    PartBoxInput(ViewportInput),
+    /// M9 F. Hand a part box texture back once the UI no longer displays it.
+    ReleasePartBoxTexture(wgpu::Texture),
+}
+
+/// M9 F. The node shown in the part box and the box texture size in physical px.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PartBoxSpec {
+    pub node: lab_core::NodeId,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -330,6 +346,8 @@ pub(crate) enum FrameRequest {
     SetHidden(Vec<lab_core::NodeId>),
     IsolateNodes(Option<Vec<lab_core::NodeId>>),
     HighlightNodes(Vec<lab_core::NodeId>),
+    PartBox(Option<PartBoxSpec>),
+    PartBoxInput(ViewportInput),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).
