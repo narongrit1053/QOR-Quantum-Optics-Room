@@ -202,6 +202,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
     ui.set_show_beams(app.settings.show_beams);
     ui_models::fill_presets(models, preset_rows(app.units()));
     ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &app.scene_collapsed));
+    crate::relations::fill(ui, &session.doc);
 }
 
 /// The inspector for the current selection, including every choice property.
@@ -616,6 +617,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         "tool.ground" => crate::joint::ground(ui, app, models),
         "tool.rigid_group" => crate::joint::rigid(ui, app, models),
         _ if id.starts_with("joint.") => crate::joint::action(ui, app, models, id),
+        _ if id.starts_with("relation.") => crate::relations::run(ui, app, models, id),
         _ if id.starts_with("constraint.") => {
             let outcome = crate::constrain::action_edit(&app.borrow(), id);
             apply_outcome(ui, app, models, id, outcome);

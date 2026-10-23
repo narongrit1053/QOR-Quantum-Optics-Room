@@ -24,11 +24,13 @@ import { ExportSheet } from "export.slint";
 import { ContextMenu } from "context_menu.slint";
 import { JointPanel } from "joint_panel.slint";
 import { PartBox } from "part_box.slint";
+import { RelationsBar, RelationChip } from "relations_bar.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
+export { RelationChip } from "relations_bar.slint";
 
 // One scene-tree row: chevron, label (double-click to rename), lock and delete on hover.
 component SceneItem inherits Rectangle {
@@ -218,6 +220,12 @@ export component AppWindow inherits Window {
     callback part-box-pointer(int, int, length, length, bool, bool, bool);
     callback part-box-scroll(length, length, length, length);
     callback part-box-close();
+    // M9 G. Relationships bar.
+    in property <[RelationChip]> relation-chips;
+    callback relation-hovered(int);
+    callback relation-clicked(int);
+    callback relation-double-clicked(int);
+    callback relation-menu(int, length, length);
 
     // ── Platform inspector ───────────────────────────────────────────────────
     in property <string> platform-name;
@@ -1434,6 +1442,18 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                 }
             }
+        }
+
+        // ── Relationships bar (M9 G; above the toolbar, status and toast) ────
+        if root.relation-chips.length > 0: relations-bar := RelationsBar {
+            x: sidebar.x + sidebar.width + Theme.inset;
+            width: toolbar.free-span - 2 * Theme.inset;
+            y: toolbar.y - self.height - 84px;
+            chips: root.relation-chips;
+            hovered(i) => { root.relation-hovered(i); }
+            clicked(i) => { root.relation-clicked(i); }
+            double-clicked(i) => { root.relation-double-clicked(i); }
+            menu(i, x, y) => { root.relation-menu(i, self.x + x, self.y + y); }
         }
 
         // ── Measure readout (bottom centre, above the toolbar) ───────────────
