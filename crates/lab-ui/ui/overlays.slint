@@ -572,3 +572,25 @@ export component PartMenu inherits PopupWindow {
         }
     }
 }
+
+// M9 E2. Numeric entry next to the cursor while a gizmo/joint drag is in progress.
+export component DragValueField inherits Rectangle {
+    in property <string> text;
+    in property <string> unit;
+    width: field-row.preferred-width;
+    height: 26px;
+    border-radius: 6px;
+    background: Theme.sheet-bg;
+    border-width: Theme.border-width;
+    border-color: Theme.panel-border;
+    field-row := HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        Text {
+            text: (root.text == "" ? "Type a value" : root.text) + " " + root.unit;
+            color: root.text == "" ? Theme.text-secondary : Theme.text;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+        }
+    }
+}

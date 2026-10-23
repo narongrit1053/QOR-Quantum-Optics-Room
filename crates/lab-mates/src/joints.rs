@@ -128,7 +128,7 @@ pub fn next_seq(doc: &Document) -> u64 {
 }
 
 /// A frame as a pose: origin and rotation taking X/Z to `x`/`z` (re-orthogonalised).
-fn frame_pose(f: &Frame) -> (DVec3, DQuat) {
+pub fn frame_pose(f: &Frame) -> (DVec3, DQuat) {
     let z = f.z.normalize_or(DVec3::Z);
     let x = (f.x - z * f.x.dot(z)).normalize_or(z.any_orthonormal_vector());
     (f.origin, DQuat::from_mat3(&DMat3::from_cols(x, z.cross(x), z)))

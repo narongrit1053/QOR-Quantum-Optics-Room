@@ -217,7 +217,7 @@ pub fn start(
 fn add_scene_plugins(app: &mut App, document: Document) {
     app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin, crate::thumbnail::ThumbnailPlugin, crate::export::ExportPlugin));
     app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
-    app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin, crate::feature_pick::FeaturePickPlugin));
+    app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin, crate::feature_pick::FeaturePickPlugin, crate::feature_pick::DofGlyphPlugin));
     app.add_plugins(crate::beams::BeamsPlugin);
 }
 
@@ -408,6 +408,7 @@ fn run_on_demand(
                 ViewportRequest::SetHidden(ids) => pending.push(FrameRequest::SetHidden(ids)),
                 ViewportRequest::IsolateNodes(ids) => pending.push(FrameRequest::IsolateNodes(ids)),
                 ViewportRequest::HighlightNodes(ids) => pending.push(FrameRequest::HighlightNodes(ids)),
+                ViewportRequest::DragValue(v) => pending.push(FrameRequest::DragValue(v)),
                 ViewportRequest::RenderThumbnail { part, path } => {
                     pending.push(FrameRequest::RenderThumbnail(part, path))
                 }

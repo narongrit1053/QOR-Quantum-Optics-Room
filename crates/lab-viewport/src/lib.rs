@@ -179,6 +179,15 @@ pub enum ViewportRequest {
     IsolateNodes(Option<Vec<lab_core::NodeId>>),
     /// M9 G. Hover outline on these nodes (empty clears).
     HighlightNodes(Vec<lab_core::NodeId>),
+    /// M9 E2. Typed value (mm or degrees) for the drag in progress; applies exactly and ends it.
+    DragValue(f64),
+}
+
+/// M9 E2. Unit of the value a drag changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragUnit {
+    Mm,
+    Degrees,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -280,6 +289,8 @@ pub enum ViewportEvent {
     FeaturePoint { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
     /// M9 D. A right click without drag (the target is selected first); `pos` in physical px.
     ContextMenu { target: Option<SelectionTarget>, pos: Vec2 },
+    /// M9 E2. A gizmo/DOF drag began (the app shows the numeric field).
+    DragStarted { id: lab_core::NodeId, unit: DragUnit },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -330,6 +341,7 @@ pub(crate) enum FrameRequest {
     SetHidden(Vec<lab_core::NodeId>),
     IsolateNodes(Option<Vec<lab_core::NodeId>>),
     HighlightNodes(Vec<lab_core::NodeId>),
+    DragValue(f64),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

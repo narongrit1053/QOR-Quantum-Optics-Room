@@ -121,3 +121,46 @@ fn draw_highlight(
         }
     }
 }
+
+/// M9 E2. DOF glyph on the selected jointed node: an arrow per slide and an arc per rotation at
+/// the joint origin. Immediate-mode gizmos, so nothing is drawn (or redrawn) while idle.
+pub(crate) struct DofGlyphPlugin;
+
+impl Plugin for DofGlyphPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, draw_dof_glyph.after(crate::picking::pick));
+    }
+}
+
+fn draw_dof_glyph(
+    selection: Res<crate::picking::Selection>,
+    index: Res<SceneIndex>,
+    capturing: Res<crate::export::Capturing>,
+    mut gizmos: Gizmos<OnTop>,
+) {
+    if capturing.0 {
+        return;
+    }
+    let (Some(SelectionTarget::Node(id)), Some(doc)) = (selection.selected, &index.snapshot) else { return };
+    let Some(node) = doc.node(id) else { return };
+    let lab_core::Attach::Joint(j) = &node.attach else { return };
+    let Some((o, r)) = crate::gizmo::joint_frame(doc, node, j) else { return };
+    for d in lab_mates::joints::dofs(j.kind) {
+        let axis = crate::gizmo::dof_axis(*d, r);
+        if crate::gizmo::is_rot(*d) {
+            // Three-quarter arc of radius 15 mm about the axis, with an arrow at its end.
+            let u = axis.any_orthonormal_vector() * 15.0;
+            let v = axis.cross(u);
+            let at = |a: f64| o + u * a.cos() + v * a.sin();
+            let n = 24;
+            let end = 1.5 * std::f64::consts::PI;
+            for k in 0..n {
+                let (a0, a1) = (end * k as f64 / n as f64, end * (k + 1) as f64 / n as f64);
+                gizmos.line(to_render(at(a0)), to_render(at(a1)), ACCENT);
+            }
+            gizmos.arrow(to_render(at(end - 0.3)), to_render(at(end)), ACCENT);
+        } else {
+            gizmos.arrow(to_render(o - axis * 20.0), to_render(o + axis * 20.0), ACCENT);
+        }
+    }
+}

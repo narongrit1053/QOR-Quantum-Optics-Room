@@ -14,15 +14,20 @@ use bevy::{
 };
 use lab_catalog::Catalog;
 use lab_core::part::Frame;
-use lab_core::{Attach, Document, Node, NodeId, Parent, SelectionTarget, Shape, compute_holes};
+use lab_core::{Attach, Document, Joint, Node, NodeId, Parent, SelectionTarget, Shape, compute_holes};
+use lab_mates::joints::{Dof, dofs};
 
 use crate::camera::{OrbitCamera, PointerState, camera_at, handle_input, to_camera_space};
 use crate::host::{EventSender, PendingRequests, SettleFrames, ViewportSize};
 use crate::picking::{PickId, Selection};
 use crate::scene::{SceneIndex, from_render, part_mesh, to_render};
-use crate::{CatalogRes, FrameRequest, PointerButton, Tool, ViewportEvent, ViewportInput};
+use crate::{CatalogRes, DragUnit, FrameRequest, PointerButton, Tool, ViewportEvent, ViewportInput};
 
 const ROTATE_STEP: f64 = std::f64::consts::PI / 12.0;
+/// Joint rotation step (M9 E2).
+const JOINT_STEP: f64 = std::f64::consts::PI / 36.0;
+/// Pointer travel (px) that picks the DOF of a multi-DOF joint drag.
+const DOF_PICK_PX: f32 = 6.0;
 /// Rotate ring inner and outer radius, in gizmo radii.
 const RING: (f32, f32) = (1.05, 1.35);
 /// A press this far from the centre (gizmo radii) still grabs the ring, so a near miss does not orbit.
@@ -36,6 +41,8 @@ pub(crate) enum GizmoHandle {
     Slide,
     /// Turn about the vertical axis.
     Ring,
+    /// M9 E2. The jointed part itself: drags along its joint's DOFs.
+    Joint,
 }
 
 /// Set while a pointer press belongs to the gizmo, so the camera neither orbits nor clicks.
@@ -55,6 +62,10 @@ pub(crate) struct Drag {
     pub grab: DVec3,
     /// Room-frame point the node turns about and whose xy snaps to holes.
     pub anchor: DVec3,
+    /// Joint drags: the DOF index being dragged (`None` until picked) and the joint origin frame
+    /// in the room at the press.
+    pub dof: Option<usize>,
+    pub joint: Option<(DVec3, DQuat)>,
     last: Option<(Attach, DVec3, DQuat)>,
 }
 
@@ -93,6 +104,13 @@ impl Plugin for GizmoPlugin {
 pub(crate) fn handles(doc: &Document, catalog: &Catalog, node: &Node, tool: Tool) -> Vec<GizmoHandle> {
     if node.locked {
         return Vec::new();
+    }
+    if let Attach::Joint(j) = &node.attach {
+        return match tool {
+            Tool::Measure | Tool::Constrain | Tool::Joint => Vec::new(),
+            _ if j.suppressed || dofs(j.kind).is_empty() => Vec::new(),
+            _ => vec![GizmoHandle::Joint],
+        };
     }
     let mate = mate_frames(doc, catalog, node);
     match tool {
@@ -160,6 +178,54 @@ fn room_anchor(doc: &Document, catalog: &Catalog, node: &Node) -> Option<DVec3> 
     Some(origin + DQuat::from_rotation_z(angle) * local)
 }
 
+/// Room-frame joint origin frame of `node` (z = joint axis), current slide values included.
+pub(crate) fn joint_frame(doc: &Document, node: &Node, j: &Joint) -> Option<(DVec3, DQuat)> {
+    let (wp, wq) = lab_mates::constraints::world_pose(doc, node.parent)?;
+    let (pp, pq) = lab_mates::joints::frame_pose(&j.parent);
+    let r = pq * DQuat::from_rotation_z(j.angle);
+    let mut slide = DVec3::ZERO;
+    for (d, v) in dofs(j.kind).iter().zip(j.values) {
+        match d {
+            Dof::SlideX => slide.x = v,
+            Dof::SlideY => slide.y = v,
+            Dof::SlideZ => slide.z = v,
+            _ => {}
+        }
+    }
+    Some((wp + wq * (pp + pq * j.offset + r * slide), wq * r))
+}
+
+pub(crate) fn is_rot(d: Dof) -> bool {
+    matches!(d, Dof::RotX | Dof::RotY | Dof::RotZ)
+}
+
+/// Room direction of a DOF for joint frame rotation `r`.
+pub(crate) fn dof_axis(d: Dof, r: DQuat) -> DVec3 {
+    r * match d {
+        Dof::SlideX | Dof::RotX => DVec3::X,
+        Dof::SlideY | Dof::RotY => DVec3::Y,
+        Dof::SlideZ | Dof::RotZ => DVec3::Z,
+    }
+}
+
+/// Signed angle about `axis` (through `o`) from `grab` to where `ray` meets the plane normal to `axis`.
+fn plane_angle(o: DVec3, axis: DVec3, grab: DVec3, (ro, rd): (DVec3, DVec3)) -> Option<f64> {
+    let denom = rd.dot(axis);
+    if denom.abs() < 1e-9 {
+        return None;
+    }
+    let t = (o - ro).dot(axis) / denom;
+    if t <= 0.0 {
+        return None;
+    }
+    let flat = |v: DVec3| v - axis * v.dot(axis);
+    let (a0, a1) = (flat(grab - o), flat(ro + rd * t - o));
+    if a0.length() < 1e-6 || a1.length() < 1e-6 {
+        return None;
+    }
+    Some(axis.dot(a0.cross(a1)).atan2(a0.dot(a1)))
+}
+
 impl Drag {
     pub(crate) fn new(doc: &Document, catalog: &Catalog, node: &Node, handle: GizmoHandle, grab: DVec3) -> Option<Drag> {
         let mut start = node.clone();
@@ -171,8 +237,16 @@ impl Drag {
             start.position = position;
             start.rotation = rotation;
         }
+        let (dof, joint) = match (&node.attach, handle) {
+            (Attach::Joint(j), GizmoHandle::Joint) => {
+                ((dofs(j.kind).len() == 1).then_some(0), Some(joint_frame(doc, node, j)?))
+            }
+            _ => (None, None),
+        };
         Some(Drag {
             handle,
+            dof,
+            joint,
             anchor: room_anchor(doc, catalog, node)?,
             start,
             root: root_frame(doc, node.id),
@@ -218,19 +292,13 @@ impl Drag {
             }
             GizmoHandle::Slide => {
                 let Attach::Mate { slide, .. } = &start.attach else { return None };
-                let (parent, _, (lo, hi)) = mate_frames(doc, catalog, start)?;
+                let (parent, _, _) = mate_frames(doc, catalog, start)?;
                 let Parent::Node(pid) = start.parent else { return None };
                 let parent_rot = doc.node_pose(pid)?.1;
                 let axis = (turn * parent_rot * parent.z).normalize_or_zero();
                 let t = line_param(self.grab, axis, ray)?;
                 let raw = slide + t;
-                let new_slide = if shift { raw } else { raw.round() }.clamp(lo, hi);
-                let mut attach = start.attach.clone();
-                if let Attach::Mate { slide, .. } = &mut attach {
-                    *slide = new_slide;
-                }
-                let position = start.position + parent.z.normalize_or_zero() * (new_slide - slide);
-                Some((attach, position, start.rotation))
+                self.slide_to(doc, catalog, if shift { raw } else { raw.round() })
             }
             GizmoHandle::Ring => {
                 let p = plane_point(ray, self.grab.z)?;
@@ -240,7 +308,81 @@ impl Drag {
                     return None;
                 }
                 let raw = a0.angle_to(a1);
-                let angle = if shift { raw } else { (raw / ROTATE_STEP).round() * ROTATE_STEP };
+                self.turn(doc, catalog, if shift { raw } else { (raw / ROTATE_STEP).round() * ROTATE_STEP })
+            }
+            GizmoHandle::Joint => {
+                let (i, (o, r)) = (self.dof?, self.joint?);
+                let Attach::Joint(j) = &start.attach else { return None };
+                let d = *dofs(j.kind).get(i)?;
+                let axis = dof_axis(d, r);
+                let delta = if is_rot(d) {
+                    let raw = plane_angle(o, axis, self.grab, ray)?;
+                    if shift { raw } else { (raw / JOINT_STEP).round() * JOINT_STEP }
+                } else {
+                    let t = line_param(self.grab, axis, ray)?;
+                    if shift { t } else { t.round() }
+                };
+                self.joint_value(i, j.values[i] + delta)
+            }
+        }
+    }
+
+    /// M9 E2. The result for a typed value: Plane moves `v` mm along the current drag direction
+    /// from the start, Ring and joint rotations turn `v` degrees, slides set `v` mm.
+    pub(crate) fn exact(&self, doc: &Document, catalog: &Catalog, v: f64) -> Option<(Attach, DVec3, DQuat)> {
+        let start = &self.start;
+        match self.handle {
+            GizmoHandle::Plane => {
+                let dir = (self.last.as_ref()?.1 - start.position).truncate().normalize_or_zero();
+                (dir != DVec2::ZERO).then(|| (Attach::Free, start.position + (dir * v).extend(0.0), start.rotation))
+            }
+            GizmoHandle::Slide => self.slide_to(doc, catalog, v),
+            GizmoHandle::Ring => self.turn(doc, catalog, v.to_radians()),
+            GizmoHandle::Joint => {
+                let Attach::Joint(j) = &start.attach else { return None };
+                let i = self.dof.unwrap_or(0);
+                let d = *dofs(j.kind).get(i)?;
+                self.joint_value(i, if is_rot(d) { j.values[i] + v.to_radians() } else { v })
+            }
+        }
+    }
+
+    pub(crate) fn unit(&self) -> DragUnit {
+        let rot = match (&self.start.attach, self.handle) {
+            (_, GizmoHandle::Ring) => true,
+            (Attach::Joint(j), GizmoHandle::Joint) => {
+                dofs(j.kind).get(self.dof.unwrap_or(0)).is_some_and(|d| is_rot(*d))
+            }
+            _ => false,
+        };
+        if rot { DragUnit::Degrees } else { DragUnit::Mm }
+    }
+
+    fn joint_value(&self, i: usize, v: f64) -> Option<(Attach, DVec3, DQuat)> {
+        let Attach::Joint(j) = &self.start.attach else { return None };
+        let mut j = j.clone();
+        j.values[i] = v;
+        lab_mates::joints::clamp(&mut j);
+        let (position, rotation) = lab_mates::joints::joint_pose(&j);
+        Some((Attach::Joint(j), position, rotation))
+    }
+
+    fn slide_to(&self, doc: &Document, catalog: &Catalog, new_slide: f64) -> Option<(Attach, DVec3, DQuat)> {
+        let start = &self.start;
+        let Attach::Mate { slide, .. } = &start.attach else { return None };
+        let (parent, _, (lo, hi)) = mate_frames(doc, catalog, start)?;
+        let new_slide = new_slide.clamp(lo, hi);
+        let mut attach = start.attach.clone();
+        if let Attach::Mate { slide, .. } = &mut attach {
+            *slide = new_slide;
+        }
+        let position = start.position + parent.z.normalize_or_zero() * (new_slide - slide);
+        Some((attach, position, start.rotation))
+    }
+
+    fn turn(&self, doc: &Document, catalog: &Catalog, angle: f64) -> Option<(Attach, DVec3, DQuat)> {
+        let start = &self.start;
+        let turn = DQuat::from_rotation_z(self.root.1);
                 match &start.attach {
                     Attach::Mate { self_conn, parent_conn, slide, twist } => {
                         let (parent, child, _) = mate_frames(doc, catalog, start)?;
@@ -263,8 +405,6 @@ impl Drag {
                         Some((attach.clone(), position, (spin * start.rotation).normalize()))
                     }
                 }
-            }
-        }
     }
 }
 
@@ -338,13 +478,14 @@ fn gizmo_input(
                         // Handles, and in Move mode the selected part itself (as the plane handle).
                         let filter = |e: Entity| {
                             handles_q.contains(e)
-                                || (available.contains(&GizmoHandle::Plane)
+                                || ((available.contains(&GizmoHandle::Plane) || available.contains(&GizmoHandle::Joint))
                                     && picks.get(e).is_ok_and(|p| p.0 == SelectionTarget::Node(id)))
                         };
                         let settings = MeshRayCastSettings::default().with_filter(&filter);
                         let grabbed = match ray_cast.cast_ray(ray, &settings).first() {
                             Some((entity, hit)) => {
-                                Some((handles_q.get(*entity).copied().unwrap_or(GizmoHandle::Plane), from_render(hit.point)))
+                                let body = if available.contains(&GizmoHandle::Joint) { GizmoHandle::Joint } else { GizmoHandle::Plane };
+                                Some((handles_q.get(*entity).copied().unwrap_or(body), from_render(hit.point)))
                             }
                             None if available.contains(&GizmoHandle::Ring) => {
                                 let radius = f64::from(gizmo.radius / crate::scene::MM);
@@ -356,6 +497,10 @@ fn gizmo_input(
                         };
                         let Some((handle, grab)) = grabbed else { continue };
                         if let Some(drag) = Drag::new(doc, &catalog.0, node, handle, grab) {
+                            // A multi-DOF joint drag reports its unit once the DOF is picked.
+                            if !(handle == GizmoHandle::Joint && drag.dof.is_none()) {
+                                events.send(ViewportEvent::DragStarted { id, unit: drag.unit() });
+                            }
                             gizmo.drag = Some(drag);
                             capture.0 = true;
                         }
@@ -363,6 +508,28 @@ fn gizmo_input(
                     ViewportInput::PointerMove { pos, mods } => {
                         let Some(drag) = &gizmo.drag else { continue };
                         let Some(ray) = ray_at(pos) else { continue };
+                        if drag.handle == GizmoHandle::Joint && drag.dof.is_none() {
+                            // Multi-DOF joint: the DOF whose screen direction best matches the first moves.
+                            let Some(from) = pointer.press_start() else { continue };
+                            if from.distance(pos) < DOF_PICK_PX {
+                                continue;
+                            }
+                            let (Attach::Joint(j), Some((o, r))) = (&drag.start.attach, drag.joint) else { continue };
+                            let moved = (pos - from).normalize();
+                            let screen = |p: DVec3| camera.world_to_viewport(camera_transform, to_render(p)).ok();
+                            let best = dofs(j.kind).iter().enumerate().filter_map(|(i, d)| {
+                                let axis = dof_axis(*d, r);
+                                let dir = if is_rot(*d) { axis.cross(drag.grab - o).normalize_or_zero() } else { axis };
+                                let s = (screen(drag.grab + dir * 10.0)? - screen(drag.grab)?).normalize_or_zero();
+                                Some((i, s.dot(moved).abs()))
+                            });
+                            let Some((i, _)) = best.max_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
+                            let id = drag.start.id;
+                            let Some(drag) = gizmo.drag.as_mut() else { continue };
+                            drag.dof = Some(i);
+                            events.send(ViewportEvent::DragStarted { id, unit: drag.unit() });
+                        }
+                        let Some(drag) = &gizmo.drag else { continue };
                         let Some(result) = drag.update(doc, &catalog.0, render_ray(ray), mods.shift, mods.ctrl) else {
                             continue;
                         };
@@ -392,6 +559,16 @@ fn gizmo_input(
                 }
             }
             FrameRequest::LoadDocument(_) => gizmo.drag = None,
+            FrameRequest::DragValue(v) => {
+                let (Some(doc), Some(drag)) = (&index.snapshot, gizmo.drag.take()) else { continue };
+                match drag.exact(doc, &catalog.0, *v) {
+                    Some((attach, position, rotation)) => {
+                        let s = &drag.start;
+                        events.send(ViewportEvent::TransformRequested { id: s.id, parent: s.parent, attach, position, rotation, done: true });
+                    }
+                    None => gizmo.drag = Some(drag),
+                }
+            }
             _ => {}
         }
     }
@@ -453,6 +630,7 @@ fn update_gizmo(
     gizmo.radius = r;
     for handle in available {
         let (mesh, material, transform) = match handle {
+            GizmoHandle::Joint => continue,
             GizmoHandle::Plane => (
                 meshes.add(Annulus::new(r * 0.8, r * 1.2)),
                 faint.clone(),
@@ -495,6 +673,7 @@ fn draw_on_top(gizmo: Res<Gizmo>, handles: Query<(&GizmoHandle, &GlobalTransform
                 lines.circle(flat(global), r * RING.0, color);
                 lines.circle(flat(global), r * RING.1, color);
             }
+            GizmoHandle::Joint => {}
             GizmoHandle::Slide => {
                 let half = Vec3::Y * 0.75 * r / global.scale().y.max(1e-6);
                 lines.line(global.transform_point(-half), global.transform_point(half), color);
@@ -642,6 +821,26 @@ mod tests {
         let (attach, position, _) = drag.update(&doc, &catalog, down(room(pose + DVec3::X * 30.0)), true, false).unwrap();
         assert_eq!(attach, Attach::Free);
         assert!((position - (pose + DVec3::X * 30.0)).length() < 1e-6, "{position:?}");
+    }
+
+    /// M9 E2: a typed 50 during a plane drag moves exactly 50 mm along the drag direction.
+    #[test]
+    fn plane_drag_value_is_exact() {
+        let mut doc = lab_core::sample::demo_document();
+        let catalog = catalog();
+        let pid = doc.platforms[0].id;
+        let hid = doc.next_free_id();
+        doc.nodes.push(node(hid, "t:PH50/M", Parent::Platform(pid), Attach::Free, DVec3::new(3.0, 4.0, 0.0)));
+        let holder = doc.node(NodeId(hid)).unwrap().clone();
+        let (origin, angle) = doc.platform_pose(pid).unwrap();
+        let room = |local: DVec3| origin + DQuat::from_rotation_z(angle) * local;
+        let mut drag = Drag::new(&doc, &catalog, &holder, GizmoHandle::Plane, room(holder.position)).unwrap();
+        drag.last = drag.update(&doc, &catalog, down(room(holder.position + DVec3::new(7.3, 7.3, 0.0))), true, false);
+        let (attach, position, _) = drag.exact(&doc, &catalog, 50.0).unwrap();
+        assert_eq!(attach, Attach::Free);
+        let moved = position - holder.position;
+        assert!((moved.length() - 50.0).abs() < 1e-9, "{moved:?}");
+        assert!((moved.x - moved.y).abs() < 1e-9 && moved.z == 0.0, "{moved:?}");
     }
 
     #[test]
