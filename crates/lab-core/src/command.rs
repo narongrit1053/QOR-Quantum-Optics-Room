@@ -597,6 +597,7 @@ impl Command {
                 let was_mated = doc.node(*id).is_some_and(|n| matches!(n.attach, Attach::Mate { .. }));
                 match attach {
                     Attach::Mate { .. } => format!("Mate {}", node_name(id)),
+                    Attach::Joint(j) => format!("Joint {:?}", j.kind),
                     _ if was_mated => format!("Unmate {}", node_name(id)),
                     _ => format!("Move {}", node_name(id)),
                 }
