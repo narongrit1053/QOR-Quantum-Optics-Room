@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -13,6 +13,7 @@ use lab_core::part::{ConnectorDef, ConnectorKind, Feature, Frame, Gender, Geomet
 use lab_geom::TriMesh;
 use lab_import::{ImportOptions, Progress, SourceUp};
 use lab_ui::AppWindow;
+use lab_viewport::{DragItem, Modifiers, PartDrag, Vec2, ViewportRequest};
 use slint::ComponentHandle;
 
 use crate::app_state::AppState;
@@ -142,35 +143,7 @@ fn start(ui: &AppWindow) {
             })
             .ok();
         };
-        let result = lab_import::import_step(&step, &library, &opts, &progress).and_then(|imported| {
-            let mut mesh = TriMesh::default();
-            for (_, m) in lab_import::read_glb(&imported.path, 0)? {
-                mesh.append(&m);
-            }
-            let features = lab_import::features::detect(&mesh);
-            let mut connectors =
-                vec![ConnectorDef { name: "seat".into(), kind: ConnectorKind::HoleGridSeat, frame: seat_frame(&features) }];
-            connectors.extend(hole_connectors(&features));
-            let def = PartDef {
-                id: format!("{}:{}", vendor.to_lowercase(), part_number),
-                version: 1,
-                vendor,
-                part_number,
-                name,
-                category: if category.is_empty() { "imported".into() } else { category },
-                tags: Vec::new(),
-                geometry: Geometry::Mesh { asset: imported.asset.clone() },
-                connectors,
-                optical_ports: Vec::new(),
-                meta: BTreeMap::from([
-                    ("finish".to_string(), FINISHES[finish_index.clamp(0, 2) as usize].to_string()),
-                    ("source".to_string(), step.file_name().unwrap_or_default().to_string_lossy().into_owned()),
-                ]),
-                features,
-            };
-            lab_import::write_part(&library, &def)?;
-            Ok((def, imported))
-        });
+        let result = convert(&step, &library, Spec { vendor, part_number, name, category, finish_index, opts }, &progress);
         let message = match result {
             Ok((def, imported)) => Ok((
                 def.id.clone(),
@@ -197,6 +170,151 @@ fn start(ui: &AppWindow) {
         })
         .ok();
     });
+}
+
+struct Spec {
+    vendor: String,
+    part_number: String,
+    name: String,
+    category: String,
+    finish_index: i32,
+    opts: ImportOptions,
+}
+
+/// Blocking: converts `step`, detects its features and connectors and writes the part to
+/// `library` (with `meta["step_hash"]`, so a later drop of the same file reuses it).
+fn convert(
+    step: &Path,
+    library: &Path,
+    spec: Spec,
+    progress: &dyn Fn(Progress),
+) -> Result<(PartDef, lab_import::Imported), lab_import::ImportError> {
+    let step_hash = blake3::hash(&std::fs::read(step)?).to_hex().to_string();
+    let imported = lab_import::import_step(step, library, &spec.opts, progress)?;
+    let mut mesh = TriMesh::default();
+    for (_, m) in lab_import::read_glb(&imported.path, 0)? {
+        mesh.append(&m);
+    }
+    let features = lab_import::features::detect(&mesh);
+    let mut connectors =
+        vec![ConnectorDef { name: "seat".into(), kind: ConnectorKind::HoleGridSeat, frame: seat_frame(&features) }];
+    connectors.extend(hole_connectors(&features));
+    let def = PartDef {
+        id: format!("{}:{}", spec.vendor.to_lowercase(), spec.part_number),
+        version: 1,
+        vendor: spec.vendor,
+        part_number: spec.part_number,
+        name: spec.name,
+        category: if spec.category.is_empty() { "imported".into() } else { spec.category },
+        tags: Vec::new(),
+        geometry: Geometry::Mesh { asset: imported.asset.clone() },
+        connectors,
+        optical_ports: Vec::new(),
+        meta: BTreeMap::from([
+            ("finish".to_string(), FINISHES[spec.finish_index.clamp(0, 2) as usize].to_string()),
+            ("source".to_string(), step.file_name().unwrap_or_default().to_string_lossy().into_owned()),
+            ("step_hash".to_string(), step_hash),
+        ]),
+        features,
+    };
+    lab_import::write_part(library, &def)?;
+    Ok((def, imported))
+}
+
+/// (vendor, part number) from a STEP file name: Thorlabs names its files "<part>-Step.step"
+/// with '/' written as '_'.
+fn names_from_file(step: &Path) -> (&'static str, String) {
+    let stem = step.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let part = stem.trim_end_matches("-Step").trim_end_matches("-step");
+    let vendor = if part.len() < stem.len() { "Thorlabs" } else { "Imported" };
+    (vendor, part.replace('_', "/"))
+}
+
+/// "Insert STEP…": the open dialog, then [`quick_insert`] at the viewport centre.
+pub fn insert_dialog(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
+    let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
+    show_file_dialog_local(owner_hwnd(ui.window()), DialogKind::OpenStep, None, move |result| {
+        let Some(ui) = w.upgrade() else { return };
+        match result {
+            DialogResult::Chosen(path) => quick_insert(&ui, &a, &m, path, None),
+            DialogResult::Cancelled => {}
+            DialogResult::Failed(text) => controller::show_toast(&ui, &a.borrow(), &text, false),
+        }
+    });
+}
+
+/// Converts `step` in the background (or reuses the library part with the same STEP hash),
+/// writes the library entry silently, reloads the catalog, then places it at `pos`
+/// (viewport px) with DragPart Move+Drop so it seats on a hole. Toast on error.
+pub fn quick_insert(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<UiModels>, step: PathBuf, pos: Option<Vec2>) {
+    let toast = |text: &str| controller::show_toast(ui, &app.borrow(), text, false);
+    let hash = match std::fs::read(&step) {
+        Ok(bytes) => blake3::hash(&bytes).to_hex().to_string(),
+        Err(error) => return toast(&format!("{} could not be read: {error}", step.display())),
+    };
+    let known = app.borrow().catalog.all().iter().find(|d| d.meta.get("step_hash") == Some(&hash)).map(|d| d.id.clone());
+    if let Some(id) = known {
+        return place(ui, app, &id, pos);
+    }
+    let Some(library) = lab_catalog::user_dir() else {
+        return toast("The user library folder (%APPDATA%\\LabSetup\\library) is not available.");
+    };
+    let (vendor, mut part) = names_from_file(&step);
+    // An older import with this id (no or another STEP hash) keeps its own file and connectors.
+    if app.borrow().catalog.get(&format!("{}:{part}", vendor.to_lowercase())).is_some() {
+        part = format!("{part} ({})", &hash[..6]);
+    }
+    toast(&format!("Converting {part}…"));
+    let spec = Spec {
+        vendor: vendor.into(),
+        part_number: part.clone(),
+        name: part,
+        category: "imported".into(),
+        finish_index: 0,
+        opts: ImportOptions { source_up: SourceUp::Y, finish: Some(finish_of(0)), ..Default::default() },
+    };
+    let w = ui.as_weak();
+    std::thread::spawn(move || {
+        let result = convert(&step, &library, spec, &|_| {}).map(|(def, _)| def.id).map_err(|e| e.to_string());
+        slint::invoke_from_event_loop(move || {
+            let Some(ui) = w.upgrade() else { return };
+            HANDLES.with(|h| {
+                let Some((app, models)) = &*h.borrow() else { return };
+                match result {
+                    Ok(id) => {
+                        {
+                            let mut a = app.borrow_mut();
+                            library::reload_catalog(&mut a, models);
+                            crate::thumbs::render(&a, &id);
+                        }
+                        // shortcut: the catalog swap respawns the scene, so the drop ray misses
+                        // the table for a few frames; a fixed delay, until the viewport reports readiness.
+                        let (w, app) = (ui.as_weak(), app.clone());
+                        slint::Timer::single_shot(std::time::Duration::from_millis(500), move || {
+                            if let Some(ui) = w.upgrade() {
+                                place(&ui, &app, &id, pos);
+                            }
+                        });
+                    }
+                    Err(text) => controller::show_toast(&ui, &app.borrow(), &text, false),
+                }
+            });
+        })
+        .ok();
+    });
+}
+
+/// Ghosts catalog part `id` at `pos` (viewport px; `None` = the viewport centre) and drops it.
+fn place(ui: &AppWindow, app: &Rc<RefCell<AppState>>, id: &str, pos: Option<Vec2>) {
+    let scale = ui.window().scale_factor();
+    let pos = pos.unwrap_or_else(|| {
+        let left = (ui.get_sidebar_right() - ui.get_viewport_x()).max(0.0);
+        Vec2::new((left + ui.get_viewport_width()) * 0.5 * scale, ui.get_viewport_height() * 0.5 * scale)
+    });
+    let mods = Modifiers::default();
+    let a = app.borrow();
+    a.send(ViewportRequest::DragPart(PartDrag::Move { item: DragItem::Part(id.into()), pos, mods }));
+    a.send(ViewportRequest::DragPart(PartDrag::Drop { pos, mods }));
 }
 
 /// The seat (M8-PLAN A): a bottom hole (axis down within 2°, M4–M6 / 8-32–1/4-20 size, opening

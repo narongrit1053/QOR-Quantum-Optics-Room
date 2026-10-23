@@ -439,6 +439,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             refresh_all(ui, &app.borrow(), models);
         }
         "import.step" => crate::import::choose_file(ui, app, models),
+        "import.step_insert" => crate::import::insert_dialog(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),
         "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" | "tool.constrain" | "tool.joint" => {
             let (index, tool) = match id {
