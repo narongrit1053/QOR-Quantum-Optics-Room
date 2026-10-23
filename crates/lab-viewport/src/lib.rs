@@ -182,6 +182,8 @@ pub enum ViewportRequest {
     /// M9 E. Joint tool: draw a snap glyph at this frame (target's frame, as `HighlightFeature`)
     /// while the tool is active. `None` clears.
     HighlightSnap(Option<(SelectionTarget, lab_core::part::Frame, SnapGlyph)>),
+    /// M9 E2. Typed value (mm or degrees) for the drag in progress; applies exactly and ends it.
+    DragValue(f64),
 }
 
 /// M9 E. How a joint-origin snap is drawn.
@@ -193,6 +195,13 @@ pub enum SnapGlyph {
     Dot,
     /// Face centre.
     Square,
+}
+
+/// M9 E2. Unit of the value a drag changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragUnit {
+    Mm,
+    Degrees,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -297,6 +306,8 @@ pub enum ViewportEvent {
     /// M9 E. Like `FeaturePoint`, on pointer move while `Tool::Joint`/`Constrain` is active,
     /// at most one per frame.
     FeatureHover { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
+    /// M9 E2. A gizmo/DOF drag began (the app shows the numeric field).
+    DragStarted { id: lab_core::NodeId, unit: DragUnit },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -348,6 +359,7 @@ pub(crate) enum FrameRequest {
     IsolateNodes(Option<Vec<lab_core::NodeId>>),
     HighlightNodes(Vec<lab_core::NodeId>),
     HighlightSnap(Option<(SelectionTarget, lab_core::part::Frame, SnapGlyph)>),
+    DragValue(f64),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

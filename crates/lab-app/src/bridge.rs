@@ -90,6 +90,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 }
                 ViewportEvent::HoverChanged(_) => {}
                 ViewportEvent::ContextMenu { target, pos } => crate::context_menu::open(&ui, target, pos),
+                ViewportEvent::DragStarted { unit, .. } => controller::on_drag_started(&ui, unit),
                 ViewportEvent::IsolationChanged(id) => {
                     app.borrow_mut().isolated = id;
                     controller::refresh_isolated(&ui, &app.borrow());

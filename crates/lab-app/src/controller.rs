@@ -18,7 +18,7 @@ use lab_core::{
     WallDisplay,
 };
 use lab_ui::AppWindow;
-use lab_viewport::{FrameTarget, Tool, ViewMode, ViewportRequest};
+use lab_viewport::{DragUnit, FrameTarget, Tool, ViewMode, ViewportRequest};
 use slint::{ComponentHandle, SharedString};
 
 use crate::app_state::{AppState, SheetKind};
@@ -91,6 +91,30 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
             _ => return,
         };
         select(&ui, &a, &m, Some(target));
+    });
+
+    // M9 E2: typed value during a drag; Enter applies it exactly and ends the drag.
+    let (w, a) = (ui.as_weak(), app.clone());
+    ui.on_drag_value_key(move |key| {
+        let Some(ui) = w.upgrade() else { return false };
+        let mut text = ui.get_drag_value().to_string();
+        match key.as_str() {
+            "\n" | "\r" => {
+                if let Ok(v) = text.parse::<f64>() {
+                    a.borrow().send(ViewportRequest::DragValue(v));
+                    ui.set_drag_value_open(false);
+                }
+                return true;
+            }
+            "\u{1b}" => text.clear(),
+            "\u{8}" => {
+                text.pop();
+            }
+            k if k == "." || k == "-" || (k.len() == 1 && k.chars().all(|c| c.is_ascii_digit())) => text.push_str(k),
+            _ => return false,
+        }
+        ui.set_drag_value(text.into());
+        true
     });
 
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
@@ -250,6 +274,17 @@ pub fn set_hint(ui: &AppWindow, text: &str) {
 
 /// Shows a single-shot toast: 2.4 s, or 5 s with an Undo button. The caller sets
 /// `AppState::toast_undo` to match `undo`.
+/// M9 E2. A drag began: open the empty numeric field in the drag's unit.
+pub fn on_drag_started(ui: &AppWindow, unit: DragUnit) {
+    ui.set_drag_value("".into());
+    ui.set_drag_value_unit(match unit {
+        DragUnit::Mm => "mm",
+        DragUnit::Degrees => "°",
+    }
+    .into());
+    ui.set_drag_value_open(true);
+}
+
 pub fn show_toast(ui: &AppWindow, app: &AppState, text: &str, undo: bool) {
     ui.set_toast(text.into());
     ui.set_toast_action(if undo { "Undo" } else { "" }.into());

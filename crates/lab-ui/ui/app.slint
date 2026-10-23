@@ -12,7 +12,7 @@ import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow,
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
-import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay } from "overlays.slint";
+import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay, DragValueField } from "overlays.slint";
 import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
 import { ViewCube, CubeFaceRow } from "view_cube.slint";
@@ -199,6 +199,12 @@ export component AppWindow inherits Window {
     in property <string> measure-text;
     // M9 D. Tool step hint (bottom centre), shown in the measure chip's place while non-empty.
     in property <string> tool-hint;
+    // M9 E2. Numeric entry during a drag: open while the pointer is down, typed text, unit label.
+    in-out property <bool> drag-value-open;
+    in property <string> drag-value;
+    in property <string> drag-value-unit;
+    // A key while the field is open; true when it was used (digits, ".", "-", Backspace, Enter, Esc).
+    callback drag-value-key(string) -> bool;
     // M9 D. Context menu rows (id, title, shortcut) and its position in the viewport (logical px).
     in property <[PaletteItem]> context-rows;
     in property <length> context-x;
@@ -593,6 +599,9 @@ export component AppWindow inherits Window {
 
             keys := FocusScope {
                 key-pressed(event) => {
+                    if (root.drag-value-open && !event.modifiers.control && root.drag-value-key(event.text)) {
+                        return accept;
+                    }
                     if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
                         return reject;
                     }
@@ -682,6 +691,9 @@ export component AppWindow inherits Window {
                         if (event.kind == PointerEventKind.down) {
                             keys.focus();
                         }
+                        if (event.kind == PointerEventKind.up) {
+                            root.drag-value-open = false;
+                        }
                         root.viewport-pointer(
                             event.kind == PointerEventKind.down ? 0 : event.kind == PointerEventKind.up ? 1 : event.kind == PointerEventKind.move ? 2 : 3,
                             event.button == PointerEventButton.left ? 0 : event.button == PointerEventButton.right ? 1 : event.button == PointerEventButton.middle ? 2 : 3,
@@ -701,6 +713,13 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+            }
+
+            if root.drag-value-open: DragValueField {
+                x: pointer.mouse-x + 16px;
+                y: pointer.mouse-y + 16px;
+                text: root.drag-value;
+                unit: root.drag-value-unit;
             }
 
             if root.isolated-name != "": Rectangle {
