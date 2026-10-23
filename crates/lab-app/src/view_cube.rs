@@ -59,9 +59,9 @@ pub fn faces(yaw: f32, pitch: f32, size: f32) -> Vec<CubeFace> {
         ("Back", [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], (std::f32::consts::PI, 0.0)),
         ("Right", [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], (std::f32::consts::FRAC_PI_2, 0.0)),
         ("Left", [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], (-std::f32::consts::FRAC_PI_2, 0.0)),
-        // Top/Bottom keep the current heading.
-        ("Top", [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], (yaw, TOP_PITCH)),
-        ("Bottom", [0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], (yaw, -TOP_PITCH)),
+        // Top/Bottom face Front at the bottom of the screen, room +X right (axis-aligned).
+        ("Top", [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], (0.0, TOP_PITCH)),
+        ("Bottom", [0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], (0.0, -TOP_PITCH)),
     ];
     // M9: each face splits into a 3×3 grid: the centre is the face, the chamfer bands (BAND of
     // the face size) are its edges and the corner squares its corners.
@@ -207,5 +207,16 @@ mod tests {
         // Top edge band (centre column): pitch 45°, yaw 0.
         let (yaw, pitch) = hit(&f, SIZE / 2.0, SIZE * 0.21).unwrap();
         assert!(yaw.abs() < 1e-4 && (pitch - std::f32::consts::FRAC_PI_4).abs() < 1e-4);
+    }
+
+    #[test]
+    fn top_and_bottom_align_axes() {
+        for (yaw, pitch) in [HOME, (2.0, 0.5)] {
+            let f = faces(yaw, pitch, SIZE);
+            let top = f.iter().find(|f| f.label == "Top").unwrap();
+            assert_eq!((top.yaw, top.pitch), (0.0, TOP_PITCH));
+            let bottom = f.iter().find(|f| f.label == "Bottom").unwrap();
+            assert_eq!((bottom.yaw, bottom.pitch), (0.0, -TOP_PITCH));
+        }
     }
 }
