@@ -179,6 +179,20 @@ pub enum ViewportRequest {
     IsolateNodes(Option<Vec<lab_core::NodeId>>),
     /// M9 G. Hover outline on these nodes (empty clears).
     HighlightNodes(Vec<lab_core::NodeId>),
+    /// M9 E. Joint tool: draw a snap glyph at this frame (target's frame, as `HighlightFeature`)
+    /// while the tool is active. `None` clears.
+    HighlightSnap(Option<(SelectionTarget, lab_core::part::Frame, SnapGlyph)>),
+}
+
+/// M9 E. How a joint-origin snap is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapGlyph {
+    /// Circular edge centre.
+    Circle,
+    /// Vertex or mid-edge.
+    Dot,
+    /// Face centre.
+    Square,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -280,6 +294,9 @@ pub enum ViewportEvent {
     FeaturePoint { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
     /// M9 D. A right click without drag (the target is selected first); `pos` in physical px.
     ContextMenu { target: Option<SelectionTarget>, pos: Vec2 },
+    /// M9 E. Like `FeaturePoint`, on pointer move while `Tool::Joint`/`Constrain` is active,
+    /// at most one per frame.
+    FeatureHover { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -330,6 +347,7 @@ pub(crate) enum FrameRequest {
     SetHidden(Vec<lab_core::NodeId>),
     IsolateNodes(Option<Vec<lab_core::NodeId>>),
     HighlightNodes(Vec<lab_core::NodeId>),
+    HighlightSnap(Option<(SelectionTarget, lab_core::part::Frame, SnapGlyph)>),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

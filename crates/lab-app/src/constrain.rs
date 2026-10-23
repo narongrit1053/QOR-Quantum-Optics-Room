@@ -163,7 +163,7 @@ fn snap(features: &[Feature], point: DVec3, normal: DVec3) -> Option<Feature> {
 }
 
 /// The node's CPU mesh in its part frame (generated with its parameter overrides, or LOD0).
-fn part_mesh(def: &PartDef, node: &Node) -> Option<TriMesh> {
+pub(crate) fn part_mesh(def: &PartDef, node: &Node) -> Option<TriMesh> {
     let Geometry::Parametric { generator, params } = &def.geometry else {
         return crate::wizard::part_mesh(def).ok();
     };

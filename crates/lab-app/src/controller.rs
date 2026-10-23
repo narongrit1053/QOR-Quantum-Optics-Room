@@ -182,6 +182,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
 
 /// The inspector for the current selection, including every choice property.
 fn refresh_inspector(ui: &AppWindow, app: &AppState, models: &UiModels) {
+    crate::joint::fill(ui, app, models);
     let doc = &app.session.doc;
     let units = app.units();
     let kind = match app.session.selection {
@@ -301,6 +302,9 @@ pub fn close_sheet(ui: &AppWindow, app: &mut AppState) {
 // ── Edit pipeline ──────────────────────────────────────────────────────────────────────────
 
 fn on_field_committed(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str, text: &str) -> bool {
+    if id.starts_with("joint.") {
+        return crate::joint::field_committed(ui, app, models, id, text);
+    }
     let outcome = {
         let a = app.borrow();
         if let Some((node, field)) = set_field(id) {
@@ -495,11 +499,13 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 "tool.move" => (1, Tool::Move),
                 "tool.rotate" => (2, Tool::Rotate),
                 "tool.measure" => (3, Tool::Measure),
-                "tool.constrain" | "tool.joint" => (4, Tool::Constrain), // M9 A: J starts M8 constrain until E
+                "tool.constrain" => (4, Tool::Constrain),
+                "tool.joint" => (5, Tool::Joint),
                 _ => (0, Tool::Select),
             };
             ui.set_tool(index);
             crate::constrain::reset(ui, tool == Tool::Constrain);
+            crate::joint::reset(ui, app, models, tool == Tool::Joint);
             if tool == Tool::Measure {
                 set_hint(ui, "Click the first point");
             }
@@ -565,6 +571,9 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             }
         }
         _ if id.starts_with("file.") => files::handle_file_action(ui, app, models, id),
+        "tool.ground" => crate::joint::ground(ui, app, models),
+        "tool.rigid_group" => crate::joint::rigid(ui, app, models),
+        _ if id.starts_with("joint.") => crate::joint::action(ui, app, models, id),
         _ if id.starts_with("constraint.") => {
             let outcome = crate::constrain::action_edit(&app.borrow(), id);
             apply_outcome(ui, app, models, id, outcome);
