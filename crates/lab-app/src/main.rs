@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = load_settings();
     let args: Vec<String> = std::env::args().collect();
     let has_recovery = !find_recoverable(&default_root(), None).is_empty();
-    let (session, open_error) = files::initial_session(&args, &settings, has_recovery);
+    let (session, open_error, show_start) = files::initial_session(&args, &settings, has_recovery);
     let autosave = AutosaveSession::start(&default_root(), &session.title());
     if let Err(error) = &autosave {
         eprintln!("autosave unavailable: {error}");
@@ -108,6 +108,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     relations::connect(&ui, &app);
     controller::refresh_all(&ui, &app.borrow(), &models);
     files::show_recent(&ui, &app.borrow().settings);
+    if show_start {
+        files::show_start_page(&ui, &app.borrow().settings, open_error.as_deref(), false);
+    }
     library::fill(&app.borrow(), &models);
     stack::fill(&ui, &mut app.borrow_mut());
     if !warnings.is_empty() {
