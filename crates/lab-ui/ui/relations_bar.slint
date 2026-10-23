@@ -1,0 +1,65 @@
+// M9 G. Relationships bar: one chip per joint (by seq), then per M8 constraint, along the viewport bottom.
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct RelationChip {
+    label: string,
+    icon: string,
+    suppressed: bool,
+}
+
+export component RelationsBar inherits Rectangle {
+    in property <[RelationChip]> chips;
+    callback hovered(int /* index, -1 = none */);
+    callback clicked(int);
+    callback double-clicked(int);
+    callback menu(int, length /* x in this bar */, length /* y */);
+
+    height: 36px;
+    border-radius: 18px;
+    background: Theme.panel-bg;
+    border-width: Theme.border-width;
+    border-color: Theme.panel-border;
+
+    ScrollView {
+        x: 6px;
+        width: parent.width - 12px;
+        row := HorizontalLayout {
+            spacing: 6px;
+            padding-top: 5px;
+            padding-bottom: 5px;
+            for chip[i] in root.chips: Rectangle {
+                border-radius: 13px;
+                background: area.has-hover ? Theme.accent-soft : Theme.control-hover;
+                opacity: chip.suppressed ? 0.5 : 1.0;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 6px;
+                    Text {
+                        text: chip.icon == "joint" ? "⟲" : "⊥";
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: chip.label;
+                        color: Theme.text;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                }
+                area := TouchArea {
+                    changed has-hover => { root.hovered(self.has-hover ? i : -1); }
+                    clicked => { root.clicked(i); }
+                    double-clicked => { root.double-clicked(i); }
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                            root.menu(i, parent.x + self.mouse-x, self.mouse-y);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
