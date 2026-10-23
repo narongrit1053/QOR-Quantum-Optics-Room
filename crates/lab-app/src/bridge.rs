@@ -66,6 +66,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 ViewportEvent::FrameReady { frames_rendered } => {
                     trace(&format!("ui: frame {frames_rendered} ready"));
                     show_newest_frame(&ui, &app, &handle.textures);
+                    crate::part_box::show_newest_frame(&ui, &app, &handle.part_box_textures);
                     // Host's WARMUP_FRAMES: pipelines are compiled once the scene has rendered this many.
                     if frames_rendered >= 3 && ui.get_viewport_preparing() {
                         ui.set_viewport_preparing(false);

@@ -35,6 +35,9 @@ pub struct ViewportHandle {
     pub textures: async_channel::Receiver<wgpu::Texture>,
     pub requests: async_channel::Sender<ViewportRequest>,
     pub events: async_channel::Receiver<ViewportEvent>,
+    /// M9 F. Part box frames, like `textures`; send them back with
+    /// [`ViewportRequest::ReleasePartBoxTexture`].
+    pub part_box_textures: async_channel::Receiver<wgpu::Texture>,
 }
 
 /// Requests queued for the next Bevy update. Cleared by the host after every update.
@@ -134,6 +137,7 @@ pub fn start(
     let (request_tx, request_rx) = async_channel::unbounded::<ViewportRequest>();
     let (texture_tx, texture_rx) = async_channel::bounded::<wgpu::Texture>(BUFFER_COUNT);
     let (event_tx, event_rx) = async_channel::unbounded::<ViewportEvent>();
+    let (box_tx, box_rx) = async_channel::bounded::<wgpu::Texture>(BUFFER_COUNT);
 
     let adapter = device_adapter(&instance, &device);
     let info = adapter.get_info();
@@ -171,6 +175,7 @@ pub fn start(
             let mut app = App::new();
             app.set_runner(runner);
             app.insert_resource(BackBuffer(None))
+                .insert_resource(BoxBackBuffer(None))
                 .insert_resource(CurrentTarget(ManualTextureViewHandle(0)))
                 .init_resource::<PendingRequests>()
                 .init_resource::<RedrawState>()
@@ -205,13 +210,17 @@ pub fn start(
                         ..default()
                     }),
             );
-            app.add_plugins((SendFrameToUiPlugin(texture_tx), ExtractResourcePlugin::<BackBuffer>::default()));
+            app.add_plugins((
+                SendFrameToUiPlugin(texture_tx, box_tx),
+                ExtractResourcePlugin::<BackBuffer>::default(),
+                ExtractResourcePlugin::<BoxBackBuffer>::default(),
+            ));
             add_scene_plugins(&mut app, document);
             app.run();
         })
         .expect("failed to spawn the viewport thread");
 
-    ViewportHandle { textures: texture_rx, requests: request_tx, events: event_rx }
+    ViewportHandle { textures: texture_rx, requests: request_tx, events: event_rx, part_box_textures: box_rx }
 }
 
 fn add_scene_plugins(app: &mut App, document: Document) {
@@ -219,6 +228,7 @@ fn add_scene_plugins(app: &mut App, document: Document) {
     app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
     app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin, crate::feature_pick::FeaturePickPlugin, crate::feature_pick::DofGlyphPlugin));
     app.add_plugins(crate::beams::BeamsPlugin);
+    app.add_plugins(crate::part_box::PartBoxPlugin);
 }
 
 /// Startup test hook: the viewport's resources and plugins on a render-less Bevy app, with every schedule
@@ -327,11 +337,15 @@ fn run_on_demand(
     // Set after a reduced-resolution frame: when motion was last seen.
     let mut reduced_since: Option<Instant> = None;
     let mut loading = false;
+    // M9 F: the open part box's texture size and its free textures (none while closed).
+    let mut box_size: Option<(u32, u32)> = None;
+    let mut box_free: Vec<wgpu::Texture> = Vec::new();
 
     loop {
         // Wait for work unless a frame is due and a texture is free to render it into. After a
         // reduced-resolution frame, wait at most until the settle deadline.
-        let can_render = dirty && !free.is_empty();
+        // An open part box renders with every frame, so it needs a free texture too.
+        let can_render = dirty && !free.is_empty() && (box_size.is_none() || !box_free.is_empty());
         let first = if can_render {
             requests.try_recv().ok()
         } else if let Some(since) = reduced_since.filter(|_| !free.is_empty()) {
@@ -365,6 +379,20 @@ fn run_on_demand(
         for request in first.into_iter().chain(std::iter::from_fn(|| requests.try_recv().ok())) {
             match request {
                 ViewportRequest::ReleaseTexture(texture) => free.push(texture),
+                ViewportRequest::ReleasePartBoxTexture(texture) => {
+                    // Textures of a closed or resized box are dropped.
+                    if box_size == Some((texture.width(), texture.height())) && box_free.len() < BUFFER_COUNT {
+                        box_free.push(texture);
+                    }
+                }
+                ViewportRequest::PartBox(spec) => {
+                    box_size = spec.map(|s| (s.width.max(1), s.height.max(1)));
+                    box_free = box_size
+                        .map(|(w, h)| (0..BUFFER_COUNT).map(|_| create_texture(device, queue, w, h)).collect())
+                        .unwrap_or_default();
+                    pending.push(FrameRequest::PartBox(spec));
+                }
+                ViewportRequest::PartBoxInput(input) => pending.push(FrameRequest::PartBoxInput(input)),
                 ViewportRequest::Resize { width, height } => {
                     let new_size = (width.max(1), height.max(1));
                     if new_size != full_size {
@@ -433,7 +461,7 @@ fn run_on_demand(
             dirty = true;
             reduced_since = None;
         }
-        if !dirty || free.is_empty() {
+        if !dirty || free.is_empty() || (box_size.is_some() && box_free.is_empty()) {
             continue;
         }
 
@@ -446,8 +474,9 @@ fn run_on_demand(
         if (target.width(), target.height()) != size {
             target = create_texture(device, queue, size.0, size.1);
         }
-        render_into(app, target, ManualTextureViewHandle(next_view_id));
-        next_view_id = next_view_id.wrapping_add(1);
+        let box_target = box_size.and_then(|_| box_free.pop());
+        render_into(app, target, ManualTextureViewHandle(next_view_id), box_target);
+        next_view_id = next_view_id.wrapping_add(1) % crate::part_box::BOX_VIEW.0;
 
         let world = app.world_mut();
         world.resource_mut::<PendingRequests>().0.clear();
@@ -538,7 +567,7 @@ impl ResolutionScaler {
 #[derive(Resource, Clone, Copy)]
 pub(crate) struct ViewportSize(pub Vec2);
 
-fn render_into(app: &mut App, target: wgpu::Texture, handle: ManualTextureViewHandle) {
+fn render_into(app: &mut App, target: wgpu::Texture, handle: ManualTextureViewHandle, box_target: Option<wgpu::Texture>) {
     let view = target.create_view(&wgpu::TextureViewDescriptor {
         label: Some("lab-viewport frame view"),
         ..Default::default()
@@ -555,6 +584,18 @@ fn render_into(app: &mut App, target: wgpu::Texture, handle: ManualTextureViewHa
             view_format: TextureFormat::Rgba8UnormSrgb,
         },
     );
+    if let Some(texture) = &box_target {
+        views.insert(
+            crate::part_box::BOX_VIEW,
+            ManualTextureView {
+                texture_view: texture.create_view(&Default::default()).into(),
+                size: (texture.width(), texture.height()).into(),
+                view_format: TextureFormat::Rgba8UnormSrgb,
+            },
+        );
+    }
+    world.resource_mut::<crate::part_box::PartBoxActive>().0 = box_target.is_some();
+    world.resource_mut::<BoxBackBuffer>().0 = box_target;
     world.resource_mut::<CurrentTarget>().0 = handle;
     world.resource_mut::<TargetSize>().0 = UVec2::new(target.width(), target.height());
     app.update();
@@ -570,7 +611,12 @@ pub(crate) struct TargetSize(pub UVec2);
 #[derive(Resource)]
 pub(crate) struct CurrentTarget(pub ManualTextureViewHandle);
 
-type SceneCameras = (With<Camera3d>, Without<crate::thumbnail::ThumbCamera>, Without<crate::export::ExportCamera>);
+type SceneCameras = (
+    With<Camera3d>,
+    Without<crate::thumbnail::ThumbCamera>,
+    Without<crate::export::ExportCamera>,
+    Without<crate::part_box::PartBoxCamera>,
+);
 
 fn apply_render_target(current: Res<CurrentTarget>, mut cameras: Query<&mut RenderTarget, SceneCameras>) {
     for mut target in &mut cameras {
@@ -583,21 +629,29 @@ fn apply_render_target(current: Res<CurrentTarget>, mut cameras: Query<&mut Rend
 #[extract_app(RenderApp)]
 struct BackBuffer(Option<wgpu::Texture>);
 
-#[derive(Resource)]
-struct FrameSender(async_channel::Sender<wgpu::Texture>);
+/// M9 F. The part box texture of the current frame (None while the box is closed).
+#[derive(Clone, Resource, ExtractResource)]
+#[extract_app(RenderApp)]
+struct BoxBackBuffer(Option<wgpu::Texture>);
 
-struct SendFrameToUiPlugin(async_channel::Sender<wgpu::Texture>);
+#[derive(Resource)]
+struct FrameSender(async_channel::Sender<wgpu::Texture>, async_channel::Sender<wgpu::Texture>);
+
+struct SendFrameToUiPlugin(async_channel::Sender<wgpu::Texture>, async_channel::Sender<wgpu::Texture>);
 
 impl Plugin for SendFrameToUiPlugin {
     fn build(&self, app: &mut App) {
         let render_app = app.sub_app_mut(RenderApp);
-        render_app.insert_resource(FrameSender(self.0.clone()));
+        render_app.insert_resource(FrameSender(self.0.clone(), self.1.clone()));
         // After all cameras have rendered and been submitted.
         render_app.add_systems(RenderGraph, send_frame_to_ui.in_set(RenderGraphSystems::Finish));
     }
 }
 
-fn send_frame_to_ui(sender: Res<FrameSender>, back_buffer: Res<BackBuffer>) {
+fn send_frame_to_ui(sender: Res<FrameSender>, back_buffer: Res<BackBuffer>, box_buffer: Res<BoxBackBuffer>) {
+    if let Some(texture) = &box_buffer.0 {
+        sender.1.send_blocking(texture.clone()).ok();
+    }
     if let Some(texture) = &back_buffer.0 {
         // A closed channel means the UI is shutting down.
         sender.0.send_blocking(texture.clone()).ok();
