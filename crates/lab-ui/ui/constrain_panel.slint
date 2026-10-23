@@ -1,0 +1,164 @@
+// POLA-147. Constrain Components panel (Fusion layout): type, two components with their picked
+// geometry, the constraints of Component 1, Solve All, OK / Cancel. Docked right of the part box.
+// Every click goes out as `action("cpanel.…")`; table fields as `cpanel.constraint.<i>.offset`.
+
+import { Theme } from "theme.slint";
+import { ConstraintRow } from "types.slint";
+import { Panel, IconButton, PillButton } from "components.slint";
+import { NumberField } from "fields.slint";
+
+component KindButton inherits Rectangle {
+    in property <string> glyph;
+    in property <string> name;
+    in property <bool> active;
+    callback clicked();
+    width: 40px;
+    height: 32px;
+    border-radius: 6px;
+    background: root.active ? Theme.accent : touch.has-hover ? Theme.panel-border : transparent;
+    border-width: 1px;
+    border-color: Theme.panel-border;
+    Text {
+        text: root.glyph;
+        color: root.active ? white : Theme.text;
+        font-size: 16px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    if touch.has-hover: Rectangle {
+        y: root.height + 2px;
+        width: tip.preferred-width + 10px;
+        height: 20px;
+        background: Theme.sheet-bg;
+        border-radius: 4px;
+        tip := Text { text: root.name; color: Theme.text; font-size: Theme.font-caption; vertical-alignment: center; }
+    }
+}
+
+component ComponentRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> name;
+    in property <string> geometry;
+    in property <bool> armed;
+    callback select();
+    spacing: 8px;
+    height: 30px;
+    Text { text: root.label; color: Theme.text-secondary; width: 92px; vertical-alignment: center; }
+    Text { text: root.name == "" ? "-" : root.name; color: Theme.text; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+    PillButton {
+        label: root.geometry == "" ? "Select" : root.geometry;
+        primary: root.armed;
+        clicked => { root.select(); }
+    }
+}
+
+export component ConstrainPanel inherits Panel {
+    in property <int> kind; // -1 none, 0 Mate, 1 Flush, 2 Concentric, 3 Angle
+    in property <string> name1;
+    in property <string> geometry1;
+    in property <string> name2;
+    in property <string> geometry2;
+    in property <int> next-slot;
+    in property <bool> solve-all;
+    in property <int> selected-row;
+    in property <[ConstraintRow]> rows;
+    callback action(string /* id */);
+    callback field-committed(string /* id */, string /* text */) -> bool;
+
+    width: 380px;
+    height: body.preferred-height;
+    // Clicks on the panel do not reach the viewport below.
+    TouchArea { }
+
+    body := VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+        HorizontalLayout {
+            Text { text: "CONSTRAIN COMPONENTS"; color: Theme.text; font-weight: 650; vertical-alignment: center; horizontal-stretch: 1; }
+            IconButton { icon: "✕"; clicked => { root.action("cpanel.cancel"); } }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: "Type"; color: Theme.text-secondary; width: 92px; vertical-alignment: center; }
+            KindButton { glyph: "⫴"; name: "Mate"; active: root.kind == 0; clicked => { root.action("cpanel.kind.0"); } }
+            KindButton { glyph: "▭"; name: "Flush"; active: root.kind == 1; clicked => { root.action("cpanel.kind.1"); } }
+            KindButton { glyph: "◎"; name: "Concentric"; active: root.kind == 2; clicked => { root.action("cpanel.kind.2"); } }
+            KindButton { glyph: "∠"; name: "Angle"; active: root.kind == 3; clicked => { root.action("cpanel.kind.3"); } }
+            Rectangle { }
+        }
+        ComponentRow {
+            label: "Component 1";
+            name: root.name1;
+            geometry: root.geometry1;
+            armed: root.next-slot == 0;
+            select => { root.action("cpanel.select.0"); }
+        }
+        ComponentRow {
+            label: "Component 2";
+            name: root.name2;
+            geometry: root.geometry2;
+            armed: root.next-slot == 1;
+            select => { root.action("cpanel.select.1"); }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            for h in ["Name", "Type", "Geometry", "Offset", "Flip"]: Text {
+                text: h;
+                color: Theme.text-tertiary;
+                font-size: Theme.font-caption;
+                width: h == "Offset" ? 96px : h == "Flip" ? 40px : 64px;
+            }
+        }
+        for c in root.rows: Rectangle {
+            height: 30px;
+            border-radius: 4px;
+            background: root.selected-row == c.index ? Theme.panel-border : transparent;
+            TouchArea { clicked => { root.action("cpanel.row." + c.index); } }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: "C" + (c.index + 1); color: Theme.text; width: 64px; vertical-alignment: center; }
+                PillButton { label: c.kind; width: 64px; clicked => { root.action("cpanel.constraint." + c.index + ".kind"); } }
+                Text { text: c.kind == "Concentric" ? "Axis" : "Face"; color: Theme.text-secondary; width: 64px; vertical-alignment: center; }
+                VerticalLayout {
+                    alignment: center;
+                    NumberField {
+                        id: "cpanel." + c.offset.id;
+                        value: c.offset.value;
+                        unit: c.offset.unit;
+                        field-width: 96px;
+                        committed(i, t) => { return root.field-committed(i, t); }
+                    }
+                }
+                PillButton { label: c.flip ? "✓" : " "; primary: c.flip; width: 40px; clicked => { root.action("cpanel.constraint." + c.index + ".flip"); } }
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            IconButton { icon: "+"; clicked => { root.action("cpanel.add"); } }
+            IconButton { icon: "×"; destructive: true; enabled: root.selected-row >= 0; clicked => { root.action("cpanel.delete"); } }
+            Rectangle { }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.panel-border;
+                background: root.solve-all ? Theme.accent : transparent;
+                Text { text: root.solve-all ? "✓" : ""; color: white; }
+                TouchArea { clicked => { root.action("cpanel.solve_all"); } }
+            }
+            Text { text: "Solve All Constraints"; color: Theme.text; vertical-alignment: center; }
+            Rectangle { }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            PillButton { label: "Cancel"; hint: "Esc"; clicked => { root.action("cpanel.cancel"); } }
+            PillButton { label: "OK"; hint: "Enter"; primary: true; clicked => { root.action("cpanel.ok"); } }
+        }
+    }
+}
