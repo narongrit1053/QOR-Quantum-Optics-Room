@@ -1,6 +1,7 @@
 //! Connector compatibility, mate poses and hole snap (DESIGN.md §4.1, docs/M2-PLAN.md).
 
 pub mod constraints;
+pub mod joints;
 pub mod solver;
 
 use glam::{DAffine3, DMat3, DQuat, DVec2, DVec3};

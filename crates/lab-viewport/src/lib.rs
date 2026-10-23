@@ -184,6 +184,8 @@ pub enum Tool {
     Measure,
     /// M8. Clicks report [`ViewportEvent::FeaturePoint`] instead of selecting.
     Constrain,
+    /// M9. Joint tool (docs/M9-PLAN.md E gives it behaviour).
+    Joint,
 }
 
 /// What a library drag carries.

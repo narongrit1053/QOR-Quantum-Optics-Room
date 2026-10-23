@@ -96,7 +96,7 @@ pub(crate) fn handles(doc: &Document, catalog: &Catalog, node: &Node, tool: Tool
     }
     let mate = mate_frames(doc, catalog, node);
     match tool {
-        Tool::Measure | Tool::Constrain => Vec::new(),
+        Tool::Measure | Tool::Constrain | Tool::Joint => Vec::new(),
         // M9: in Select the part itself is the handle (left-drag moves it hole to hole).
         Tool::Select => vec![GizmoHandle::Plane],
         // A node on a node can also be dragged off sideways: that unmates it (POLA-104).

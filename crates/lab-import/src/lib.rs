@@ -5,6 +5,7 @@ pub mod features;
 pub mod fit;
 mod glb;
 mod lod;
+pub mod snaps;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

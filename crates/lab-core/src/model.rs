@@ -8,7 +8,7 @@ use crate::holes::{HoleGrid, LatticeIndex};
 use crate::limits::{LEG_MAX_SPAN, MAX_LEGS};
 use crate::migrate::{LoadError, LoadReport};
 use crate::outline::{Outline, OutlineError};
-use crate::part::{Feature, Params};
+use crate::part::{Feature, Frame, Params};
 use crate::room::Room;
 use crate::units::Mm;
 
@@ -398,6 +398,56 @@ pub enum Attach {
     Mate { self_conn: String, parent_conn: String, slide: Mm, twist: f64 },
     /// Feature-to-feature constraints to the parent (docs/M8-PLAN.md B); solved by `lab_mates::constraints`.
     Constrained { constraints: Vec<Constraint> },
+    /// Closed-form joint to the parent (docs/M9-PLAN.md C); posed by `lab_mates::joints`.
+    Joint(Joint),
+}
+
+/// A joint between a child origin frame and a parent origin frame (docs/M9-PLAN.md C).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Joint {
+    pub kind: JointKind,
+    /// Joint origin in the child's part frame (z = joint axis).
+    pub child: Frame,
+    /// In the parent's frame (part frame / platform frame).
+    pub parent: Frame,
+    /// mm, in the parent origin frame.
+    #[serde(default)]
+    pub offset: DVec3,
+    /// Radians, about the parent origin z.
+    #[serde(default)]
+    pub angle: f64,
+    /// Child z runs against parent z.
+    #[serde(default)]
+    pub flip: bool,
+    /// Current DOF values (mm / rad), order = `lab_mates::joints::dofs(kind)`.
+    #[serde(default)]
+    pub values: [f64; 3],
+    #[serde(default)]
+    pub limits: [Option<Limit>; 3],
+    /// Pose kept, motion and re-solve off.
+    #[serde(default)]
+    pub suppressed: bool,
+    /// Creation order (relationships bar).
+    #[serde(default)]
+    pub seq: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Limit {
+    pub min: f64,
+    pub max: f64,
+    pub rest: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JointKind {
+    Rigid,
+    Revolute,
+    Slider,
+    Cylindrical,
+    PinSlot,
+    Planar,
+    Ball,
 }
 
 /// One constraint between a child feature and a parent feature (docs/M8-PLAN.md B).
