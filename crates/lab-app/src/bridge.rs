@@ -104,7 +104,14 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 }
                 ViewportEvent::PartPoint { point, normal } => crate::wizard::on_part_point(&ui, point, normal),
                 ViewportEvent::FeaturePoint { target, point, normal } => {
-                    crate::constrain::on_feature_point(&ui, &app, &models, target, point, normal);
+                    if crate::joint::is_active() {
+                        crate::joint::on_feature_point(&ui, &app, &models, target, point, normal);
+                    } else {
+                        crate::constrain::on_feature_point(&ui, &app, &models, target, point, normal);
+                    }
+                }
+                ViewportEvent::FeatureHover { target, point, normal } => {
+                    crate::joint::on_feature_hover(&app, target, point, normal);
                 }
                 ViewportEvent::ThumbnailReady { ok, .. } => {
                     if ok {

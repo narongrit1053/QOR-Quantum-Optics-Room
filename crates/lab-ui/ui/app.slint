@@ -22,6 +22,7 @@ import { CommandPalette } from "palette.slint";
 import { ShortcutSheet } from "shortcuts.slint";
 import { ExportSheet } from "export.slint";
 import { ContextMenu } from "context_menu.slint";
+import { JointPanel } from "joint_panel.slint";
 
 export { Theme }
 export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
@@ -180,13 +181,19 @@ export component AppWindow inherits Window {
     in property <[EditField]> node-fields;
     in property <[SetRow]> set-rows;
     in property <[ConstraintRow]> constraint-rows;
+    // M9 E. Joint fields of the selected jointed node (inspector) or of the joint being placed
+    // (floating panel while `joint-editing`).
+    in property <string> joint-kind;
+    in property <bool> joint-flip;
+    in property <[EditField]> joint-fields;
+    in property <bool> joint-editing;
     in property <[EditField]> beam-fields;
     in property <string> beam-text;
     in property <bool> beam-laser;
     in property <bool> beam-on;
     // M6 `view.beams` (saved in Settings).
     in property <bool> show-beams: true;
-    // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure, 4 constrain.
+    // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure, 4 constrain, 5 joint.
     in-out property <int> tool;
     // Measure readout; empty hides the chip.
     in property <string> measure-text;
@@ -637,7 +644,15 @@ export component AppWindow inherits Window {
                         root.wizard-cancel();
                         return accept;
                     }
-                    if (event.text == Key.Escape && root.tool == 4) {
+                    if (event.text == Key.Escape && root.joint-editing) {
+                        root.action("joint.cancel");
+                        return accept;
+                    }
+                    if (event.text == Key.Return && root.joint-editing) {
+                        root.action("joint.ok");
+                        return accept;
+                    }
+                    if (event.text == Key.Escape && (root.tool == 4 || root.tool == 5)) {
                         root.action("tool.select");
                         return accept;
                     }
@@ -1050,6 +1065,9 @@ export component AppWindow inherits Window {
                     edit-fields: root.node-fields;
                     set-rows: root.set-rows;
                     constraint-rows: root.constraint-rows;
+                    joint-kind: root.joint-editing ? "" : root.joint-kind;
+                    joint-flip: root.joint-flip;
+                    joint-fields: root.joint-fields;
                     beam-fields: root.beam-fields;
                     beam-text: root.beam-text;
                     beam-laser: root.beam-laser;
@@ -1175,6 +1193,18 @@ export component AppWindow inherits Window {
             hover(x, y) => { root.view-cube-hover(x, y); }
             clicked(x, y) => { root.view-cube-clicked(x, y); }
             home => { root.view-cube-home(); }
+        }
+
+        // M9 E. The joint being placed: left of the inspector, below the view cube.
+        if root.joint-editing: JointPanel {
+            x: (root.wizard-open ? wizard-panel.x : inspector-panel.shown ? inspector-panel.x : root.width) - self.width - Theme.inset;
+            y: Theme.inset + 200px;
+            kind: root.joint-kind;
+            flip: root.joint-flip;
+            fields: root.joint-fields;
+            action(id) => { root.action(id); }
+            field-committed(id, text) => { return root.field-committed(id, text); }
+            field-edited(id, text) => { root.field-edited(id, text); }
         }
 
         // ── View switcher and units (top centre) ─────────────────────────────

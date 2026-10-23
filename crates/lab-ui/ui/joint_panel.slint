@@ -1,0 +1,104 @@
+// M9 E. Joint fields: type, offset, angle, flip, per-DOF value and limits. Used twice: as the
+// floating panel while a new joint is being placed (`editing`: OK/Cancel) and as the node
+// inspector's Joint section (Delete).
+
+import { Theme } from "theme.slint";
+import { EditField } from "types.slint";
+import { PillButton } from "components.slint";
+import { LabeledField } from "fields.slint";
+
+export component JointFields inherits VerticalLayout {
+    in property <string> kind;
+    in property <bool> flip;
+    in property <bool> editing;
+    in property <[EditField]> fields;
+    callback action(string /* id */);
+    callback field-committed(string /* id */, string /* text */) -> bool;
+    callback field-edited(string /* id */, string /* text */);
+
+    spacing: 2px;
+    HorizontalLayout {
+        padding-left: 9px;
+        spacing: 6px;
+        Text {
+            text: "Joint";
+            color: Theme.text;
+            font-weight: 650;
+            vertical-alignment: center;
+        }
+        // Cycles through the seven kinds.
+        PillButton {
+            label: root.kind;
+            clicked => { root.action("joint.kind"); }
+        }
+        PillButton {
+            label: root.flip ? "Flipped" : "Flip";
+            primary: root.flip;
+            clicked => { root.action("joint.flip"); }
+        }
+        Rectangle { }
+        if !root.editing: PillButton {
+            label: "Delete";
+            destructive: true;
+            clicked => { root.action("joint.delete"); }
+        }
+    }
+    for f in root.fields: LabeledField {
+        label: f.label;
+        id: f.id;
+        value: f.value;
+        unit: f.unit;
+        enabled: f.enabled;
+        invalid: f.invalid;
+        committed(i, t) => { return root.field-committed(i, t); }
+        edited(i, t) => { root.field-edited(i, t); }
+    }
+    if root.editing: HorizontalLayout {
+        padding-top: 6px;
+        spacing: 6px;
+        alignment: end;
+        PillButton {
+            label: "Cancel";
+            hint: "Esc";
+            clicked => { root.action("joint.cancel"); }
+        }
+        PillButton {
+            label: "OK";
+            hint: "Enter";
+            primary: true;
+            clicked => { root.action("joint.ok"); }
+        }
+    }
+}
+
+export component JointPanel inherits Rectangle {
+    in property <string> kind;
+    in property <bool> flip;
+    in property <[EditField]> fields;
+    callback action(string /* id */);
+    callback field-committed(string /* id */, string /* text */) -> bool;
+    callback field-edited(string /* id */, string /* text */);
+
+    width: 300px;
+    height: body.preferred-height;
+    background: Theme.sheet-bg;
+    border-radius: 10px;
+    border-width: Theme.border-width;
+    border-color: Theme.panel-border;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: Theme.shadow;
+    // Clicks on the panel do not reach the viewport below.
+    TouchArea { }
+
+    body := JointFields {
+        padding: 10px;
+        kind: root.kind;
+        flip: root.flip;
+        editing: true;
+        fields: root.fields;
+        action(id) => { root.action(id); }
+        field-committed(id, text) => { return root.field-committed(id, text); }
+        field-edited(id, text) => { root.field-edited(id, text); }
+    }
+}

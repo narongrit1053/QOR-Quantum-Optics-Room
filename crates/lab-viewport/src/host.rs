@@ -408,6 +408,7 @@ fn run_on_demand(
                 ViewportRequest::SetHidden(ids) => pending.push(FrameRequest::SetHidden(ids)),
                 ViewportRequest::IsolateNodes(ids) => pending.push(FrameRequest::IsolateNodes(ids)),
                 ViewportRequest::HighlightNodes(ids) => pending.push(FrameRequest::HighlightNodes(ids)),
+                ViewportRequest::HighlightSnap(h) => pending.push(FrameRequest::HighlightSnap(h)),
                 ViewportRequest::RenderThumbnail { part, path } => {
                     pending.push(FrameRequest::RenderThumbnail(part, path))
                 }

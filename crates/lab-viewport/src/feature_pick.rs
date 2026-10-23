@@ -7,20 +7,21 @@ use bevy::{
     picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
     prelude::*,
 };
-use lab_core::part::Feature;
+use lab_core::part::{Feature, Frame};
 use lab_core::{Document, SelectionTarget};
 
-use crate::camera::{Clicks, OrbitCamera, camera_at, handle_input};
+use crate::camera::{Clicks, OrbitCamera, PointerState, camera_at, handle_input};
 use crate::gizmo::OnTop;
 use crate::host::{EventSender, PendingRequests, ViewportSize};
 use crate::picking::{ACCENT, PickId, pick};
 use crate::scene::{SceneIndex, from_render, to_render};
-use crate::{FrameRequest, Tool, ViewportEvent};
+use crate::{FrameRequest, SnapGlyph, Tool, ViewportEvent, ViewportInput};
 
 #[derive(Resource, Default)]
 struct FeaturePick {
     active: bool,
     highlight: Option<(SelectionTarget, Feature)>,
+    snap: Option<(SelectionTarget, Frame, SnapGlyph)>,
 }
 
 pub(crate) struct FeaturePickPlugin;
@@ -49,6 +50,7 @@ fn target_pose(doc: &Document, target: SelectionTarget) -> Option<(DVec3, DQuat)
 #[allow(clippy::too_many_arguments)]
 fn feature_input(
     pending: Res<PendingRequests>,
+    pointer: Res<PointerState>,
     mut clicks: ResMut<Clicks>,
     cameras: Query<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     targets: Query<&PickId>,
@@ -59,10 +61,12 @@ fn feature_input(
     for request in &pending.0 {
         match request {
             FrameRequest::SetTool(tool) => {
-                state.active = *tool == Tool::Constrain;
+                state.active = matches!(tool, Tool::Constrain | Tool::Joint);
                 state.highlight = None;
+                state.snap = None;
             }
             FrameRequest::HighlightFeature(h) => state.highlight = h.clone(),
+            FrameRequest::HighlightSnap(h) => state.snap = *h,
             _ => {}
         }
     }
@@ -70,24 +74,33 @@ fn feature_input(
         return;
     }
     let Some(doc) = &index.snapshot else { return };
-    // Clicks pick features instead of selecting.
-    for click in std::mem::take(&mut clicks.0) {
-        let Some(((), camera, transform, p)) = camera_at(cameras.iter().map(|(c, t)| ((), c, t)), &full, click) else {
-            continue;
-        };
-        let Ok(ray) = camera.viewport_to_world(transform, p) else { continue };
+    // Hit target, point and normal in the target's frame.
+    let mut hit_at = |pos: Vec2| -> Option<(SelectionTarget, DVec3, DVec3)> {
+        let ((), camera, transform, p) = camera_at(cameras.iter().map(|(c, t)| ((), c, t)), &full, pos)?;
+        let ray = camera.viewport_to_world(transform, p).ok()?;
         let filter = |e: Entity| targets.contains(e);
         let settings = MeshRayCastSettings::default().with_filter(&filter);
-        let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first() else { continue };
-        let Ok(PickId(target)) = targets.get(*entity) else { continue };
-        let Some((origin, rotation)) = target_pose(doc, *target) else { continue };
+        let (entity, hit) = ray_cast.cast_ray(ray, &settings).first()?;
+        let PickId(target) = targets.get(*entity).ok()?;
+        let (origin, rotation) = target_pose(doc, *target)?;
         let inv = rotation.inverse();
         let n = hit.normal;
-        events.send(ViewportEvent::FeaturePoint {
-            target: *target,
-            point: inv * (from_render(hit.point) - origin),
-            normal: (inv * DVec3::new(n.x as f64, -n.z as f64, n.y as f64)).normalize_or_zero(),
-        });
+        Some((*target, inv * (from_render(hit.point) - origin), (inv * DVec3::new(n.x as f64, -n.z as f64, n.y as f64)).normalize_or_zero()))
+    };
+    // Clicks pick features instead of selecting.
+    for click in std::mem::take(&mut clicks.0) {
+        if let Some((target, point, normal)) = hit_at(click) {
+            events.send(ViewportEvent::FeaturePoint { target, point, normal });
+        }
+    }
+    // M9 E: hover reports the feature under the pointer, once per frame at most.
+    let moved = pending.0.iter().any(|r| matches!(r, FrameRequest::Input(ViewportInput::PointerMove { .. })));
+    if moved
+        && !pointer.is_dragging()
+        && let Some(pos) = pointer.position
+        && let Some((target, point, normal)) = hit_at(pos)
+    {
+        events.send(ViewportEvent::FeatureHover { target, point, normal });
     }
 }
 
@@ -101,7 +114,28 @@ fn draw_highlight(
     if capturing.0 || !state.active {
         return;
     }
-    let (Some((target, feature)), Some(doc)) = (&state.highlight, &index.snapshot) else { return };
+    let Some(doc) = &index.snapshot else { return };
+    // M9 E snap glyph: circle (edge centre, r 3 mm), dot (vertex, mid-edge), square (face centre).
+    if let Some((target, f, glyph)) = &state.snap
+        && let Some((o, q)) = target_pose(doc, *target)
+    {
+        let w = |p: DVec3| to_render(o + q * p);
+        let z = f.z.normalize_or(DVec3::Z);
+        let u = (f.x - z * f.x.dot(z)).normalize_or(z.any_orthonormal_vector());
+        let v = z.cross(u);
+        let ring = |r: f64| (0..=24).map(move |i| {
+            let a = i as f64 * std::f64::consts::TAU / 24.0;
+            f.origin + (u * a.cos() + v * a.sin()) * r
+        });
+        let points: Vec<DVec3> = match glyph {
+            SnapGlyph::Circle => ring(3.0).collect(),
+            SnapGlyph::Dot => ring(0.8).collect(),
+            SnapGlyph::Square => [u + v, -u + v, -u - v, u - v, u + v].map(|d| f.origin + d * 2.5).to_vec(),
+        };
+        gizmos.linestrip(points.into_iter().map(w), ACCENT);
+        gizmos.line(w(f.origin), w(f.origin + z * 6.0), ACCENT);
+    }
+    let Some((target, feature)) = &state.highlight else { return };
     let Some((o, q)) = target_pose(doc, *target) else { return };
     let w = |p: DVec3| to_render(o + q * p);
     match feature {
