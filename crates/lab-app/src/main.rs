@@ -12,6 +12,7 @@ mod controller;
 mod dialogs;
 mod embed;
 mod export_png;
+mod file_drop;
 mod files;
 mod import;
 mod library;
@@ -98,6 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     library::connect(&ui, &app, &models);
     stack::connect(&ui, &app);
     scene::connect(&ui, &app, &models);
+    file_drop::connect(&ui, &app, &models);
     controller::refresh_all(&ui, &app.borrow(), &models);
     files::show_recent(&ui, &app.borrow().settings);
     library::fill(&app.borrow(), &models);

@@ -34,7 +34,7 @@ lab-optics = { path = "crates/lab-optics" }
 
 # Slint and Bevy must share one wgpu major version (Slint's `unstable-wgpu-30` <-> Bevy 0.20).
 # Upgrade them together; see docs/DESIGN.md §9.
-slint = { version = "=1.18.1", features = ["renderer-skia", "unstable-wgpu-30", "raw-window-handle-06"] }
+slint = { version = "=1.18.1", features = ["renderer-skia", "unstable-wgpu-30", "raw-window-handle-06", "unstable-winit-030"] }
 slint-build = "=1.18.1"
 bevy = { version = "=0.20.0", default-features = false, features = [
     "std",
