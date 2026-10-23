@@ -172,6 +172,13 @@ pub enum ViewportRequest {
     /// M8 constrain tool. Outline this feature (in the target's frame: part frame for a node,
     /// platform frame for a platform) while the tool is active. `None` clears.
     HighlightFeature(Option<(SelectionTarget, lab_core::part::Feature)>),
+    /// M9 D. These nodes and their descendants are not drawn or picked (replaces the last set).
+    SetHidden(Vec<lab_core::NodeId>),
+    /// M9 D. Show only these nodes (+descendants, + their root platform); hide room, walls and
+    /// fixtures like `Isolate`. `None` releases.
+    IsolateNodes(Option<Vec<lab_core::NodeId>>),
+    /// M9 G. Hover outline on these nodes (empty clears).
+    HighlightNodes(Vec<lab_core::NodeId>),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -271,6 +278,8 @@ pub enum ViewportEvent {
     /// M8. A click with the constrain tool: hit point and surface normal in the target's frame
     /// (part frame for a node, platform frame for a platform), mm, +Z up.
     FeaturePoint { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
+    /// M9 D. A right click without drag (the target is selected first); `pos` in physical px.
+    ContextMenu { target: Option<SelectionTarget>, pos: Vec2 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -318,6 +327,9 @@ pub(crate) enum FrameRequest {
     SetBeams(bool),
     ViewDirection(f32, f32),
     HighlightFeature(Option<(SelectionTarget, lab_core::part::Feature)>),
+    SetHidden(Vec<lab_core::NodeId>),
+    IsolateNodes(Option<Vec<lab_core::NodeId>>),
+    HighlightNodes(Vec<lab_core::NodeId>),
 }
 
 /// The catalog from [`ViewportRequest::SetCatalog`] (empty until the app sends one).

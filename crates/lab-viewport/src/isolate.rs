@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use bevy::{camera::visibility::VisibilitySystems, prelude::*};
-use lab_core::{Document, PlatformId, Support};
+use lab_core::{Document, NodeId, PlatformId, Support};
 
 use crate::host::{EventSender, PendingRequests};
 use crate::scene::SceneIndex;
@@ -13,11 +13,24 @@ use crate::{FrameRequest, ViewportEvent};
 #[derive(Resource, Default)]
 pub(crate) struct Isolated(pub Option<PlatformId>);
 
+/// M9 D. Hidden nodes and the isolated selection, as sent (descendants are added when applied).
+#[derive(Resource, Default)]
+pub(crate) struct NodeView {
+    hidden: Vec<NodeId>,
+    isolated: Option<Vec<NodeId>>,
+}
+
+/// `ids` and all their descendants.
+fn with_descendants(doc: &Document, ids: &[NodeId]) -> BTreeSet<NodeId> {
+    ids.iter().flat_map(|&id| doc.descendants(id).into_iter().chain([id])).collect()
+}
+
 pub(crate) struct IsolatePlugin;
 
 impl Plugin for IsolatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Isolated>()
+            .init_resource::<NodeView>()
             .add_systems(PostUpdate, apply_isolation.before(VisibilitySystems::VisibilityPropagate));
     }
 }
@@ -45,6 +58,7 @@ pub(crate) fn apply_isolation(
     index: Res<SceneIndex>,
     events: Res<EventSender>,
     mut isolated: ResMut<Isolated>,
+    mut view: ResMut<NodeView>,
     mut visibility: Query<&mut Visibility>,
 ) {
     let exists = |id: PlatformId| index.snapshot.as_ref().is_some_and(|doc| doc.platform(id).is_some());
@@ -59,6 +73,14 @@ pub(crate) fn apply_isolation(
                 isolated.0 = id;
                 dirty = true;
             }
+            FrameRequest::SetHidden(ids) => {
+                view.hidden = ids.clone();
+                dirty = true;
+            }
+            FrameRequest::IsolateNodes(ids) => {
+                view.isolated = ids.clone();
+                dirty = true;
+            }
             FrameRequest::LoadDocument(_) | FrameRequest::ApplyChanges(..) => dirty = true,
             _ => {}
         }
@@ -70,11 +92,17 @@ pub(crate) fn apply_isolation(
         events.send(ViewportEvent::IsolationChanged(None));
     }
     // While isolated, re-apply every frame: the wall fade writes wall visibility on its own.
-    if !dirty && isolated.0.is_none() {
+    if !dirty && isolated.0.is_none() && view.isolated.is_none() {
         return;
     }
-    let (Some(doc), kept) = (index.snapshot.as_ref(), isolated.0) else { return };
-    let kept = kept.map(|root| kept_platforms(doc, root));
+    let Some(doc) = index.snapshot.as_ref() else { return };
+    let hidden = with_descendants(doc, &view.hidden);
+    let only = view.isolated.as_ref().map(|ids| with_descendants(doc, ids));
+    // Isolating nodes keeps their root platforms (not the platforms stacked on them).
+    let kept = match &only {
+        Some(only) => Some(only.iter().filter_map(|&id| doc.root_platform(id)).collect()),
+        None => isolated.0.map(|root| kept_platforms(doc, root)),
+    };
     let show = |platform: Option<PlatformId>| match (&kept, platform) {
         (None, _) => true,
         (Some(kept), Some(p)) => kept.contains(&p),
@@ -99,6 +127,7 @@ pub(crate) fn apply_isolation(
         set(platform.root, show(Some(id)));
     }
     for (&id, &entity) in &index.nodes {
-        set(entity, show(doc.root_platform(id)));
+        let visible = show(doc.root_platform(id)) && !hidden.contains(&id) && only.as_ref().is_none_or(|o| o.contains(&id));
+        set(entity, visible);
     }
 }

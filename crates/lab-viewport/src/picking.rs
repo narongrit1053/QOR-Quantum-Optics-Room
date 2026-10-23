@@ -9,7 +9,7 @@ use bevy::{
 };
 use lab_core::SelectionTarget;
 
-use crate::camera::{Clicks, OrbitCamera, PointerState, camera_at, handle_input};
+use crate::camera::{Clicks, OrbitCamera, RightClicks, PointerState, camera_at, handle_input};
 use crate::hole_material::HoleTopMaterial;
 use crate::host::{EventSender, PendingRequests, ViewportSize};
 use crate::room::WallState;
@@ -55,6 +55,7 @@ pub(crate) fn pick(
     pending: Res<PendingRequests>,
     pointer: Res<PointerState>,
     clicks: Res<Clicks>,
+    right_clicks: Res<RightClicks>,
     cameras: Query<(&Camera, &GlobalTransform), With<OrbitCamera>>,
     targets: Query<(&PickId, Option<&WallState>)>,
     mut ray_cast: MeshRayCast,
@@ -81,6 +82,11 @@ pub(crate) fn pick(
     for &click in &clicks.0 {
         selected = target_at(click);
     }
+    let mut menu = None;
+    for &click in &right_clicks.0 {
+        selected = target_at(click);
+        menu = Some(click);
+    }
 
     // Hover follows the pointer (nodes only), but not while dragging the camera.
     let pointer_moved = pending.0.iter().any(|r| {
@@ -97,6 +103,9 @@ pub(crate) fn pick(
     if selected != selection.selected {
         selection.selected = selected;
         events.send(ViewportEvent::SelectionChanged(selected));
+    }
+    if let Some(pos) = menu {
+        events.send(ViewportEvent::ContextMenu { target: selected, pos });
     }
     if hovered != selection.hovered {
         selection.hovered = hovered;

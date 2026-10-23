@@ -142,6 +142,7 @@ pub fn refresh_all(ui: &AppWindow, app: &AppState, models: &UiModels) {
 /// The isolate banner's platform name.
 pub fn refresh_isolated(ui: &AppWindow, app: &AppState) {
     let name = app.isolated.and_then(|id| app.session.doc.platform(id)).map(|p| p.name.clone());
+    let name = name.or(app.isolated_nodes.then(|| "Selection".to_string()));
     ui.set_isolated_name(name.unwrap_or_default().into());
 }
 
@@ -239,6 +240,11 @@ pub fn replace_document(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc
     ui.set_inspector_error("".into());
     ui.set_paste_target("".into());
     refresh(ui, app, models);
+}
+
+/// M9 D. The tool step hint at the bottom centre of the viewport; empty hides it.
+pub fn set_hint(ui: &AppWindow, text: &str) {
+    ui.set_tool_hint(text.into());
 }
 
 /// Shows a single-shot toast: 2.4 s, or 5 s with an Undo button. The caller sets
@@ -394,7 +400,50 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 eprintln!("settings not saved: {error}");
             }
         }
-        "view.show_all" => app.borrow().send(ViewportRequest::Isolate(None)),
+        "view.show_all" => {
+            let mut a = app.borrow_mut();
+            a.hidden.clear();
+            a.isolated_nodes = false;
+            a.send(ViewportRequest::SetHidden(Vec::new()));
+            a.send(ViewportRequest::IsolateNodes(None));
+            a.send(ViewportRequest::Isolate(None));
+        }
+        "view.hide" => {
+            let mut a = app.borrow_mut();
+            match a.session.selection {
+                Some(SelectionTarget::Node(n)) => {
+                    if !a.hidden.remove(&n) {
+                        a.hidden.insert(n);
+                    }
+                }
+                _ => a.hidden.clear(),
+            }
+            let ids = a.hidden.iter().copied().collect();
+            a.send(ViewportRequest::SetHidden(ids));
+        }
+        "view.isolate_selection" => {
+            let Some(SelectionTarget::Node(n)) = app.borrow().session.selection else { return };
+            {
+                let mut a = app.borrow_mut();
+                a.isolated_nodes = true;
+                a.send(ViewportRequest::IsolateNodes(Some(vec![n])));
+            }
+            refresh_isolated(ui, &app.borrow());
+        }
+        "view.walls" => {
+            let mut a = app.borrow_mut();
+            a.walls_hidden = !a.walls_hidden;
+            let display = if a.walls_hidden { WallDisplay::Hidden } else { a.settings.wall_display };
+            a.send(ViewportRequest::SetWallDisplay(display));
+        }
+        "view.context_menu" => {
+            let (target, (w, h)) = {
+                let a = app.borrow();
+                (a.session.selection, a.viewport_size)
+            };
+            // shortcut: opens at the viewport centre, not the node's projected origin; needs a projection query to the viewport.
+            crate::context_menu::open(ui, target, lab_viewport::Vec2::new(w as f32 / 2.0, h as f32 / 2.0));
+        }
         "view.top" | "view.3d" => {
             let top = id == "view.top";
             ui.set_view_mode(i32::from(top));
@@ -451,6 +500,9 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             };
             ui.set_tool(index);
             crate::constrain::reset(ui, tool == Tool::Constrain);
+            if tool == Tool::Measure {
+                set_hint(ui, "Click the first point");
+            }
             app.borrow().send(ViewportRequest::SetTool(tool));
         }
         "edit.copy" | "edit.cut" | "edit.paste" | "edit.duplicate" => {
@@ -480,8 +532,9 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 execute(ui, app, models, id, command, label.into(), roots.first().map(|r| SelectionTarget::Node(*r)), Vec::new());
             }
         }
-        _ if id.starts_with("nudge.") || id == "tool.rotate_left" || id == "tool.rotate_right" => {
+        _ if id.starts_with("nudge.") || id == "tool.rotate_left" || id == "tool.rotate_right" || id == "edit.rotate_90" => {
             let how = match id {
+                "edit.rotate_90" => crate::nudge::Nudge::Turn { degrees: 90.0 },
                 "tool.rotate_left" => crate::nudge::Nudge::Turn { degrees: -15.0 },
                 "tool.rotate_right" => crate::nudge::Nudge::Turn { degrees: 15.0 },
                 _ => {
@@ -726,8 +779,12 @@ fn undo_redo(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
                 }
             }
             refresh(ui, app, models);
-            let verb = if redo { "Redo" } else { "Undo" };
-            let text = label.map_or(verb.to_string(), |l| format!("{verb} {l}"));
+            let text = match (redo, label) {
+                (false, Some(l)) => format!("Undid: {l}"),
+                (true, Some(l)) => format!("Redid: {l}"),
+                (false, None) => "Undid".into(),
+                (true, None) => "Redid".into(),
+            };
             show_toast(ui, &app.borrow(), &text, false);
             files::arm_autosave(app);
         }

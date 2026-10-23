@@ -186,12 +186,17 @@ impl PointerState {
 #[derive(Resource, Default)]
 pub(crate) struct Clicks(pub Vec<Vec2>);
 
+/// M9. Right clicks (no drag) this frame, consumed by picking for the context menu.
+#[derive(Resource, Default)]
+pub(crate) struct RightClicks(pub Vec<Vec2>);
+
 pub(crate) struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PointerState>()
             .init_resource::<Clicks>()
+            .init_resource::<RightClicks>()
             .add_systems(Startup, spawn_camera)
             .add_systems(Update, (layout_panes, handle_input, animate_camera, report_orient, top_shadows).chain())
             .add_systems(PostUpdate, tag_shadow_casters.before(bevy::camera::visibility::VisibilitySystems::CheckVisibility));
@@ -316,6 +321,7 @@ pub(crate) fn handle_input(
     full: Res<ViewportSize>,
     mut pointer: ResMut<PointerState>,
     mut clicks: ResMut<Clicks>,
+    mut right_clicks: ResMut<RightClicks>,
     mut capture: ResMut<GizmoCapture>,
     mut cameras: Query<CameraItem>,
     sources: FrameSources,
@@ -323,6 +329,7 @@ pub(crate) fn handle_input(
     picks: Query<(), With<PickId>>,
 ) {
     clicks.0.clear();
+    right_clicks.0.clear();
     let Some(main) = cameras.iter().find(|c| !c.4).map(|c| c.0) else { return };
     let pane_at = |cameras: &Query<CameraItem>, pos: Vec2| {
         camera_at(cameras.iter().map(|(e, _, c, t, _)| (e, c, t)), &full, pos).map_or(main, |hit| hit.0)
@@ -369,6 +376,8 @@ pub(crate) fn handle_input(
                         && !press.dragging
                     {
                         clicks.0.push(pos);
+                    } else if press.is_some_and(|p| p.button == button && button == PointerButton::Right && !p.dragging) {
+                        right_clicks.0.push(pos);
                     }
                     // M9: a right release without drag opens the context menu (POLA-130 adds it here).
                 }
@@ -434,7 +443,7 @@ pub(crate) fn handle_input(
             }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
-            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) | FrameRequest::RenderThumbnail(..) | FrameRequest::ExportImage(..) | FrameRequest::SetBeams(_) | FrameRequest::HighlightFeature(_) => {}
+            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) | FrameRequest::RenderThumbnail(..) | FrameRequest::ExportImage(..) | FrameRequest::SetBeams(_) | FrameRequest::HighlightFeature(_) | FrameRequest::SetHidden(_) | FrameRequest::IsolateNodes(_) | FrameRequest::HighlightNodes(_) => {}
         }
     }
 }
