@@ -4,7 +4,7 @@
 //! planes so silhouettes and hole rims survive.
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 
 use glam::{DVec2, DVec3};
 use lab_geom::TriMesh;
@@ -116,7 +116,8 @@ fn collapse(pos: &[DVec3], tris: &mut Vec<[u32; 3]>, target: usize) {
     };
     let mut faces: Vec<Vec<u32>> = vec![Vec::new(); n];
     let mut q = vec![[0.0; 10]; n];
-    let mut edges: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
+    // Ordered: iteration order feeds float sums and heap ties, so it must not vary per run.
+    let mut edges: BTreeMap<(u32, u32), Vec<u32>> = BTreeMap::new();
     for (f, t) in tris.iter().enumerate() {
         let c = cross(t);
         let pq = plane_quadric(c.normalize_or_zero(), pos[t[0] as usize], 0.5 * c.length());
