@@ -449,6 +449,11 @@ export component ProjectMenu inherits PopupWindow {
                 enabled: !root.busy;
                 clicked => { root.action("file.export_png"); }
             }
+            MenuRow {
+                label: "Settings…";
+                shortcut: "Ctrl+,";
+                clicked => { root.action("app.settings"); }
+            }
         }
     }
 }

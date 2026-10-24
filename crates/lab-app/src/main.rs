@@ -29,6 +29,7 @@ mod transform;
 mod stack;
 mod thumbs;
 mod scene;
+mod settings_ui;
 mod ui_models;
 mod view_cube;
 mod wizard;
@@ -37,7 +38,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-use lab_file::{AutosaveSession, IoWorker, default_root, find_recoverable, load_settings};
+use lab_file::{AutosaveSession, GpuChoice, IoWorker, MsaaChoice, RenderQuality, default_root, find_recoverable, load_settings};
 use lab_ui::AppWindow;
 use lab_viewport::{Quality, ViewportRequest, wgpu};
 use slint::ComponentHandle;
@@ -47,6 +48,8 @@ use crate::bridge::trace;
 use crate::ui_models::UiModels;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Settings first: the GPU choice decides which device the UI creates.
+    let settings = load_settings();
     // The UI and the viewport share one wgpu device, so frames are composited without copies.
     let mut wgpu_settings = slint::wgpu_30::WGPUSettings::default();
     wgpu_settings.device_required_limits =
@@ -59,16 +62,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // Prefer a discrete GPU (for example the NVIDIA one of a hybrid laptop); wgpu falls back
     // to the integrated GPU, then to a software adapter, when there is none.
-    // `WGPU_POWER_PREF=low|none` still overrides this, `WGPU_ADAPTER_NAME` picks one by name.
-    wgpu_settings.power_preference =
-        wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance);
+    // `WGPU_POWER_PREF=low|none` still overrides this, `WGPU_ADAPTER_NAME` picks one by name;
+    // both win over the Settings window's GPU choice.
+    wgpu_settings.power_preference = wgpu::PowerPreference::from_env().unwrap_or(match settings.gpu {
+        GpuChoice::PowerSaving => wgpu::PowerPreference::LowPower,
+        _ => wgpu::PowerPreference::HighPerformance,
+    });
+    if let GpuChoice::Named(name) = &settings.gpu
+        && std::env::var_os("WGPU_ADAPTER_NAME").is_none()
+    {
+        // SAFETY: no other thread exists yet; Slint reads the variable when it picks the adapter.
+        unsafe { std::env::set_var("WGPU_ADAPTER_NAME", name) };
+    }
     slint::BackendSelector::new()
         .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::Automatic(wgpu_settings))
         .select()?;
 
-    // Startup (§7.6): settings, the initial document, this run's autosave directory, crash
-    // candidates of other runs, the I/O worker.
-    let settings = load_settings();
+    // Startup (§7.6): the initial document, this run's autosave directory, crash candidates of
+    // other runs, the I/O worker.
     let args: Vec<String> = std::env::args().collect();
     let has_recovery = !find_recoverable(&default_root(), None).is_empty();
     let (session, open_error, show_start) = files::initial_session(&args, &settings, has_recovery);
@@ -142,19 +153,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(windows)]
                 style_title_bar(ui.window(), ui.global::<lab_ui::Theme>().get_mode());
                 let snapshot = a.borrow().session.doc.clone();
-                // Automatic unless overridden (until there is a preferences UI).
+                // `LABSETUP_QUALITY` wins over the Settings window.
+                let settings = a.borrow().settings.clone();
                 let quality = match std::env::var("LABSETUP_QUALITY").as_deref() {
                     Ok("low") => Some(Quality::Low),
                     Ok("balanced") => Some(Quality::Balanced),
                     Ok("high") => Some(Quality::High),
-                    _ => None,
+                    _ => match settings.render_quality {
+                        RenderQuality::Auto => None,
+                        RenderQuality::High => Some(Quality::High),
+                        RenderQuality::Balanced => Some(Quality::Balanced),
+                        RenderQuality::Low => Some(Quality::Low),
+                    },
                 };
+                let msaa = match settings.msaa {
+                    MsaaChoice::Auto => None,
+                    MsaaChoice::Off => Some(1),
+                    MsaaChoice::X2 => Some(2),
+                    MsaaChoice::X4 => Some(4),
+                    MsaaChoice::X8 => Some(8),
+                };
+                let options = lab_viewport::GraphicsOptions { quality, msaa, shadows: settings.shadows };
+                a.borrow_mut().adapters = lab_viewport::adapters(instance, wgpu::Backends::DX12);
                 let handle = lab_viewport::start(
                     instance.clone(),
                     device.clone(),
                     queue.clone(),
                     snapshot,
-                    quality,
+                    options,
                     bridge::wake_ui,
                 );
                 a.borrow_mut().requests = Some(handle.requests.clone());

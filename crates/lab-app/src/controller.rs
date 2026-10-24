@@ -54,6 +54,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
 
     crate::import::connect(ui, app, models);
     crate::palette::connect(ui, app, models);
+    crate::settings_ui::connect(ui, app);
 
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
     ui.on_paste_corners(move |target, text| {
@@ -502,6 +503,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             app.borrow().send(ViewportRequest::SetViewMode(ViewMode::Split));
         }
         "palette.open" => ui.set_palette_open(true),
+        "app.settings" => crate::settings_ui::open(ui, &app.borrow()),
         "help.shortcuts" => {
             let rows = crate::actions::ACTIONS
                 .iter()

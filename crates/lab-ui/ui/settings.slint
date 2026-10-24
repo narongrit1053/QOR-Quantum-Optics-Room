@@ -1,0 +1,142 @@
+// Settings sheet (POLA-155, Ctrl+,): render quality, anti-aliasing, shadows and GPU.
+// Choices are saved on Apply and take effect at the next start.
+
+import { Theme } from "theme.slint";
+import { PillButton, SegmentedControl, ListRow } from "components.slint";
+
+component Label inherits Text {
+    color: Theme.text-secondary;
+    font-size: Theme.font-caption;
+}
+
+export component SettingsSheet inherits Rectangle {
+    in property <bool> open;
+    // Saved choices, loaded into the sheet each time it opens.
+    in property <int> quality;   // 0 Auto, 1 High, 2 Balanced, 3 Low
+    in property <int> msaa;      // 0 Auto, 1 Off, 2 2×, 3 4×, 4 8×
+    in property <int> shadows;   // 0 Auto, 1 On, 2 Off
+    in property <int> gpu;       // 0 Auto, 1 High performance, 2 Power saving, 3+ adapters
+    in property <[string]> gpus;
+    // "<adapter> · <backend> · …" from the viewport's Ready event.
+    in property <string> in-use;
+    callback apply(int, int, int, int);
+    callback cancel();
+
+    property <int> q;
+    property <int> m;
+    property <int> s;
+    property <int> g;
+    property <bool> changed-any: q != quality || m != msaa || s != shadows || g != gpu;
+
+    background: root.open ? Theme.scrim : transparent;
+    animate background { duration: 200ms; easing: ease-out; }
+
+    changed open => {
+        if (root.open) {
+            q = quality;
+            m = msaa;
+            s = shadows;
+            g = gpu;
+            keys.focus();
+        }
+    }
+
+    TouchArea {
+        enabled: root.open;
+        scroll-event(event) => { accept }
+    }
+
+    keys := FocusScope {
+        focus-on-click: false;
+        capture-key-pressed(event) => {
+            if (!root.open) {
+                return reject;
+            }
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.apply(q, m, s, g);
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            width: 440px;
+            height: layout.preferred-height;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2 - 40px;
+            visible: root.open;
+            background: Theme.sheet-bg;
+            border-radius: Theme.radius-panel;
+            border-width: 1px;
+            border-color: Theme.panel-border;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 16px;
+            drop-shadow-color: Theme.shadow-strong;
+
+            TouchArea { }
+
+            layout := VerticalLayout {
+                padding: 20px;
+                spacing: 8px;
+                Text { text: "Settings"; color: Theme.text; font-size: Theme.font-title; font-weight: 650; }
+                Text { text: "Graphics"; color: Theme.text; font-size: Theme.font-body; font-weight: 700; }
+                Label { text: "Render quality"; }
+                SegmentedControl {
+                    items: ["Auto", "High", "Balanced", "Low"];
+                    current: q;
+                    floating: false;
+                    enabled: root.open;
+                    selected(i) => { q = i; }
+                }
+                Label { text: "Anti-aliasing"; }
+                SegmentedControl {
+                    items: ["Auto", "Off", "2×", "4×", "8×"];
+                    current: m;
+                    floating: false;
+                    enabled: root.open;
+                    selected(i) => { m = i; }
+                }
+                Label { text: "Shadows"; }
+                SegmentedControl {
+                    items: ["Auto", "On", "Off"];
+                    current: s;
+                    floating: false;
+                    enabled: root.open;
+                    selected(i) => { s = i; }
+                }
+                Text { text: "GPU"; color: Theme.text; font-size: Theme.font-body; font-weight: 700; }
+                for name[i] in root.gpus: ListRow {
+                    label: name;
+                    selected: i == g;
+                    clicked => { g = i; }
+                }
+                Label { text: "In use: " + (root.in-use == "" ? "starting…" : root.in-use); wrap: word-wrap; }
+                if root.changed-any: Text {
+                    text: "Restart LabSetup to apply graphics changes.";
+                    color: Theme.warning;
+                    font-size: Theme.font-caption;
+                }
+                HorizontalLayout {
+                    padding-top: 4px;
+                    spacing: 8px;
+                    alignment: end;
+                    PillButton {
+                        label: "Cancel";
+                        enabled: root.open;
+                        clicked => { root.cancel(); }
+                    }
+                    PillButton {
+                        label: "Apply";
+                        primary: true;
+                        enabled: root.open;
+                        clicked => { root.apply(q, m, s, g); }
+                    }
+                }
+            }
+        }
+    }
+}

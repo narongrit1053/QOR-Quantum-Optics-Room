@@ -683,11 +683,11 @@ fn orthographic(orbit: &OrbitCamera) -> bool {
 /// No shadow blobs in the Top projection: the main key light casts shadows only while the main
 /// camera is not in Top. The Top pane has its own key light, without shadows (POLA-104).
 pub(crate) fn top_shadows(
-    quality: Res<crate::Quality>,
+    shadows: Res<crate::host::Shadows>,
     cameras: Query<&OrbitCamera, Without<TopPane>>,
     mut lights: Query<&mut DirectionalLight, With<crate::scene::KeyLight>>,
 ) {
-    let want = quality.shadows() && cameras.iter().all(|c| c.mode() != ViewMode::Top);
+    let want = shadows.0 && cameras.iter().all(|c| c.mode() != ViewMode::Top);
     for mut light in &mut lights {
         if light.shadow_maps_enabled != want {
             light.shadow_maps_enabled = want;

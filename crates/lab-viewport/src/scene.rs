@@ -26,7 +26,7 @@ use crate::platform::{PlatformAssets, PlatformRoot, platform_root_transform, spa
 use crate::room::spawn_room;
 use crate::sync::{SyncOp, plan_changes, plan_full};
 use crate::mesh::trimesh_to_bevy;
-use crate::{CatalogRes, FrameRequest, Quality, ViewportEvent};
+use crate::{CatalogRes, FrameRequest, ViewportEvent};
 
 /// Render units per millimetre.
 pub(crate) const MM: f32 = 0.001;
@@ -106,11 +106,11 @@ impl Plugin for ScenePlugin {
 #[derive(Component)]
 pub(crate) struct KeyLight;
 
-fn spawn_lighting(mut commands: Commands, quality: Res<Quality>) {
+fn spawn_lighting(mut commands: Commands, shadows: Res<crate::host::Shadows>) {
     let key = Transform::from_xyz(2.5, 6.0, 3.5).looking_at(Vec3::new(0.0, 0.8, 0.0), Vec3::Y);
     commands.spawn((
         KeyLight,
-        DirectionalLight { illuminance: 9_000.0, shadow_maps_enabled: quality.shadows(), ..default() },
+        DirectionalLight { illuminance: 9_000.0, shadow_maps_enabled: shadows.0, ..default() },
         key,
         // One cascade over the working area keeps shadows affordable on integrated GPUs.
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 8.0, ..default() }.build(),
