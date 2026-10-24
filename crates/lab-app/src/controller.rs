@@ -200,6 +200,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
     ui.set_display_unit(unit_index(app.units()));
     ui.set_wall_display(wall_index(app.settings.wall_display));
     ui.set_show_beams(app.settings.show_beams);
+    ui.set_show_builtin_parts(app.settings.show_builtin_parts);
     ui_models::fill_presets(models, preset_rows(app.units()));
     ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &app.scene_collapsed));
     crate::relations::fill(ui, &session.doc);
@@ -411,6 +412,19 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 eprintln!("settings not saved: {error}");
             }
         }
+        "library.show_builtin" => {
+            let settings = {
+                let mut a = app.borrow_mut();
+                a.settings.show_builtin_parts = !a.settings.show_builtin_parts;
+                crate::library::fill(&a, models);
+                a.settings.clone()
+            };
+            ui.set_show_builtin_parts(settings.show_builtin_parts);
+            if let Err(error) = lab_file::save_settings(&settings) {
+                eprintln!("settings not saved: {error}");
+            }
+        }
+        "library.find" => ui.invoke_find_part(),
         "beam.toggle" => {
             let outcome = crate::beams::toggle(&app.borrow());
             apply_outcome(ui, app, models, id, outcome);

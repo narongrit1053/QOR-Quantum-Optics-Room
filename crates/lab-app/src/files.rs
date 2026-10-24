@@ -350,7 +350,7 @@ fn open(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
         let Some(ui) = ui_weak.upgrade() else { return };
         match result {
             DialogResult::Chosen(path) => load_path(&ui, &a, &m, path),
-            DialogResult::Cancelled => set_busy(&ui, &a, &m, false, ""),
+            DialogResult::Cancelled | DialogResult::ChosenMany(_) => set_busy(&ui, &a, &m, false, ""),
             DialogResult::Failed(message) => {
                 set_busy(&ui, &a, &m, false, "");
                 show_message(&ui, &a, "Couldn't show the Open dialog", &message);
@@ -468,7 +468,7 @@ fn save_as(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, f
         match result {
             DialogResult::Chosen(path) => submit_save(&ui, &a, &m, ProjectLocation { path, format }, then),
             // Cancelling also cancels what the save was for (New, Open, closing the window).
-            DialogResult::Cancelled => {}
+            DialogResult::Cancelled | DialogResult::ChosenMany(_) => {}
             DialogResult::Failed(message) => show_message(&ui, &a, "Couldn't show the Save dialog", &message),
         }
     });

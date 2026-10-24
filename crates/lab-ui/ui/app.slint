@@ -199,6 +199,13 @@ export component AppWindow inherits Window {
     in property <bool> beam-on;
     // M6 `view.beams` (saved in Settings).
     in property <bool> show-beams: true;
+    // POLA-154 `library.show_builtin` (saved in Settings).
+    in property <bool> show-builtin-parts: false;
+    // POLA-154 Ctrl+F / `library.find`: focus the library search.
+    public function find-part() {
+        search.focus();
+        search.select-all();
+    }
     // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure, 4 constrain, 5 joint.
     in-out property <int> tool;
     // Measure readout; empty hides the chip.
@@ -497,6 +504,11 @@ export component AppWindow inherits Window {
             // Ctrl+K opens the palette, also while a field is focused.
             if (event.modifiers.control && !event.modifiers.alt && (event.text == "k" || event.text == "K") && !root.sheet-open && root.paste-target == "") {
                 root.action("palette.open");
+                return accept;
+            }
+            // Ctrl+F focuses the library search, also while a field is focused.
+            if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && (event.text == "f" || event.text == "F") && !root.modal) {
+                root.find-part();
                 return accept;
             }
             // Esc cancels a part drag from the sidebar.
@@ -998,6 +1010,12 @@ export component AppWindow inherits Window {
                     content-height: library-layout.preferred-height;
                     library-layout := VerticalLayout {
                         alignment: start;
+                        if root.library.length == 0: Text {
+                            text: search.text == "" ? "No imported parts yet. Use Import STEP… (or drop .step files here)." : "No imported parts match.";
+                            color: Theme.text-tertiary;
+                            font-size: Theme.font-caption;
+                            wrap: word-wrap;
+                        }
                         for item in root.library: HorizontalLayout {
                             spacing: 8px;
                             padding-left: item.header ? 4px : 16px;
@@ -1319,6 +1337,14 @@ export component AppWindow inherits Window {
                     label: "Beams";
                     active: root.show-beams;
                     clicked => { root.action("view.beams"); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                ToolButton {
+                    label: "Demo parts";
+                    active: root.show-builtin-parts;
+                    clicked => { root.action("library.show_builtin"); }
                 }
             }
             // Hidden rather than removed, so the bar keeps its width and does not shift.

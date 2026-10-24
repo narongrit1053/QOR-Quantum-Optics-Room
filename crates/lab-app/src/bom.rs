@@ -143,7 +143,7 @@ pub fn export(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
                         Err(_) => "The BOM could not be written.".to_string(),
                     }
                 }
-                DialogResult::Cancelled => return,
+                DialogResult::Cancelled | DialogResult::ChosenMany(_) => return,
                 DialogResult::Failed(message) => message,
             };
             controller::show_toast(&ui, &app.borrow(), &text, false);

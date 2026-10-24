@@ -29,6 +29,8 @@ pub enum DialogKind {
     Open,
     /// Choose an existing `.step`/`.stp` file to import (POLA-59).
     OpenStep,
+    /// Choose one or more `.step`/`.stp` files (POLA-154); answers `ChosenMany`.
+    OpenSteps,
     /// Choose a `.labsetup` file to save to; `suggested` pre-fills the name field.
     SaveArchive { suggested: String },
     /// Type the name of a project folder to save to; `suggested` pre-fills the name field.
@@ -44,6 +46,8 @@ pub enum DialogKind {
 pub enum DialogResult {
     /// The chosen path. For `SaveFolder` it is the folder itself (a typed `.labsetup` is removed).
     Chosen(PathBuf),
+    /// The chosen files of `OpenSteps` (at least one).
+    ChosenMany(Vec<PathBuf>),
     Cancelled,
     /// The dialog could not be shown; the text is a complete user-facing sentence.
     Failed(String),
@@ -51,6 +55,20 @@ pub enum DialogResult {
 
 /// Length of the path buffer in UTF-16 units (the Win32 long-path limit).
 const PATH_BUFFER_LEN: usize = 32_768;
+/// `OpenSteps` buffer: room for many names after the directory.
+const MULTI_BUFFER_LEN: usize = 65_536;
+
+/// An `OFN_ALLOWMULTISELECT | OFN_EXPLORER` answer: the directory then NUL-separated names,
+/// ended by a double NUL; a single selection is just the full path.
+fn parse_multi(buffer: &[u16]) -> Vec<PathBuf> {
+    let parts: Vec<String> =
+        buffer.split(|&c| c == 0).take_while(|s| !s.is_empty()).map(String::from_utf16_lossy).collect();
+    match parts.as_slice() {
+        [] => Vec::new(),
+        [single] => vec![PathBuf::from(single)],
+        [dir, names @ ..] => names.iter().map(|n| PathBuf::from(dir).join(n)).collect(),
+    }
+}
 
 const OPEN_FILTER: &str = "LabSetup projects (*.labsetup; project.json)\0*.labsetup;project.json\0All files\0*.*\0\0";
 const STEP_FILTER: &str = "STEP files (*.step; *.stp)\0*.step;*.stp\0All files\0*.*\0\0";
@@ -237,7 +255,7 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::Controls::Dialogs::{
         CommDlgExtendedError, GetOpenFileNameW, GetSaveFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST,
-        OFN_HIDEREADONLY, OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+        OFN_ALLOWMULTISELECT, OFN_HIDEREADONLY, OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
     };
 
     let wide = |text: &str| text.encode_utf16().collect::<Vec<u16>>(); // filters carry their own NULs
@@ -247,6 +265,7 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
     let (filter, flags, default_ext, suggested) = match kind {
         DialogKind::Open => (wide(OPEN_FILTER), base | OFN_FILEMUSTEXIST, None, None),
         DialogKind::OpenStep => (wide(STEP_FILTER), base | OFN_FILEMUSTEXIST, None, None),
+        DialogKind::OpenSteps => (wide(STEP_FILTER), base | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT, None, None),
         DialogKind::SaveArchive { suggested } => {
             (wide(ARCHIVE_FILTER), base | OFN_OVERWRITEPROMPT, Some(wide_z(ARCHIVE_EXTENSION)), Some(suggested))
         }
@@ -259,7 +278,8 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
     // Shows which kind of save this is; both save kinds would otherwise be titled "Save As".
     let title = matches!(kind, DialogKind::SaveFolder { .. }).then(|| wide_z("Save as Folder"));
 
-    let mut buffer = vec![0u16; PATH_BUFFER_LEN];
+    let buffer_len = if *kind == DialogKind::OpenSteps { MULTI_BUFFER_LEN } else { PATH_BUFFER_LEN };
+    let mut buffer = vec![0u16; buffer_len];
     if let Some(suggested) = suggested {
         let name: Vec<u16> = file_name_suggestion(suggested).encode_utf16().take(PATH_BUFFER_LEN - 1).collect();
         buffer[..name.len()].copy_from_slice(&name);
@@ -273,7 +293,7 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
         lpstrFilter: filter.as_ptr(),
         nFilterIndex: 1,
         lpstrFile: buffer.as_mut_ptr(),
-        nMaxFile: PATH_BUFFER_LEN as u32,
+        nMaxFile: buffer_len as u32,
         lpstrInitialDir: initial_dir.as_ref().map_or(std::ptr::null(), |dir| dir.as_ptr()),
         lpstrTitle: title.as_ref().map_or(std::ptr::null(), |title| title.as_ptr()),
         Flags: flags,
@@ -286,7 +306,7 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
     // length of `buffer`.
     let chosen = unsafe {
         match kind {
-            DialogKind::Open | DialogKind::OpenStep => GetOpenFileNameW(&mut ofn),
+            DialogKind::Open | DialogKind::OpenStep | DialogKind::OpenSteps => GetOpenFileNameW(&mut ofn),
             DialogKind::SaveArchive { .. } | DialogKind::SaveFolder { .. } | DialogKind::SaveCsv { .. } | DialogKind::SavePng { .. } => GetSaveFileNameW(&mut ofn),
         }
     };
@@ -296,6 +316,10 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
         return if code == 0 { DialogResult::Cancelled } else { DialogResult::Failed(failure_message(code)) };
     }
 
+    if *kind == DialogKind::OpenSteps {
+        let paths = parse_multi(&buffer);
+        return if paths.is_empty() { DialogResult::Cancelled } else { DialogResult::ChosenMany(paths) };
+    }
     let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
     if len == 0 {
         return DialogResult::Cancelled;
@@ -339,6 +363,17 @@ mod tests {
         assert_eq!(file_name_suggestion("A/B: test?"), "A-B- test-");
         assert_eq!(file_name_suggestion("Bench. "), "Bench");
         assert_eq!(file_name_suggestion("ห้องแล็บ"), "ห้องแล็บ");
+    }
+
+    #[test]
+    fn multi_select_buffers_parse() {
+        let buf = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        assert_eq!(parse_multi(&buf("C:\\a\\b.step\0\0")), [PathBuf::from(r"C:\a\b.step")]);
+        assert_eq!(
+            parse_multi(&buf("C:\\a\0x.step\0y.stp\0\0junk")),
+            [PathBuf::from(r"C:\a").join("x.step"), PathBuf::from(r"C:\a").join("y.stp")]
+        );
+        assert!(parse_multi(&buf("\0\0")).is_empty());
     }
 
     #[test]

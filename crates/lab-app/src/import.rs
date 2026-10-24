@@ -36,6 +36,8 @@ thread_local! {
     static FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// App handles for worker results, which arrive on the UI thread without them.
     static HANDLES: RefCell<Option<Handles>> = const { RefCell::new(None) };
+    /// Files still to import after the current one (a multi-file "Import STEP…").
+    static QUEUE: RefCell<std::collections::VecDeque<PathBuf>> = const { RefCell::new(std::collections::VecDeque::new()) };
 }
 
 /// The `Finish` stored in an imported part's `meta["finish"]` (AnodizedBlack if unknown).
@@ -57,6 +59,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     let w = ui.as_weak();
     ui.on_import_cancel(move || {
         GENERATION.fetch_add(1, Ordering::SeqCst);
+        QUEUE.with(|q| q.borrow_mut().clear());
         if let Some(ui) = w.upgrade() {
             ui.set_import_step(0);
         }
@@ -81,21 +84,26 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
 /// "Import STEP…" and "Choose another file": the native open dialog, then the form.
 pub fn choose_file(ui: &AppWindow, _app: &Rc<RefCell<AppState>>, _models: &Rc<UiModels>) {
     let w = ui.as_weak();
-    show_file_dialog_local(owner_hwnd(ui.window()), DialogKind::OpenStep, None, move |result| {
+    show_file_dialog_local(owner_hwnd(ui.window()), DialogKind::OpenSteps, None, move |result| {
         let Some(ui) = w.upgrade() else { return };
         match result {
             DialogResult::Chosen(path) => {
-                let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                // Thorlabs names its files "<part>-Step.step" with '/' written as '_'.
-                let part = stem.trim_end_matches("-Step").trim_end_matches("-step").replace('_', "/");
-                ui.set_import_file(path.file_name().unwrap_or_default().to_string_lossy().as_ref().into());
-                ui.set_import_part_number(part.as_str().into());
-                ui.set_import_name(part.as_str().into());
-                if ui.get_import_category().is_empty() {
-                    ui.set_import_category("imported".into());
-                }
-                FILE.with(|f| *f.borrow_mut() = Some(path));
+                prefill(&ui, path);
                 ui.set_import_step(1);
+            }
+            DialogResult::ChosenMany(mut paths) if paths.len() == 1 => {
+                prefill(&ui, paths.remove(0));
+                ui.set_import_step(1);
+            }
+            // Several files: imported one after another with the form's defaults, no form.
+            DialogResult::ChosenMany(paths) => {
+                let mut paths = std::collections::VecDeque::from(paths);
+                let first = paths.pop_front();
+                QUEUE.with(|q| *q.borrow_mut() = paths);
+                if let Some(first) = first {
+                    prefill(&ui, first);
+                    start(&ui);
+                }
             }
             DialogResult::Cancelled => {}
             DialogResult::Failed(text) => {
@@ -104,6 +112,20 @@ pub fn choose_file(ui: &AppWindow, _app: &Rc<RefCell<AppState>>, _models: &Rc<Ui
             }
         }
     });
+}
+
+/// Fills the form from a STEP file name and makes it the file to import.
+fn prefill(ui: &AppWindow, path: PathBuf) {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    // Thorlabs names its files "<part>-Step.step" with '/' written as '_'.
+    let part = stem.trim_end_matches("-Step").trim_end_matches("-step").replace('_', "/");
+    ui.set_import_file(path.file_name().unwrap_or_default().to_string_lossy().as_ref().into());
+    ui.set_import_part_number(part.as_str().into());
+    ui.set_import_name(part.as_str().into());
+    if ui.get_import_category().is_empty() {
+        ui.set_import_category("imported".into());
+    }
+    FILE.with(|f| *f.borrow_mut() = Some(path));
 }
 
 fn start(ui: &AppWindow) {
@@ -233,10 +255,20 @@ fn names_from_file(step: &Path) -> (&'static str, String) {
 /// "Insert STEP…": the open dialog, then [`quick_insert`] at the viewport centre.
 pub fn insert_dialog(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
-    show_file_dialog_local(owner_hwnd(ui.window()), DialogKind::OpenStep, None, move |result| {
+    show_file_dialog_local(owner_hwnd(ui.window()), DialogKind::OpenSteps, None, move |result| {
         let Some(ui) = w.upgrade() else { return };
         match result {
             DialogResult::Chosen(path) => quick_insert(&ui, &a, &m, path, None),
+            DialogResult::ChosenMany(paths) => {
+                // shortcut: spaced 120 px apart on screen from the viewport centre, not 100 mm
+                // in the scene; switch to world spacing if parts of very different sizes overlap.
+                let centre = centre(&ui);
+                let scale = ui.window().scale_factor();
+                for (i, path) in paths.into_iter().enumerate() {
+                    let pos = Vec2::new(centre.x + i as f32 * 120.0 * scale, centre.y);
+                    quick_insert(&ui, &a, &m, path, Some(pos));
+                }
+            }
             DialogResult::Cancelled => {}
             DialogResult::Failed(text) => controller::show_toast(&ui, &a.borrow(), &text, false),
         }
@@ -304,13 +336,16 @@ pub fn quick_insert(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<Ui
     });
 }
 
+/// The centre of the visible viewport (right of the sidebar), in viewport px.
+fn centre(ui: &AppWindow) -> Vec2 {
+    let scale = ui.window().scale_factor();
+    let left = (ui.get_sidebar_right() - ui.get_viewport_x()).max(0.0);
+    Vec2::new((left + ui.get_viewport_width()) * 0.5 * scale, ui.get_viewport_height() * 0.5 * scale)
+}
+
 /// Ghosts catalog part `id` at `pos` (viewport px; `None` = the viewport centre) and drops it.
 fn place(ui: &AppWindow, app: &Rc<RefCell<AppState>>, id: &str, pos: Option<Vec2>) {
-    let scale = ui.window().scale_factor();
-    let pos = pos.unwrap_or_else(|| {
-        let left = (ui.get_sidebar_right() - ui.get_viewport_x()).max(0.0);
-        Vec2::new((left + ui.get_viewport_width()) * 0.5 * scale, ui.get_viewport_height() * 0.5 * scale)
-    });
+    let pos = pos.unwrap_or_else(|| centre(ui));
     let mods = Modifiers::default();
     let a = app.borrow();
     a.send(ViewportRequest::DragPart(PartDrag::Move { item: DragItem::Part(id.into()), pos, mods }));
@@ -380,8 +415,13 @@ fn finish(ui: &AppWindow, message: Result<(String, String, String), String>) {
             ui.set_import_part_id(id.into());
             ui.set_import_done_text(text.into());
             ui.set_import_step(4);
+            if let Some(next) = QUEUE.with(|q| q.borrow_mut().pop_front()) {
+                prefill(ui, next);
+                start(ui);
+            }
         }
         Err(text) => {
+            QUEUE.with(|q| q.borrow_mut().clear());
             ui.set_import_error(text.into());
             ui.set_import_step(3);
         }
