@@ -228,8 +228,8 @@ Solve: pick holder + post such that `holder_seat + post_insertion_range ∋ H �
 
 **STEP import (vendor parts)**
 1. The user picks a STEP file downloaded from Thorlabs/MOGLabs/Toptica.
-2. `step2glb.exe` (a separate process with a 60 s timeout, so a crash cannot take down the app) reads it with OpenCascade `STEPCAFControl_Reader` (keeps part names and colours), meshes it with `BRepMesh_IncrementalMesh` (≈0.05 mm linear / 0.3 rad angular deflection) and writes GLB via `RWGltf_CafWriter`.
-3. `lab-import` (Rust) merges by material, then uses `meshopt` to build LOD0 ≤ 30k tris, LOD1 ~25%, LOD2 ~5%, quantizes, hashes and stores the result.
+2. `step2glb.exe` (a separate process with a 60 s timeout, so a crash cannot take down the app) reads it with OpenCascade `STEPCAFControl_Reader` (keeps part names and colours), meshes it with `BRepMesh_IncrementalMesh` (≈0.05 mm linear; `lab-import` passes 0.1 rad angular deflection) and writes GLB via `RWGltf_CafWriter`.
+3. `lab-import` (Rust) merges by material, then keeps step2glb's mesh as LOD0 when it fits 150k tris (otherwise re-meshes at 0.2, 0.3, then 0.5 rad, and decimates with `meshopt` only as a last resort), then builds LOD1 ~25% and LOD2 ~5% with `meshopt`, quantizes, hashes and stores the result.
 4. **Connector wizard** in the app: click a tapped hole and the app fits the cylinder axis from the mesh and asks for the thread; click an optical face to define an optical port. Templates speed this up, e.g. "Laser head" asks for the beam exit point, direction and wavelength.
 5. The TOML definition is written to the user library and the index is updated.
 
@@ -407,4 +407,4 @@ M1 is built and verified (§14); the board signs it off.
 1. Fix the open M1 findings in §14: the blank viewport at startup and the wall-fade stop time (after the board decides on 300 ms against the §5.6 rate).
 2. M2: library and placement (§11).
 3. Release build: measure binary size, memory and startup against §1.
-4. For M4, apply the step2glb findings above: the `reflect_auto_register` Bevy feature, mandatory mesh simplification, default angular deflection 0.5 rad, `--source-up y` for Thorlabs parts, and picking for GLB parts.
+4. For M4, apply the step2glb findings above: the `reflect_auto_register` Bevy feature, mandatory mesh simplification, default angular deflection 0.1 rad (POLA-152), `--source-up y` for Thorlabs parts, and picking for GLB parts.
