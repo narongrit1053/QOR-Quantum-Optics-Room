@@ -100,14 +100,15 @@ pub(crate) fn spawn_glb(
 fn tag_instance(
     ready: On<WorldInstanceReady>,
     mut commands: Commands,
-    mut lods: Query<&mut GlbLod>,
+    mut lods: Query<(&mut GlbLod, &VisibilityRange)>,
     children: Query<&Children>,
     pieces: Query<&MeshMaterial3d<StandardMaterial>, With<Mesh3d>>,
     materials: Res<Assets<StandardMaterial>>,
     mut settle: ResMut<SettleFrames>,
 ) {
-    let Ok(mut lod) = lods.get_mut(ready.entity) else { return };
+    let Ok((mut lod, range)) = lods.get_mut(ready.entity) else { return };
     lod.ready = true;
+    let range = range.clone();
     for entity in children.iter_descendants(ready.entity) {
         let Ok(material) = pieces.get(entity) else { continue };
         let Some(base_color) = materials.get(&material.0).map(|m| m.base_color) else { continue };
@@ -116,6 +117,8 @@ fn tag_instance(
             SceneEntity,
             HighlightLook::Standard { material: material.0.clone(), base_color, owner: lod.owner },
             SharedMaterial,
+            // Bevy does not propagate VisibilityRange to children; without it every LOD draws at once.
+            range.clone(),
         ));
         if lod.primary {
             piece.insert(SceneNode(lod.node));
