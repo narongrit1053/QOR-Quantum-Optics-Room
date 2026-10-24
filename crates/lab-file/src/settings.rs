@@ -28,6 +28,9 @@ pub struct Settings {
     /// M7: open `recent_files[0]` on start (`file.reopen_last`).
     #[serde(default = "yes")]
     pub reopen_last: bool,
+    /// POLA-154: list the built-in demo parts in the library (`library.show_builtin`).
+    #[serde(default)]
+    pub show_builtin_parts: bool,
 }
 
 pub const MAX_RECENT: usize = 10;
@@ -55,6 +58,7 @@ impl Default for Settings {
             show_beams: true,
             recent_files: Vec::new(),
             reopen_last: true,
+            show_builtin_parts: false,
         }
     }
 }

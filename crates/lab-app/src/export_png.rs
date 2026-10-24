@@ -55,7 +55,7 @@ fn choose_file(ui: &AppWindow, app: &Rc<RefCell<AppState>>, width: u32, height: 
                 };
                 render_to(&a, path, width, height, Box::new(done));
             }
-            DialogResult::Cancelled => {}
+            DialogResult::Cancelled | DialogResult::ChosenMany(_) => {}
             DialogResult::Failed(message) => controller::show_toast(&ui, &a.borrow(), &message, false),
         }
     });

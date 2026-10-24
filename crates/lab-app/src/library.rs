@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use lab_catalog::Catalog;
+use lab_catalog::{Catalog, Source};
 use lab_ui::{AppWindow, LibraryRow};
 use lab_viewport::{DragItem, Modifiers, PartDrag, Vec2, ViewportRequest};
 use slint::ComponentHandle;
@@ -42,9 +42,13 @@ fn group_of(category: &str) -> &str {
     category.split('/').next().unwrap_or("")
 }
 
-/// Header and part rows. While searching every matching group is shown expanded.
-pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>) -> Vec<LibraryRow> {
-    let parts = if query.trim().is_empty() { catalog.all() } else { catalog.search(query, 500) };
+/// Header and part rows. While searching every matching group is shown expanded. Built-in
+/// parts are left out unless `show_builtin`.
+pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>, show_builtin: bool) -> Vec<LibraryRow> {
+    let mut parts = if query.trim().is_empty() { catalog.all() } else { catalog.search(query, 500) };
+    if !show_builtin {
+        parts.retain(|p| catalog.source(&p.id) != Some(Source::BuiltIn));
+    }
     let mut out = Vec::new();
     // Known groups in order, then any other first segment alphabetically.
     let mut keys: Vec<String> = GROUPS.iter().map(|g| g.0.to_string()).collect();
@@ -94,7 +98,7 @@ pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>) -> Vec
 }
 
 pub fn fill(app: &AppState, models: &UiModels) {
-    sync(&models.library, rows(&app.catalog, &app.library.query, &app.library.collapsed));
+    sync(&models.library, rows(&app.catalog, &app.library.query, &app.library.collapsed, app.settings.show_builtin_parts));
 }
 
 /// Reloads the catalog from disk, sends it to the viewport and refreshes the sidebar
@@ -182,13 +186,15 @@ mod tests {
             def("thorlabs:KM100", "KM100", "mounts/kinematic"),
             def("thorlabs:TR50/M", "TR50/M", "posts/posts"),
         ]);
-        let all = rows(&catalog, "", &BTreeSet::new());
+        // `from_defs` marks every part built-in: hidden unless asked for.
+        assert!(rows(&catalog, "", &BTreeSet::new(), false).is_empty());
+        let all = rows(&catalog, "", &BTreeSet::new(), true);
         let labels: Vec<_> = all.iter().map(|r| r.label.to_string()).collect();
         assert_eq!(labels, ["Posts", "TR50/M", "Mounts", "KM100"]);
-        let found = rows(&catalog, "km", &BTreeSet::from(["mounts".to_string()]));
+        let found = rows(&catalog, "km", &BTreeSet::from(["mounts".to_string()]), true);
         assert_eq!(found.len(), 2);
         assert_eq!(found[1].id, "thorlabs:KM100");
-        let collapsed = rows(&catalog, "", &BTreeSet::from(["posts".to_string()]));
+        let collapsed = rows(&catalog, "", &BTreeSet::from(["posts".to_string()]), true);
         assert_eq!(collapsed.len(), 3);
     }
 }
