@@ -22,6 +22,7 @@ import { CommandPalette } from "palette.slint";
 import { ShortcutSheet } from "shortcuts.slint";
 import { StartPage, StartEntry } from "start_page.slint";
 import { ExportSheet } from "export.slint";
+import { SettingsSheet } from "settings.slint";
 import { ContextMenu } from "context_menu.slint";
 import { JointPanel } from "joint_panel.slint";
 import { PartBox } from "part_box.slint";
@@ -364,6 +365,14 @@ export component AppWindow inherits Window {
     in property <string> start-error;
     in-out property <bool> shortcuts-open;
     in property <[PaletteItem]> shortcut-items;
+    // Settings sheet (POLA-155): saved choices as indices (see settings.slint) and GPU rows.
+    in-out property <bool> settings-open;
+    in property <int> settings-quality;
+    in property <int> settings-msaa;
+    in property <int> settings-shadows;
+    in property <int> settings-gpu;
+    in property <[string]> settings-gpus;
+    callback settings-apply(int, int, int, int);
     // "" ok, else error text (the sheet stays open).
     callback paste-corners(string /* target */, string /* text */) -> string;
     callback sheet-button(int);
@@ -459,9 +468,14 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open;
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open;
     changed shortcuts-open => {
         if (!root.shortcuts-open) {
+            EditState.focus-viewport += 1;
+        }
+    }
+    changed settings-open => {
+        if (!root.settings-open) {
             EditState.focus-viewport += 1;
         }
     }
@@ -548,6 +562,11 @@ export component AppWindow inherits Window {
                 if ((event.text == "o" || event.text == "O") && !event.modifiers.shift) {
                     keys.focus();
                     root.action("file.open");
+                    return accept;
+                }
+                if (event.text == "," && !event.modifiers.shift) {
+                    keys.focus();
+                    root.action("app.settings");
                     return accept;
                 }
                 if (event.text == "s" || event.text == "S") {
@@ -1605,6 +1624,20 @@ export component AppWindow inherits Window {
             open: root.shortcuts-open;
             items: root.shortcut-items;
             close => { root.shortcuts-open = false; }
+        }
+
+        SettingsSheet {
+            width: root.width;
+            height: root.height;
+            open: root.settings-open;
+            quality: root.settings-quality;
+            msaa: root.settings-msaa;
+            shadows: root.settings-shadows;
+            gpu: root.settings-gpu;
+            gpus: root.settings-gpus;
+            in-use: root.gpu;
+            apply(q, m, s, g) => { root.settings-apply(q, m, s, g); }
+            cancel => { root.settings-open = false; }
         }
 
         StartPage {

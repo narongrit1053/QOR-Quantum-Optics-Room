@@ -131,7 +131,7 @@ pub fn start(
     device: wgpu::Device,
     queue: wgpu::Queue,
     document: Document,
-    quality: Option<Quality>,
+    options: GraphicsOptions,
     wake_ui: impl Fn() + Send + Sync + 'static,
 ) -> ViewportHandle {
     let (request_tx, request_rx) = async_channel::unbounded::<ViewportRequest>();
@@ -141,12 +141,13 @@ pub fn start(
 
     let adapter = device_adapter(&instance, &device);
     let info = adapter.get_info();
-    let quality = quality.unwrap_or(match info.device_type {
+    let quality = options.quality.unwrap_or(match info.device_type {
         // Measured on Intel UHD (DX12): directional shadows cost ~5x the rest of the frame.
         wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::Cpu => Quality::Balanced,
         _ => Quality::High,
     });
-    let msaa_samples = supported_msaa(&adapter, quality.msaa_samples());
+    let msaa_samples = supported_msaa(&adapter, options.msaa.unwrap_or(quality.msaa_samples()));
+    let shadows = Shadows(options.shadows.unwrap_or(quality.shadows()));
     let events = EventSender { events: event_tx, wake_ui: std::sync::Arc::new(wake_ui) };
     events.send(ViewportEvent::Ready {
         adapter: info.name.clone(),
@@ -182,6 +183,7 @@ pub fn start(
                 .init_resource::<SettleFrames>()
                 .insert_resource(events)
                 .insert_resource(quality)
+                .insert_resource(shadows)
                 .insert_resource(MsaaSamples(msaa_samples))
                 .insert_resource(ViewportSize(Vec2::new(640.0, 480.0)))
                 .init_resource::<TargetSize>()
@@ -246,6 +248,7 @@ pub fn smoke_test(document: Document) {
         .init_resource::<SettleFrames>()
         .insert_resource(events)
         .insert_resource(Quality::Balanced)
+        .insert_resource(Shadows(false))
         .insert_resource(MsaaSamples(1))
         .insert_resource(ViewportSize(Vec2::new(640.0, 480.0)))
         .init_resource::<TargetSize>()
@@ -295,6 +298,25 @@ fn device_adapter(instance: &wgpu::Instance, device: &wgpu::Device) -> wgpu::Ada
     }))
     .expect("no GPU adapter for the viewport")
 }
+
+/// Overrides of the quality's defaults; `None` everywhere is the automatic choice.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GraphicsOptions {
+    pub quality: Option<Quality>,
+    /// Wanted samples; clamped to what the adapter supports.
+    pub msaa: Option<u32>,
+    pub shadows: Option<bool>,
+}
+
+/// `(name, type)` of every adapter `instance` sees on `backends`, for the GPU picker.
+pub fn adapters(instance: &wgpu::Instance, backends: wgpu::Backends) -> Vec<(String, wgpu::DeviceType)> {
+    let adapters = bevy::tasks::block_on(instance.enumerate_adapters(backends));
+    adapters.iter().map(|a| a.get_info()).map(|i| (i.name, i.device_type)).collect()
+}
+
+/// The key light casts shadows (quality default or the user's override).
+#[derive(Resource, Clone, Copy)]
+pub(crate) struct Shadows(pub bool);
 
 /// MSAA sample count the camera uses, already checked against the adapter.
 #[derive(Resource, Clone, Copy)]

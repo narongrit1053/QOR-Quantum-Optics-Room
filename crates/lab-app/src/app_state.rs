@@ -109,6 +109,8 @@ pub struct AppState {
     pub isolated_nodes: bool,
     /// M9 D: `view.walls` hides the walls over the saved preference.
     pub walls_hidden: bool,
+    /// POLA-155: `(name, type)` of the DX12 adapters, for the Settings GPU list.
+    pub adapters: Vec<(String, lab_viewport::wgpu::DeviceType)>,
 }
 
 impl AppState {
@@ -142,6 +144,7 @@ impl AppState {
             hidden: Default::default(),
             isolated_nodes: false,
             walls_hidden: false,
+            adapters: Vec::new(),
         }
     }
 

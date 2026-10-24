@@ -20,7 +20,7 @@ pub use project::{
     EmbeddedFile, LoadedProject, PROJECT_EXTENSION, PROJECT_JSON, ProjectFormat, ProjectLocation, SaveOptions, decode_bytes,
     encode_archive, load_project, save_project,
 };
-pub use settings::{Settings, load_settings, load_settings_at, save_settings, save_settings_at, settings_path};
+pub use settings::{GpuChoice, MsaaChoice, RenderQuality, Settings, load_settings, load_settings_at, save_settings, save_settings_at, settings_path};
 pub use worker::{IoJob, IoResult, IoWorker};
 
 /// The largest archive `load_project` reads.

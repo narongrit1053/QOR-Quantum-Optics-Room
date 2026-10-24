@@ -31,6 +31,48 @@ pub struct Settings {
     /// POLA-154: list the built-in demo parts in the library (`library.show_builtin`).
     #[serde(default)]
     pub show_builtin_parts: bool,
+    /// POLA-155: graphics choices, applied at the next start. Env vars override them.
+    #[serde(default)]
+    pub render_quality: RenderQuality,
+    #[serde(default)]
+    pub gpu: GpuChoice,
+    #[serde(default)]
+    pub msaa: MsaaChoice,
+    /// None: the quality's default.
+    #[serde(default)]
+    pub shadows: Option<bool>,
+}
+
+/// `Auto` picks Balanced on integrated GPUs, High otherwise.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RenderQuality {
+    #[default]
+    Auto,
+    High,
+    Balanced,
+    Low,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum GpuChoice {
+    /// Prefer a discrete GPU.
+    #[default]
+    Auto,
+    HighPerformance,
+    PowerSaving,
+    /// Adapter name as wgpu reports it.
+    Named(String),
+}
+
+/// `Auto`: the quality's default sample count.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MsaaChoice {
+    #[default]
+    Auto,
+    Off,
+    X2,
+    X4,
+    X8,
 }
 
 pub const MAX_RECENT: usize = 10;
@@ -59,6 +101,10 @@ impl Default for Settings {
             recent_files: Vec::new(),
             reopen_last: true,
             show_builtin_parts: false,
+            render_quality: RenderQuality::Auto,
+            gpu: GpuChoice::Auto,
+            msaa: MsaaChoice::Auto,
+            shadows: None,
         }
     }
 }
@@ -126,5 +172,15 @@ mod recent_tests {
         assert_eq!(s.recent_files.len(), MAX_RECENT);
         assert_eq!(s.recent_files[0], Path::new("p5"));
         assert_eq!(s.recent_files.iter().filter(|p| *p == Path::new("p5")).count(), 1);
+    }
+
+    #[test]
+    fn old_settings_load_graphics_defaults_and_new_ones_round_trip() {
+        let old: Settings = serde_json::from_str(r#"{"show_beams":false}"#).unwrap();
+        assert_eq!((old.render_quality, old.gpu.clone(), old.msaa, old.shadows), (RenderQuality::Auto, GpuChoice::Auto, MsaaChoice::Auto, None));
+        assert!(!old.show_beams);
+        let new = Settings { render_quality: RenderQuality::Low, gpu: GpuChoice::Named("Intel(R) UHD".into()), msaa: MsaaChoice::X8, shadows: Some(false), ..old };
+        let back: Settings = serde_json::from_slice(&serde_json::to_vec(&new).unwrap()).unwrap();
+        assert_eq!(back, new);
     }
 }
