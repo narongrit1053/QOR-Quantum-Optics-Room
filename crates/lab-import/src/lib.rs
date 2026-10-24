@@ -18,13 +18,15 @@ use lab_geom::TriMesh;
 
 use crate::glb::{Glb, Material};
 
-const LOD0_BUDGET: usize = 30_000;
+/// LOD0 is the converter's own tessellation, kept undecimated whenever it fits: decimating a
+/// fine mesh or meshing coarsely is what made curved surfaces facet and smear (POLA-152).
+const LOD0_BUDGET: usize = 150_000;
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ImportOptions {
     /// Up axis of the STEP model. `Y` for Thorlabs (SolidWorks), `Z` otherwise.
     pub source_up: SourceUp,
-    /// Starting angular deflection in rad (default 0.5).
+    /// Starting angular deflection in rad (default 0.1, ~5.7° per facet, as imagetostl.com uses).
     pub angular_deflection: f64,
     /// Applied to primitives that have no material (AP203 files). `None` = AnodizedBlack.
     pub finish: Option<Finish>,
@@ -32,7 +34,7 @@ pub struct ImportOptions {
 
 impl Default for ImportOptions {
     fn default() -> Self {
-        ImportOptions { source_up: SourceUp::Y, angular_deflection: 0.5, finish: None }
+        ImportOptions { source_up: SourceUp::Y, angular_deflection: 0.1, finish: None }
     }
 }
 
@@ -115,10 +117,10 @@ pub fn import_step(
     let tmp = TempDir::new()?;
     progress(Progress::Converting);
 
-    // Coarser tessellation until LOD0 fits the budget (DESIGN §13: 0.5, then 0.8, 1.2 rad).
+    // Coarser tessellation until LOD0 fits the budget; decimation is the last resort.
     let start = opts.angular_deflection;
     let mut tries = vec![start];
-    tries.extend([0.8, 1.2].into_iter().filter(|&a| a > start));
+    tries.extend([0.2, 0.3, 0.5].into_iter().filter(|&a| a > start));
     let mut merged = None;
     for a in tries {
         let out = tmp.0.join("out.glb");
@@ -353,6 +355,25 @@ impl Drop for TempDir {
 mod tests {
     use super::*;
     use lab_core::part::{ConnectorDef, ConnectorKind, Frame, Geometry};
+
+    /// LOD0 is step2glb's 0.1 rad mesh itself, not a decimated copy (POLA-152: imagetostl.com
+    /// writes 111,558 triangles for this file from the same OpenCascade mesher at 0.1 rad).
+    #[test]
+    fn km100_lod0_is_undecimated() {
+        let step = Path::new("D:/Try/LabSetup/Test GLB/ThorLabs - KM100.stp");
+        if !step2glb_path().is_file() || !step.is_file() {
+            eprintln!("skipped: step2glb or the sample is missing");
+            return;
+        }
+        let lib = TempDir::new().unwrap();
+        let a = import_step(step, &lib.0, &ImportOptions::default(), &|_| {}).unwrap();
+        assert!((100_000..=LOD0_BUDGET).contains(&a.triangles[0]), "{:?}", a.triangles);
+        let mut mesh = TriMesh::default();
+        read_glb(&a.path, 0).unwrap().iter().for_each(|(_, m)| mesh.append(m));
+        let t = Instant::now();
+        let features = crate::features::detect(&mesh);
+        eprintln!("triangles {:?}, {} features in {:?}", a.triangles, features.len(), t.elapsed());
+    }
 
     #[test]
     fn imports_fmmp1() {
