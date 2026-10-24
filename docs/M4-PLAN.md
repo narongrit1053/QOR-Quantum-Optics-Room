@@ -49,7 +49,7 @@ pub struct ImportOptions {
     /// Applied to primitives that have no material (AP203 files). `None` = AnodizedBlack.
     pub finish: Option<lab_core::model::Finish>,
 }
-impl Default for ImportOptions { /* Y, 0.5, None */ }
+impl Default for ImportOptions { /* Y, 0.1, None (POLA-152) */ }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceUp { Y, Z }
