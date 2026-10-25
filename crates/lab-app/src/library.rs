@@ -24,11 +24,13 @@ const GROUPS: &[Group] = &[
     ("mounts", "Mounts", "M", (10, 132, 255)),
     ("optics", "Optics", "O", (48, 209, 88)),
     ("beam", "Beam", "B", (255, 214, 10)),
+    ("stages", "Stages", "S", (90, 200, 250)),
     ("fiber", "Fiber", "F", (100, 210, 255)),
     ("modulators", "Modulators", "A", (94, 92, 230)),
     ("detectors", "Detectors", "D", (255, 159, 10)),
     ("crystals", "Crystals", "C", (172, 142, 104)),
     ("lasers", "Lasers", "L", (255, 55, 95)),
+    ("hardware", "Hardware", "H", (160, 160, 165)),
     ("room", "Room", "R", (142, 142, 147)),
 ];
 
@@ -89,7 +91,8 @@ pub fn unit_system(def: &PartDef) -> Option<Unit> {
     if tag(&["imperial", "inch"]) {
         return Some(Unit::Inch);
     }
-    if def.part_number.ends_with("/M") {
+    let p = def.part_number.as_str();
+    if ["/M", "-M", "_M"].iter().any(|s| p.ends_with(s)) || ["-M-", "_M-", "-M "].iter().any(|s| p.contains(s)) {
         return Some(Unit::Metric);
     }
     def.connectors.iter().find_map(|c| match &c.kind {
@@ -469,6 +472,9 @@ mod tests {
         .unwrap();
         assert_eq!(unit_system(&threaded), Some(Unit::Inch));
         assert_eq!(unit_system(&def("d", "KM100", "mounts")), None);
+        for metric in ["TR50-M", "KC1T_M", "TR50_M", "ST1XY-A_M", "SPT2-M-Stellring1", "AB_M-2", "XR25-M (x)"] {
+            assert_eq!(unit_system(&def("e", metric, "posts")), Some(Unit::Metric), "{metric}");
+        }
     }
 
     #[test]

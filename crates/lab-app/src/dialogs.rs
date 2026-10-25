@@ -31,6 +31,8 @@ pub enum DialogKind {
     OpenStep,
     /// Choose one or more `.step`/`.stp` files (POLA-154); answers `ChosenMany`.
     OpenSteps,
+    /// Choose a folder of STEP files by picking any file in it (POLA-163); answers the folder.
+    OpenFolder,
     /// Choose a `.labsetup` file to save to; `suggested` pre-fills the name field.
     SaveArchive { suggested: String },
     /// Type the name of a project folder to save to; `suggested` pre-fills the name field.
@@ -266,6 +268,7 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
         DialogKind::Open => (wide(OPEN_FILTER), base | OFN_FILEMUSTEXIST, None, None),
         DialogKind::OpenStep => (wide(STEP_FILTER), base | OFN_FILEMUSTEXIST, None, None),
         DialogKind::OpenSteps => (wide(STEP_FILTER), base | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT, None, None),
+        DialogKind::OpenFolder => (wide(STEP_FILTER), base | OFN_FILEMUSTEXIST, None, None),
         DialogKind::SaveArchive { suggested } => {
             (wide(ARCHIVE_FILTER), base | OFN_OVERWRITEPROMPT, Some(wide_z(ARCHIVE_EXTENSION)), Some(suggested))
         }
@@ -276,7 +279,11 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
         DialogKind::SavePng { suggested } => (wide(PNG_FILTER), base | OFN_OVERWRITEPROMPT, Some(wide_z("png")), Some(suggested)),
     };
     // Shows which kind of save this is; both save kinds would otherwise be titled "Save As".
-    let title = matches!(kind, DialogKind::SaveFolder { .. }).then(|| wide_z("Save as Folder"));
+    let title = match kind {
+        DialogKind::SaveFolder { .. } => Some(wide_z("Save as Folder")),
+        DialogKind::OpenFolder => Some(wide_z("Import Folder: pick any STEP file in the folder")),
+        _ => None,
+    };
 
     let buffer_len = if *kind == DialogKind::OpenSteps { MULTI_BUFFER_LEN } else { PATH_BUFFER_LEN };
     let mut buffer = vec![0u16; buffer_len];
@@ -306,7 +313,7 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
     // length of `buffer`.
     let chosen = unsafe {
         match kind {
-            DialogKind::Open | DialogKind::OpenStep | DialogKind::OpenSteps => GetOpenFileNameW(&mut ofn),
+            DialogKind::Open | DialogKind::OpenStep | DialogKind::OpenSteps | DialogKind::OpenFolder => GetOpenFileNameW(&mut ofn),
             DialogKind::SaveArchive { .. } | DialogKind::SaveFolder { .. } | DialogKind::SaveCsv { .. } | DialogKind::SavePng { .. } => GetSaveFileNameW(&mut ofn),
         }
     };
@@ -327,6 +334,7 @@ fn run_dialog(owner: isize, kind: &DialogKind, initial_dir: Option<PathBuf>) -> 
     let path = PathBuf::from(OsString::from_wide(&buffer[..len]));
     match kind {
         DialogKind::SaveFolder { .. } => DialogResult::Chosen(strip_archive_extension(path)),
+        DialogKind::OpenFolder => DialogResult::Chosen(path.parent().map(PathBuf::from).unwrap_or(path)),
         _ => DialogResult::Chosen(path),
     }
 }

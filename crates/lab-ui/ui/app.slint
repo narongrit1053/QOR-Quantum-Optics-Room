@@ -1034,6 +1034,10 @@ export component AppWindow inherits Window {
                     label: "Import STEP…";
                     clicked => { root.action("import.step"); }
                 }
+                PillButton {
+                    label: "Import Folder into Library…";
+                    clicked => { root.action("library.import_folder"); }
+                }
 
                 SectionHeader { text: "LIBRARY"; }
                 // POLA-162: library picker (Default, then each separate library).
@@ -1051,6 +1055,11 @@ export component AppWindow inherits Window {
                         overflow: elide;
                     }
                     IconButton { icon: "›"; size: 24px; y: 2px; clicked => { root.library-cmd("step", "", "1"); } }
+                }
+                // POLA-163: own line, so the name above keeps the sidebar width.
+                if !root.library-naming: HorizontalLayout {
+                    height: 28px;
+                    spacing: 4px;
                     ToolButton { label: "New library…"; clicked => { root.library-cmd("new", "", ""); root.library-naming = true; } }
                     if root.library-active != "": ToolButton {
                         label: "Delete library";
