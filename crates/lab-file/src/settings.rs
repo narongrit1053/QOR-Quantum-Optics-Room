@@ -1,5 +1,6 @@
 //! Per-user settings (display unit, wall display, last folder). Never part of a document.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -41,6 +42,20 @@ pub struct Settings {
     /// None: the quality's default.
     #[serde(default)]
     pub shadows: Option<bool>,
+    /// POLA-162: named part collections, hidden part ids, and the active library ("" = Default).
+    #[serde(default)]
+    pub libraries: Vec<UserLibrary>,
+    #[serde(default)]
+    pub hidden_parts: BTreeSet<String>,
+    #[serde(default)]
+    pub active_library: String,
+}
+
+/// A user part collection: part ids in insertion order, no duplicates.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserLibrary {
+    pub name: String,
+    pub parts: Vec<String>,
 }
 
 /// `Auto` picks Balanced on integrated GPUs, High otherwise.
@@ -105,6 +120,9 @@ impl Default for Settings {
             gpu: GpuChoice::Auto,
             msaa: MsaaChoice::Auto,
             shadows: None,
+            libraries: Vec::new(),
+            hidden_parts: BTreeSet::new(),
+            active_library: String::new(),
         }
     }
 }
@@ -180,6 +198,20 @@ mod recent_tests {
         assert_eq!((old.render_quality, old.gpu.clone(), old.msaa, old.shadows), (RenderQuality::Auto, GpuChoice::Auto, MsaaChoice::Auto, None));
         assert!(!old.show_beams);
         let new = Settings { render_quality: RenderQuality::Low, gpu: GpuChoice::Named("Intel(R) UHD".into()), msaa: MsaaChoice::X8, shadows: Some(false), ..old };
+        let back: Settings = serde_json::from_slice(&serde_json::to_vec(&new).unwrap()).unwrap();
+        assert_eq!(back, new);
+    }
+
+    #[test]
+    fn old_settings_load_and_libraries_round_trip() {
+        let old: Settings = serde_json::from_str(r#"{"show_beams":true}"#).unwrap();
+        assert!(old.libraries.is_empty() && old.hidden_parts.is_empty() && old.active_library.is_empty());
+        let new = Settings {
+            libraries: vec![UserLibrary { name: "MOT".into(), parts: vec!["a".into(), "b".into()] }],
+            hidden_parts: BTreeSet::from(["thorlabs:KM100".to_string()]),
+            active_library: "MOT".into(),
+            ..old
+        };
         let back: Settings = serde_json::from_slice(&serde_json::to_vec(&new).unwrap()).unwrap();
         assert_eq!(back, new);
     }

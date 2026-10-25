@@ -1,11 +1,14 @@
 //! The library sidebar: catalog rows grouped by the first category segment, search, and
-//! dragging a part into the viewport (M2-PLAN POLA-42).
+//! dragging a part into the viewport (M2-PLAN POLA-42). POLA-162: separate libraries, type,
+//! units and vendor filters, and hidden parts.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use lab_catalog::{Catalog, Source};
+use lab_core::part::{ConnectorKind, PartDef};
+use lab_file::UserLibrary;
 use lab_ui::{AppWindow, LibraryRow};
 use lab_viewport::{DragItem, Modifiers, PartDrag, Vec2, ViewportRequest};
 use slint::ComponentHandle;
@@ -29,6 +32,20 @@ const GROUPS: &[Group] = &[
     ("room", "Room", "R", (142, 142, 147)),
 ];
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnitFilter {
+    #[default]
+    All,
+    Metric,
+    Inch,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unit {
+    Metric,
+    Inch,
+}
+
 #[derive(Default)]
 pub struct LibraryState {
     pub query: String,
@@ -36,18 +53,95 @@ pub struct LibraryState {
     pub collapsed: BTreeSet<String>,
     /// The current drag is over the viewport (a Move was sent and not yet ended).
     pub drag_inside: bool,
+    /// POLA-162 filters, not saved: type group, units, vendor ("" = Generic), hidden parts listed.
+    pub group: Option<String>,
+    pub units: UnitFilter,
+    pub vendor: Option<String>,
+    pub show_hidden: bool,
+    /// "New library…" from the part menu: the part the new library starts with.
+    pub pending_part: Option<String>,
+}
+
+pub struct LibraryFilter<'a> {
+    pub query: &'a str,
+    /// None = Default (the whole catalog).
+    pub library: Option<&'a [String]>,
+    /// First category segment, None = all types.
+    pub group: Option<&'a str>,
+    pub units: UnitFilter,
+    /// None = all vendors; Some("") = Generic.
+    pub vendor: Option<&'a str>,
+    pub show_builtin: bool,
+    pub show_hidden: bool,
+    pub hidden: &'a BTreeSet<String>,
 }
 
 fn group_of(category: &str) -> &str {
     category.split('/').next().unwrap_or("")
 }
 
-/// Header and part rows. While searching every matching group is shown expanded. Built-in
-/// parts are left out unless `show_builtin`.
-pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>, show_builtin: bool) -> Vec<LibraryRow> {
-    let mut parts = if query.trim().is_empty() { catalog.all() } else { catalog.search(query, 500) };
-    if !show_builtin {
-        parts.retain(|p| catalog.source(&p.id) != Some(Source::BuiltIn));
+/// Metric or inch from the tags, the part number, then thread connector specs; first match wins.
+pub fn unit_system(def: &PartDef) -> Option<Unit> {
+    let tag = |names: &[&str]| def.tags.iter().any(|t| names.iter().any(|n| t.eq_ignore_ascii_case(n)));
+    if tag(&["metric"]) {
+        return Some(Unit::Metric);
+    }
+    if tag(&["imperial", "inch"]) {
+        return Some(Unit::Inch);
+    }
+    if def.part_number.ends_with("/M") {
+        return Some(Unit::Metric);
+    }
+    def.connectors.iter().find_map(|c| match &c.kind {
+        ConnectorKind::Thread { spec, .. } => {
+            let b = spec.as_bytes();
+            if b.len() > 1 && b[0] == b'M' && b[1].is_ascii_digit() {
+                Some(Unit::Metric)
+            } else if spec.contains('-') {
+                Some(Unit::Inch)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })
+}
+
+/// Parts left after every filter but the vendor one.
+fn candidates<'c>(catalog: &'c Catalog, f: &LibraryFilter) -> Vec<&'c PartDef> {
+    let mut parts = if f.query.trim().is_empty() { catalog.all() } else { catalog.search(f.query, 500) };
+    match f.library {
+        // The user picked these parts on purpose: `show_builtin` does not apply.
+        Some(ids) => parts.retain(|p| ids.contains(&p.id)),
+        None if !f.show_builtin => parts.retain(|p| catalog.source(&p.id) != Some(Source::BuiltIn)),
+        None => {}
+    }
+    if !f.show_hidden {
+        parts.retain(|p| !f.hidden.contains(&p.id));
+    }
+    if let Some(group) = f.group {
+        parts.retain(|p| group_of(&p.category) == group);
+    }
+    match f.units {
+        UnitFilter::All => {}
+        UnitFilter::Metric => parts.retain(|p| unit_system(p) == Some(Unit::Metric)),
+        UnitFilter::Inch => parts.retain(|p| unit_system(p) == Some(Unit::Inch)),
+    }
+    parts
+}
+
+/// Distinct vendors of the parts visible before the vendor filter ("" = Generic).
+pub fn vendors(catalog: &Catalog, f: &LibraryFilter) -> Vec<String> {
+    let set: BTreeSet<String> = candidates(catalog, f).iter().map(|p| p.vendor.clone()).collect();
+    set.into_iter().collect()
+}
+
+/// Header and part rows. While searching every matching group is shown expanded.
+pub fn rows(catalog: &Catalog, f: &LibraryFilter, collapsed: &BTreeSet<String>) -> Vec<LibraryRow> {
+    let query = f.query;
+    let mut parts = candidates(catalog, f);
+    if let Some(vendor) = f.vendor {
+        parts.retain(|p| p.vendor == vendor);
     }
     let mut out = Vec::new();
     // Known groups in order, then any other first segment alphabetically.
@@ -77,6 +171,7 @@ pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>, show_b
             expanded,
             thumb: Default::default(),
             has_thumb: false,
+            hidden: false,
         });
         if expanded {
             out.extend(members.iter().map(|p| {
@@ -91,14 +186,161 @@ pub fn rows(catalog: &Catalog, query: &str, collapsed: &BTreeSet<String>, show_b
                 expanded: false,
                 has_thumb: thumb.is_some(),
                 thumb: thumb.unwrap_or_default(),
+                hidden: f.hidden.contains(&p.id),
             }}));
         }
     }
     out
 }
 
+fn active_parts(app: &AppState) -> Option<&[String]> {
+    let name = &app.settings.active_library;
+    app.settings.libraries.iter().find(|l| &l.name == name).map(|l| l.parts.as_slice())
+}
+
+fn filter<'a>(app: &'a AppState, vendor: Option<&'a str>) -> LibraryFilter<'a> {
+    let l = &app.library;
+    LibraryFilter {
+        query: &l.query,
+        library: active_parts(app),
+        group: l.group.as_deref(),
+        units: l.units,
+        vendor,
+        show_builtin: app.settings.show_builtin_parts,
+        show_hidden: l.show_hidden,
+        hidden: &app.settings.hidden_parts,
+    }
+}
+
+/// Trimmed, non-empty and unique (" 2", " 3"… appended on a clash).
+fn unique_name(libs: &[UserLibrary], name: &str) -> Option<String> {
+    let base = name.trim();
+    if base.is_empty() {
+        return None;
+    }
+    let mut name = base.to_string();
+    let mut i = 2;
+    while libs.iter().any(|l| l.name == name) {
+        name = format!("{base} {i}");
+        i += 1;
+    }
+    Some(name)
+}
+
 pub fn fill(app: &AppState, models: &UiModels) {
-    sync(&models.library, rows(&app.catalog, &app.library.query, &app.library.collapsed, app.settings.show_builtin_parts));
+    sync(&models.library, rows(&app.catalog, &filter(app, app.library.vendor.as_deref()), &app.library.collapsed));
+}
+
+fn strings(items: Vec<slint::SharedString>) -> slint::ModelRc<slint::SharedString> {
+    Rc::new(slint::VecModel::from(items)).into()
+}
+
+/// The picker and filter labels.
+pub fn sync_ui(ui: &AppWindow, app: &AppState) {
+    let (s, l) = (&app.settings, &app.library);
+    ui.set_library_names(strings(s.libraries.iter().map(|l| l.name.as_str().into()).collect()));
+    ui.set_library_active(s.active_library.as_str().into());
+    let group = l.group.as_deref().map_or("All".to_string(), |g| {
+        GROUPS.iter().find(|x| x.0 == g).map_or(g.to_string(), |x| x.1.to_string())
+    });
+    ui.set_library_type(group.into());
+    let vendor = l.vendor.as_deref().map_or("All", |v| if v.is_empty() { "Generic" } else { v });
+    ui.set_library_vendor(vendor.into());
+    ui.set_library_units(l.units as i32);
+    ui.set_library_show_hidden(l.show_hidden);
+    ui.set_library_filtered(l.group.is_some() || l.vendor.is_some() || l.units != UnitFilter::All);
+}
+
+/// One sidebar library command (POLA-162). Saves the settings when they changed.
+fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, part: &str, arg: &str) {
+    let step = |i: usize, n: usize| if arg == "-1" { (i + n - 1) % n } else { (i + 1) % n };
+    let mut save = true;
+    match verb {
+        // Part menu about to open: is the part hidden, which libraries can it go to.
+        "menu" => {
+            let s = &app.settings;
+            ui.set_library_menu_hidden(s.hidden_parts.contains(part));
+            ui.set_library_menu_targets(strings(
+                s.libraries.iter().filter(|l| !l.parts.iter().any(|p| p == part)).map(|l| l.name.as_str().into()).collect(),
+            ));
+            return;
+        }
+        "new" => {
+            app.library.pending_part = (!part.is_empty()).then(|| part.to_string());
+            return;
+        }
+        "cancel" => {
+            app.library.pending_part = None;
+            return;
+        }
+        "step" => {
+            let s = &mut app.settings;
+            let names: Vec<&str> = std::iter::once("").chain(s.libraries.iter().map(|l| l.name.as_str())).collect();
+            let i = names.iter().position(|n| *n == s.active_library).unwrap_or(0);
+            s.active_library = names[step(i, names.len())].to_string();
+        }
+        "create" => {
+            let Some(name) = unique_name(&app.settings.libraries, arg) else { return };
+            let parts = app.library.pending_part.take().into_iter().collect();
+            app.settings.libraries.push(UserLibrary { name: name.clone(), parts });
+            app.settings.active_library = name;
+        }
+        "delete" => {
+            let name = std::mem::take(&mut app.settings.active_library);
+            app.settings.libraries.retain(|l| l.name != name);
+        }
+        "hide" => {
+            if !app.settings.hidden_parts.remove(part) {
+                app.settings.hidden_parts.insert(part.to_string());
+            }
+        }
+        "add" => {
+            if let Some(lib) = app.settings.libraries.iter_mut().find(|l| l.name == arg) {
+                if !lib.parts.iter().any(|p| p == part) {
+                    lib.parts.push(part.to_string());
+                }
+            }
+        }
+        "remove" => {
+            let name = app.settings.active_library.clone();
+            if let Some(lib) = app.settings.libraries.iter_mut().find(|l| l.name == name) {
+                lib.parts.retain(|p| p != part);
+            }
+        }
+        "type" => {
+            save = false;
+            let keys: Vec<Option<&str>> = std::iter::once(None).chain(GROUPS.iter().map(|g| Some(g.0))).collect();
+            let i = keys.iter().position(|k| *k == app.library.group.as_deref()).unwrap_or(0);
+            app.library.group = keys[step(i, keys.len())].map(str::to_string);
+        }
+        "vendor" => {
+            save = false;
+            let list = vendors(&app.catalog, &filter(app, None));
+            let keys: Vec<Option<&str>> = std::iter::once(None).chain(list.iter().map(|v| Some(v.as_str()))).collect();
+            let i = keys.iter().position(|k| *k == app.library.vendor.as_deref()).unwrap_or(0);
+            app.library.vendor = keys[step(i, keys.len())].map(str::to_string);
+        }
+        "units" => {
+            save = false;
+            app.library.units = match arg {
+                "1" => UnitFilter::Metric,
+                "2" => UnitFilter::Inch,
+                _ => UnitFilter::All,
+            };
+        }
+        "hidden" => {
+            save = false;
+            app.library.show_hidden = !app.library.show_hidden;
+        }
+        _ => return,
+    }
+    if save {
+        if let Err(error) = lab_file::save_settings(&app.settings) {
+            eprintln!("settings not saved: {error}");
+        }
+    }
+    sync_ui(ui, app);
+    fill(app, models);
 }
 
 /// Reloads the catalog from disk, sends it to the viewport and refreshes the sidebar
@@ -130,6 +372,13 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         }
         fill(&app, &m);
     });
+
+    let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
+    ui.on_library_cmd(move |verb, part, arg| {
+        let Some(ui) = w.upgrade() else { return };
+        command(&ui, &mut a.borrow_mut(), &m, &verb, &part, &arg);
+    });
+    sync_ui(ui, &app.borrow());
 
     let ui_weak = ui.as_weak();
     let a = app.clone();
@@ -170,7 +419,6 @@ pub fn drag(ui: &AppWindow, app: &Rc<RefCell<AppState>>, item: DragItem, kind: i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lab_core::part::PartDef;
 
     fn def(id: &str, name: &str, category: &str) -> PartDef {
         serde_json::from_value(serde_json::json!({
@@ -180,21 +428,68 @@ mod tests {
         .unwrap()
     }
 
+    fn filt<'a>(query: &'a str, show_builtin: bool, hidden: &'a BTreeSet<String>) -> LibraryFilter<'a> {
+        LibraryFilter { query, library: None, group: None, units: UnitFilter::All, vendor: None, show_builtin, show_hidden: false, hidden }
+    }
+
+    fn ids(rows: &[LibraryRow]) -> Vec<String> {
+        rows.iter().filter(|r| !r.header).map(|r| r.id.to_string()).collect()
+    }
+
     #[test]
     fn groups_and_search() {
         let catalog = Catalog::from_defs(vec![
             def("thorlabs:KM100", "KM100", "mounts/kinematic"),
             def("thorlabs:TR50/M", "TR50/M", "posts/posts"),
         ]);
+        let none = BTreeSet::new();
         // `from_defs` marks every part built-in: hidden unless asked for.
-        assert!(rows(&catalog, "", &BTreeSet::new(), false).is_empty());
-        let all = rows(&catalog, "", &BTreeSet::new(), true);
+        assert!(rows(&catalog, &filt("", false, &none), &BTreeSet::new()).is_empty());
+        let all = rows(&catalog, &filt("", true, &none), &BTreeSet::new());
         let labels: Vec<_> = all.iter().map(|r| r.label.to_string()).collect();
         assert_eq!(labels, ["Posts", "TR50/M", "Mounts", "KM100"]);
-        let found = rows(&catalog, "km", &BTreeSet::from(["mounts".to_string()]), true);
+        let found = rows(&catalog, &filt("km", true, &none), &BTreeSet::from(["mounts".to_string()]));
         assert_eq!(found.len(), 2);
         assert_eq!(found[1].id, "thorlabs:KM100");
-        let collapsed = rows(&catalog, "", &BTreeSet::from(["posts".to_string()]), true);
+        let collapsed = rows(&catalog, &filt("", true, &none), &BTreeSet::from(["posts".to_string()]));
         assert_eq!(collapsed.len(), 3);
+    }
+
+    #[test]
+    fn unit_systems() {
+        let mut tagged = def("a", "A", "posts");
+        tagged.tags = vec!["metric".into()];
+        assert_eq!(unit_system(&tagged), Some(Unit::Metric));
+        assert_eq!(unit_system(&def("b", "TR50/M", "posts")), Some(Unit::Metric));
+        let mut threaded = def("c", "TR2", "posts");
+        threaded.connectors = serde_json::from_value(serde_json::json!([{
+            "name": "top", "kind": "thread", "spec": "8-32", "gender": "female",
+            "frame": { "origin": [0.0, 0.0, 0.0], "z": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0] },
+        }]))
+        .unwrap();
+        assert_eq!(unit_system(&threaded), Some(Unit::Inch));
+        assert_eq!(unit_system(&def("d", "KM100", "mounts")), None);
+    }
+
+    #[test]
+    fn library_type_units_and_hidden_filters() {
+        let catalog = Catalog::from_defs(vec![
+            def("thorlabs:KM100", "KM100", "mounts/kinematic"),
+            def("thorlabs:TR50/M", "TR50/M", "posts/posts"),
+            def("thorlabs:TR2", "TR2", "posts/posts"),
+        ]);
+        let (none, c) = (BTreeSet::new(), BTreeSet::new());
+        let lib = vec!["thorlabs:KM100".to_string()];
+        // A separate library ignores `show_builtin`.
+        let f = LibraryFilter { library: Some(&lib), ..filt("", false, &none) };
+        assert_eq!(ids(&rows(&catalog, &f, &c)), ["thorlabs:KM100"]);
+        let f = LibraryFilter { group: Some("posts"), ..filt("", true, &none) };
+        assert_eq!(ids(&rows(&catalog, &f, &c)), ["thorlabs:TR2", "thorlabs:TR50/M"]);
+        let f = LibraryFilter { units: UnitFilter::Metric, ..filt("", true, &none) };
+        assert_eq!(ids(&rows(&catalog, &f, &c)), ["thorlabs:TR50/M"]);
+        let hidden = BTreeSet::from(["thorlabs:KM100".to_string()]);
+        assert!(!ids(&rows(&catalog, &filt("", true, &hidden), &c)).contains(&"thorlabs:KM100".to_string()));
+        let shown = rows(&catalog, &LibraryFilter { show_hidden: true, ..filt("", true, &hidden) }, &c);
+        assert!(shown.iter().any(|r| r.id == "thorlabs:KM100" && r.hidden));
     }
 }

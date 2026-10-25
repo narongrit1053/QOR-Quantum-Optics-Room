@@ -560,7 +560,12 @@ export component ViewportOverlay inherits Rectangle {
 
 // POLA-60: right-click menu of a library part.
 export component PartMenu inherits PopupWindow {
+    // POLA-162: library entries. `targets`: separate libraries without this part.
+    in property <bool> hidden;
+    in property <[string]> targets;
+    in property <string> active-library;
     callback edit-connectors();
+    callback cmd(string /* verb */, string /* arg */);
 
     width: 200px;
 
@@ -575,6 +580,23 @@ export component PartMenu inherits PopupWindow {
 
         VerticalLayout {
             padding: 5px;
+            MenuRow {
+                label: root.hidden ? "Show in library" : "Hide from library";
+                clicked => { root.cmd("hide", ""); }
+            }
+            for t in root.targets: MenuRow {
+                label: "Add to \"" + t + "\"";
+                clicked => { root.cmd("add", t); }
+            }
+            MenuRow {
+                label: "Add to new library…";
+                clicked => { root.cmd("new", ""); }
+            }
+            if root.active-library != "": MenuRow {
+                label: "Remove from \"" + root.active-library + "\"";
+                clicked => { root.cmd("remove", ""); }
+            }
+            MenuSeparator { }
             MenuRow {
                 label: "Edit connectors…";
                 clicked => { root.edit-connectors(); }
