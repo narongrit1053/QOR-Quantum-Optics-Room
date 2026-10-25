@@ -29,6 +29,8 @@ export struct LibraryRow {
     // POLA-61
     thumb: image,
     has-thumb: bool,
+    // POLA-162: hidden part, listed (dimmed) only with the Hidden filter on.
+    hidden: bool,
 }
 
 // M0 node fields (read-only label/value pairs).

@@ -398,6 +398,19 @@ export component AppWindow inherits Window {
     callback library-drag(string /* part id */, int, length, length);
     // POLA-60: right-click on a library part ("Edit connectors…" for user-library parts).
     callback library-edit(string /* part id */);
+    // POLA-162: separate libraries and filters (state lives in lab-app's LibraryState).
+    // verb: step, create, new, cancel, delete, hide, add, remove, menu, type, vendor, units, hidden.
+    callback library-cmd(string /* verb */, string /* part id */, string /* arg */);
+    in property <[string]> library-names;
+    in property <string> library-active;
+    in property <string> library-type: "All";
+    in property <string> library-vendor: "All";
+    in property <int> library-units;
+    in property <bool> library-show-hidden;
+    in property <bool> library-filtered;
+    in property <bool> library-menu-hidden;
+    in property <[string]> library-menu-targets;
+    property <bool> library-naming;
     property <string> library-menu-part;
     property <length> library-menu-x;
     property <length> library-menu-y;
@@ -1023,15 +1036,116 @@ export component AppWindow inherits Window {
                 }
 
                 SectionHeader { text: "LIBRARY"; }
+                // POLA-162: library picker (Default, then each separate library).
+                if !root.library-naming: HorizontalLayout {
+                    height: 28px;
+                    spacing: 4px;
+                    IconButton { icon: "‹"; size: 24px; y: 2px; clicked => { root.library-cmd("step", "", "-1"); } }
+                    Text {
+                        text: root.library-active == "" ? "Default" : root.library-active;
+                        horizontal-stretch: 1;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton { icon: "›"; size: 24px; y: 2px; clicked => { root.library-cmd("step", "", "1"); } }
+                    ToolButton { label: "New library…"; clicked => { root.library-cmd("new", "", ""); root.library-naming = true; } }
+                    if root.library-active != "": ToolButton {
+                        label: "Delete library";
+                        clicked => { root.library-cmd("delete", "", ""); }
+                    }
+                }
+                if root.library-naming: Rectangle {
+                    height: 28px;
+                    border-radius: Theme.radius-control;
+                    background: Theme.control-bg;
+                    name-input := TextInput {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                        single-line: true;
+                        init => { self.focus(); }
+                        changed has-focus => {
+                            EditState.text-focused = self.has-focus;
+                        }
+                        accepted => {
+                            root.library-cmd("create", "", self.text);
+                            root.library-naming = false;
+                        }
+                        key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                root.library-cmd("cancel", "", "");
+                                root.library-naming = false;
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+                    if name-input.text == "": Text {
+                        x: 10px;
+                        text: "Library name, then Enter";
+                        color: Theme.text-tertiary;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                    }
+                }
+                // Filters: Type, Units, Vendor, Hidden. Not saved.
+                HorizontalLayout {
+                    height: 28px;
+                    spacing: 2px;
+                    IconButton { icon: "‹"; size: 22px; y: 3px; clicked => { root.library-cmd("type", "", "-1"); } }
+                    Text {
+                        text: "Type: " + root.library-type;
+                        horizontal-stretch: 1;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton { icon: "›"; size: 22px; y: 3px; clicked => { root.library-cmd("type", "", "1"); } }
+                    IconButton { icon: "‹"; size: 22px; y: 3px; clicked => { root.library-cmd("vendor", "", "-1"); } }
+                    Text {
+                        text: "Vendor: " + root.library-vendor;
+                        horizontal-stretch: 1;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton { icon: "›"; size: 22px; y: 3px; clicked => { root.library-cmd("vendor", "", "1"); } }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    SegmentedControl {
+                        horizontal-stretch: 1;
+                        items: ["All", "Metric", "Inch"];
+                        current: root.library-units;
+                        compact: true;
+                        floating: false;
+                        selected(i) => { root.library-cmd("units", "", i); }
+                    }
+                    ToolButton {
+                        label: "Hidden";
+                        active: root.library-show-hidden;
+                        clicked => { root.library-cmd("hidden", "", ""); }
+                    }
+                }
                 // Not interactive: a pointer drag on a row starts a part drag, not a scroll.
                 Flickable {
                     vertical-stretch: 1;
+                    min-height: 160px;
                     interactive: false;
                     content-height: library-layout.preferred-height;
                     library-layout := VerticalLayout {
                         alignment: start;
                         if root.library.length == 0: Text {
-                            text: search.text == "" ? "No imported parts yet. Use Import STEP… (or drop .step files here)." : "No imported parts match.";
+                            text: root.library-filtered ? "No parts match the filters." : search.text == "" ? "No imported parts yet. Use Import STEP… (or drop .step files here)." : "No imported parts match.";
                             color: Theme.text-tertiary;
                             font-size: Theme.font-caption;
                             wrap: word-wrap;
@@ -1067,6 +1181,7 @@ export component AppWindow inherits Window {
                                 ListRow {
                                     label: item.label;
                                     detail: item.detail;
+                                    dimmed: item.hidden;
                                     clicked => {
                                         if (item.header) { root.library-toggle(item.id); }
                                     }
@@ -1089,6 +1204,7 @@ export component AppWindow inherits Window {
                                             DragState.cancelled = false;
                                         } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
                                             root.library-menu-part = item.id;
+                                            root.library-cmd("menu", item.id, "");
                                             root.library-menu-x = self.absolute-position.x + self.mouse-x;
                                             root.library-menu-y = self.absolute-position.y + self.mouse-y;
                                             part-menu.show();
@@ -1307,7 +1423,14 @@ export component AppWindow inherits Window {
         part-menu := PartMenu {
             x: root.library-menu-x;
             y: root.library-menu-y;
+            hidden: root.library-menu-hidden;
+            targets: root.library-menu-targets;
+            active-library: root.library-active;
             edit-connectors => { root.library-edit(root.library-menu-part); }
+            cmd(verb, arg) => {
+                root.library-cmd(verb, root.library-menu-part, arg);
+                if (verb == "new") { root.library-naming = true; }
+            }
         }
 
         // M8 view cube: top-right of the viewport, left of the inspector; 3D only.
