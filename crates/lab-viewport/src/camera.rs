@@ -404,6 +404,16 @@ pub(crate) fn handle_input(
                         zoom_toward(&mut orbit, &camera, camera_transform, to_camera_space(&camera, &full, pos), delta.y, hit);
                     }
                 }
+                ViewportInput::Orbit { delta } => {
+                    // POLA-157: a three-finger slide is a Shift+middle drag in the pane under the pointer.
+                    let camera = pointer.position.map_or(main, |pos| pane_at(&cameras, pos));
+                    let mods = Modifiers { shift: true, ..Default::default() };
+                    let press = Press { button: PointerButton::Middle, mods, start: Vec2::ZERO, last: Vec2::ZERO, dragging: true, gizmo: false, camera };
+                    let pivot = orbit_pivot(selected, &sources);
+                    if let Ok((_, mut orbit, ..)) = cameras.get_mut(camera) {
+                        drag(&mut orbit, press, delta, viewport_height, pivot);
+                    }
+                }
             },
             FrameRequest::SetViewMode(mode) => set_view_mode(&mut cameras, *mode),
             FrameRequest::Frame(target) => {

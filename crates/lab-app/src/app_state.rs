@@ -111,6 +111,9 @@ pub struct AppState {
     pub walls_hidden: bool,
     /// POLA-155: `(name, type)` of the DX12 adapters, for the Settings GPU list.
     pub adapters: Vec<(String, lab_viewport::wgpu::DeviceType)>,
+    /// POLA-157: touchpad reports arrived in the last 300 ms (set by `touchpad`).
+    #[allow(dead_code)] // Nothing reads it yet: it tells later input code the touchpad is in use.
+    pub trackpad_active: bool,
 }
 
 impl AppState {
@@ -145,6 +148,7 @@ impl AppState {
             isolated_nodes: false,
             walls_hidden: false,
             adapters: Vec::new(),
+            trackpad_active: false,
         }
     }
 
