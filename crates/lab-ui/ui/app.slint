@@ -19,6 +19,7 @@ import { ViewCube, CubeFaceRow } from "view_cube.slint";
 import { Icon } from "icons.slint";
 import { WizardPanel } from "wizard.slint";
 import { CommandPalette } from "palette.slint";
+import { LibraryMenu } from "library_menu.slint";
 import { ShortcutSheet } from "shortcuts.slint";
 import { StartPage, StartEntry } from "start_page.slint";
 import { ExportSheet } from "export.slint";
@@ -204,9 +205,12 @@ export component AppWindow inherits Window {
     in property <bool> show-builtin-parts: false;
     // POLA-154 Ctrl+F / `library.find`: focus the library search.
     public function find-part() {
-        search.focus();
-        search.select-all();
+        library-menu.find();
     }
+    // POLA-165: the library menu (A), its Grid | List choice (Settings) and part count.
+    in-out property <bool> library-open;
+    in property <bool> library-list-view;
+    in property <string> library-count;
     // Pointer tool: 0 select, 1 move, 2 rotate, 3 measure, 4 constrain, 5 joint.
     in-out property <int> tool;
     // Measure readout; empty hides the chip.
@@ -482,7 +486,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open;
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open || root.library-open;
     changed shortcuts-open => {
         if (!root.shortcuts-open) {
             EditState.focus-viewport += 1;
@@ -490,6 +494,11 @@ export component AppWindow inherits Window {
     }
     changed settings-open => {
         if (!root.settings-open) {
+            EditState.focus-viewport += 1;
+        }
+    }
+    changed library-open => {
+        if (!root.library-open) {
             EditState.focus-viewport += 1;
         }
     }
@@ -534,9 +543,14 @@ export component AppWindow inherits Window {
                 root.action("palette.open");
                 return accept;
             }
-            // Ctrl+F focuses the library search, also while a field is focused.
-            if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && (event.text == "f" || event.text == "F") && !root.modal) {
-                root.find-part();
+            // Ctrl+F opens the library menu with its search focused, also while a field is focused.
+            if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && (event.text == "f" || event.text == "F") && (!root.modal || root.library-open)) {
+                root.action("library.find");
+                return accept;
+            }
+            // A opens the library menu (the menu's own scope closes it).
+            if ((event.text == "a" || event.text == "A") && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && !EditState.text-focused && !root.modal) {
+                root.action("library.open");
                 return accept;
             }
             // Esc cancels a part drag from the sidebar.
@@ -991,45 +1005,6 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Rectangle {
-                    height: 30px;
-                    border-radius: Theme.radius-control;
-                    background: Theme.control-bg;
-                    search := TextInput {
-                        x: 10px;
-                        width: parent.width - 20px;
-                        color: Theme.text;
-                        font-size: Theme.font-body;
-                        vertical-alignment: center;
-                        single-line: true;
-                        edited => { root.library-search(self.text); }
-                        changed has-focus => {
-                            if (self.has-focus) {
-                                EditState.focused-id = "sidebar.search";
-                                EditState.text-focused = true;
-                                EditState.field-dirty = false;
-                            } else if (EditState.focused-id == "sidebar.search") {
-                                EditState.focused-id = "";
-                                EditState.text-focused = false;
-                            }
-                        }
-                        key-pressed(event) => {
-                            if (event.text == Key.Escape) {
-                                EditState.focus-viewport += 1;
-                                return accept;
-                            }
-                            reject
-                        }
-                    }
-                    if search.text == "": Text {
-                        x: 10px;
-                        text: "Search parts";
-                        color: Theme.text-tertiary;
-                        font-size: Theme.font-body;
-                        vertical-alignment: center;
-                    }
-                }
-
                 PillButton {
                     label: "Import STEP…";
                     clicked => { root.action("import.step"); }
@@ -1039,200 +1014,9 @@ export component AppWindow inherits Window {
                     clicked => { root.action("library.import_folder"); }
                 }
 
-                SectionHeader { text: "LIBRARY"; }
-                // POLA-162: library picker (Default, then each separate library).
-                if !root.library-naming: HorizontalLayout {
-                    height: 28px;
-                    spacing: 4px;
-                    IconButton { icon: "‹"; size: 24px; y: 2px; clicked => { root.library-cmd("step", "", "-1"); } }
-                    Text {
-                        text: root.library-active == "" ? "Default" : root.library-active;
-                        horizontal-stretch: 1;
-                        color: Theme.text;
-                        font-size: Theme.font-body;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    IconButton { icon: "›"; size: 24px; y: 2px; clicked => { root.library-cmd("step", "", "1"); } }
-                }
-                // POLA-163: own line, so the name above keeps the sidebar width.
-                if !root.library-naming: HorizontalLayout {
-                    height: 28px;
-                    spacing: 4px;
-                    ToolButton { label: "New library…"; clicked => { root.library-cmd("new", "", ""); root.library-naming = true; } }
-                    if root.library-active != "": ToolButton {
-                        label: "Delete library";
-                        clicked => { root.library-cmd("delete", "", ""); }
-                    }
-                }
-                if root.library-naming: Rectangle {
-                    height: 28px;
-                    border-radius: Theme.radius-control;
-                    background: Theme.control-bg;
-                    name-input := TextInput {
-                        x: 10px;
-                        width: parent.width - 20px;
-                        color: Theme.text;
-                        font-size: Theme.font-body;
-                        vertical-alignment: center;
-                        single-line: true;
-                        init => { self.focus(); }
-                        changed has-focus => {
-                            EditState.text-focused = self.has-focus;
-                        }
-                        accepted => {
-                            root.library-cmd("create", "", self.text);
-                            root.library-naming = false;
-                        }
-                        key-pressed(event) => {
-                            if (event.text == Key.Escape) {
-                                root.library-cmd("cancel", "", "");
-                                root.library-naming = false;
-                                return accept;
-                            }
-                            reject
-                        }
-                    }
-                    if name-input.text == "": Text {
-                        x: 10px;
-                        text: "Library name, then Enter";
-                        color: Theme.text-tertiary;
-                        font-size: Theme.font-body;
-                        vertical-alignment: center;
-                    }
-                }
-                // Filters: Type, Units, Vendor, Hidden. Not saved.
-                HorizontalLayout {
-                    height: 28px;
-                    spacing: 2px;
-                    IconButton { icon: "‹"; size: 22px; y: 3px; clicked => { root.library-cmd("type", "", "-1"); } }
-                    Text {
-                        text: "Type: " + root.library-type;
-                        horizontal-stretch: 1;
-                        color: Theme.text-secondary;
-                        font-size: Theme.font-caption;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    IconButton { icon: "›"; size: 22px; y: 3px; clicked => { root.library-cmd("type", "", "1"); } }
-                    IconButton { icon: "‹"; size: 22px; y: 3px; clicked => { root.library-cmd("vendor", "", "-1"); } }
-                    Text {
-                        text: "Vendor: " + root.library-vendor;
-                        horizontal-stretch: 1;
-                        color: Theme.text-secondary;
-                        font-size: Theme.font-caption;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    IconButton { icon: "›"; size: 22px; y: 3px; clicked => { root.library-cmd("vendor", "", "1"); } }
-                }
-                HorizontalLayout {
-                    spacing: 6px;
-                    SegmentedControl {
-                        horizontal-stretch: 1;
-                        items: ["All", "Metric", "Inch"];
-                        current: root.library-units;
-                        compact: true;
-                        floating: false;
-                        selected(i) => { root.library-cmd("units", "", i); }
-                    }
-                    ToolButton {
-                        label: "Hidden";
-                        active: root.library-show-hidden;
-                        clicked => { root.library-cmd("hidden", "", ""); }
-                    }
-                }
-                // Not interactive: a pointer drag on a row starts a part drag, not a scroll.
-                Flickable {
-                    vertical-stretch: 1;
-                    min-height: 160px;
-                    interactive: false;
-                    content-height: library-layout.preferred-height;
-                    library-layout := VerticalLayout {
-                        alignment: start;
-                        if root.library.length == 0: Text {
-                            text: root.library-filtered ? "No parts match the filters." : search.text == "" ? "No imported parts yet. Use Import STEP… (or drop .step files here)." : "No imported parts match.";
-                            color: Theme.text-tertiary;
-                            font-size: Theme.font-caption;
-                            wrap: word-wrap;
-                        }
-                        for item in root.library: HorizontalLayout {
-                            spacing: 8px;
-                            padding-left: item.header ? 4px : 16px;
-                            if item.header: Rectangle {
-                                width: 14px;
-                                Icon {
-                                    name: item.expanded ? "chevron-down" : "chevron-right";
-                                    tint: Theme.text-tertiary;
-                                    width: 12px;
-                                    height: 12px;
-                                    y: 8px;
-                                }
-                            }
-                            if !item.has-thumb: Glyph {
-                                letter: item.letter;
-                                tint: item.tint;
-                                y: 4px;
-                            }
-                            // POLA-61: the part's offscreen-rendered thumbnail.
-                            if item.has-thumb: Image {
-                                source: item.thumb;
-                                width: 28px;
-                                height: 28px;
-                                image-fit: contain;
-                            }
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                height: 28px;
-                                ListRow {
-                                    label: item.label;
-                                    detail: item.detail;
-                                    dimmed: item.hidden;
-                                    clicked => {
-                                        if (item.header) { root.library-toggle(item.id); }
-                                    }
-                                }
-                                // Keeps the pointer grab while pressed, so the drag can leave the sidebar.
-                                if !item.header: TouchArea {
-                                    mouse-cursor: grab;
-                                    moved => {
-                                        if (self.pressed && !DragState.cancelled) {
-                                            DragState.active = true;
-                                            DragState.source = 1;
-                                            root.library-drag(item.id, 0, self.absolute-position.x + self.mouse-x,
-                                                self.absolute-position.y + self.mouse-y);
-                                        }
-                                    }
-                                    pointer-event(event) => {
-                                        DragState.shift = event.modifiers.shift;
-                                        DragState.ctrl = event.modifiers.control;
-                                        if (event.kind == PointerEventKind.down) {
-                                            DragState.cancelled = false;
-                                        } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
-                                            root.library-menu-part = item.id;
-                                            root.library-cmd("menu", item.id, "");
-                                            root.library-menu-x = self.absolute-position.x + self.mouse-x;
-                                            root.library-menu-y = self.absolute-position.y + self.mouse-y;
-                                            part-menu.show();
-                                        } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
-                                            if (!DragState.cancelled) {
-                                                root.library-drag(item.id, 1, self.absolute-position.x + self.mouse-x,
-                                                    self.absolute-position.y + self.mouse-y);
-                                            }
-                                            DragState.active = false;
-                                            DragState.cancelled = false;
-                                        } else if (event.kind == PointerEventKind.cancel) {
-                                            if (!DragState.cancelled) { root.library-drag(item.id, 2, 0, 0); }
-                                            DragState.active = false;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                PillButton {
+                    label: "Library (A)";
+                    clicked => { root.action("library.open"); }
                 }
 
                 StackPanel {
@@ -1706,6 +1490,34 @@ export component AppWindow inherits Window {
             text: root.toast;
             action-label: root.toast-action;
             action-clicked => { root.toast-action-clicked(); }
+        }
+
+        // POLA-165: library menu (A), over the viewport and sidebar.
+        library-menu := LibraryMenu {
+            width: root.width;
+            height: root.height;
+            open <=> root.library-open;
+            naming <=> root.library-naming;
+            rows: root.library;
+            active: root.library-active;
+            type-label: root.library-type;
+            vendor-label: root.library-vendor;
+            units: root.library-units;
+            show-hidden: root.library-show-hidden;
+            filtered: root.library-filtered;
+            list-view: root.library-list-view;
+            count: root.library-count;
+            search(t) => { root.library-search(t); }
+            toggle(g) => { root.library-toggle(g); }
+            drag(id, k, x, y) => { root.library-drag(id, k, x, y); }
+            cmd(verb, part, arg) => { root.library-cmd(verb, part, arg); }
+            part-menu(id, x, y) => {
+                root.library-menu-part = id;
+                root.library-cmd("menu", id, "");
+                root.library-menu-x = x;
+                root.library-menu-y = y;
+                part-menu.show();
+            }
         }
 
         // ── Modal sheets (last, on top, with their own focus scopes) ─────────

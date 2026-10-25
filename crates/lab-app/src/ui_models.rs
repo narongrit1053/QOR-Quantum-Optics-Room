@@ -40,12 +40,14 @@ pub struct UiModels {
     pub room_walls: Rc<VecModel<WallChoice>>,
     pub sheet_buttons: Rc<VecModel<SharedString>>,
     pub library: Rc<VecModel<LibraryRow>>,
+    /// POLA-165: for `library-count`, set by `library::fill`.
+    pub ui: slint::Weak<AppWindow>,
 }
 
 impl UiModels {
     /// Creates the models and hands each to its AppWindow property (once, at startup).
     pub fn install(ui: &AppWindow) -> Rc<Self> {
-        let models = Rc::new(Self::default());
+        let models = Rc::new(Self { ui: slint::ComponentHandle::as_weak(ui), ..Self::default() });
         let m = &models;
         ui.set_scene(ModelRc::from(m.scene.clone()));
         ui.set_inspector(ModelRc::from(m.inspector.clone()));

@@ -43,6 +43,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("view.show_all", "Show All", "View", "unisolate exit isolation", "Esc"),
     a("view.blueprint", "Toggle Blueprint", "View", "drawing lines style", ""),
     a("library.show_builtin", "Show Built-in Demo Parts", "View", "library demo example parts catalog", ""),
+    a("library.open", "Open Library", "View", "library parts components catalog browse", "A"),
     a("library.find", "Find Part", "View", "library search part catalog", "Ctrl+F"),
     a("view.beams", "Show beams", "View", "laser beam path optics trace", ""),
     a("view.theme.dark", "Dark Theme", "View", "appearance colour color", ""),

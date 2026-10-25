@@ -31,6 +31,10 @@ export struct LibraryRow {
     has-thumb: bool,
     // POLA-162: hidden part, listed (dimmed) only with the Hidden filter on.
     hidden: bool,
+    // POLA-165: "vendor · category" (list view) and the grid position (`library::grid_layout`).
+    info: string,
+    x: length,
+    y: length,
 }
 
 // M0 node fields (read-only label/value pairs).

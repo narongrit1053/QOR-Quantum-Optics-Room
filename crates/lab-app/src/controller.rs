@@ -425,7 +425,11 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 eprintln!("settings not saved: {error}");
             }
         }
-        "library.find" => ui.invoke_find_part(),
+        "library.open" => ui.set_library_open(!ui.get_library_open()),
+        "library.find" => {
+            ui.set_library_open(true);
+            ui.invoke_find_part();
+        }
         "beam.toggle" => {
             let outcome = crate::beams::toggle(&app.borrow());
             apply_outcome(ui, app, models, id, outcome);

@@ -1,0 +1,406 @@
+// Library menu (A, POLA-165): a centred overlay with the part library as a grid of tiles or a
+// list, the library picker, search and filters. Pressing a part starts the library drag; when
+// the pointer leaves the panel the menu closes and the drag goes on into the viewport.
+
+import { Theme } from "theme.slint";
+import { LibraryRow } from "types.slint";
+import { Glyph, ListRow, SegmentedControl, ToolButton, IconButton } from "components.slint";
+import { EditState, DragState } from "fields.slint";
+import { Icon } from "icons.slint";
+
+// Press-and-drag on one part (the sidebar row's logic). kind: 0 move, 1 drop, 2 cancel.
+component PartTouch inherits TouchArea {
+    callback drag(int, length, length);
+    callback menu(length, length);
+    mouse-cursor: grab;
+    moved => {
+        if (self.pressed && !DragState.cancelled) {
+            DragState.active = true;
+            DragState.source = 1;
+            root.drag(0, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+        }
+    }
+    pointer-event(event) => {
+        DragState.shift = event.modifiers.shift;
+        DragState.ctrl = event.modifiers.control;
+        if (event.kind == PointerEventKind.down) {
+            DragState.cancelled = false;
+        } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
+            root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+        } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+            if (!DragState.cancelled) {
+                root.drag(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+            DragState.active = false;
+            DragState.cancelled = false;
+        } else if (event.kind == PointerEventKind.cancel) {
+            if (!DragState.cancelled) { root.drag(2, 0, 0); }
+            DragState.active = false;
+        }
+    }
+}
+
+export component LibraryMenu inherits Rectangle {
+    in-out property <bool> open;
+    in-out property <bool> naming;
+    in property <[LibraryRow]> rows;
+    in property <string> active;
+    in property <string> type-label;
+    in property <string> vendor-label;
+    in property <int> units;
+    in property <bool> show-hidden;
+    in property <bool> filtered;
+    in property <bool> list-view;
+    in property <string> count;
+    callback search(string);
+    callback toggle(string /* group */);
+    callback drag(string /* part id */, int, length, length);
+    callback cmd(string /* verb */, string /* part id */, string /* arg */);
+    callback part-menu(string /* part id */, length, length);
+
+    // A tile drag in progress keeps the (closed, transparent) menu alive: its pointer grab
+    // carries the drag into the viewport.
+    property <bool> dragging;
+    property <int> columns: Math.max(1, Math.floor((list.width - 16px + 8px) / 128px));
+    changed columns => { root.cmd("columns", "", root.columns); }
+    init => { root.cmd("columns", "", root.columns); }
+
+    public function find() {
+        field.focus();
+        field.select-all();
+    }
+
+    visible: root.open || root.dragging;
+    changed open => {
+        if (root.open) { field.focus(); }
+    }
+
+    function part-drag(id: string, kind: int, x: length, y: length) {
+        root.dragging = kind == 0;
+        if (kind == 0 && root.open && (x < panel.absolute-position.x || x > panel.absolute-position.x + panel.width
+                || y < panel.absolute-position.y || y > panel.absolute-position.y + panel.height)) {
+            root.open = false;
+        }
+        root.drag(id, kind, x, y);
+    }
+
+    // A click outside the panel closes it.
+    TouchArea {
+        clicked => { root.open = false; }
+        scroll-event(event) => { accept }
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.open = false; return accept; }
+            if ((event.text == "a" || event.text == "A") && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta) {
+                root.open = false;
+                return accept;
+            }
+            reject
+        }
+
+        panel := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: parent.width * 0.8;
+            height: parent.height * 0.8;
+            opacity: root.open ? 1 : 0;
+            background: Theme.panel-bg;
+            border-radius: Theme.radius-control;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: Theme.shadow-strong;
+
+            TouchArea { clicked => { keys.focus(); } }   // keep clicks on the panel from closing it
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 32px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: Theme.radius-control;
+                        background: Theme.control-bg;
+                        field := TextInput {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            vertical-alignment: center;
+                            single-line: true;
+                            edited => { root.search(self.text); }
+                            changed has-focus => {
+                                if (self.has-focus) {
+                                    EditState.focused-id = "sidebar.search";
+                                    EditState.text-focused = true;
+                                    EditState.field-dirty = false;
+                                } else if (EditState.focused-id == "sidebar.search") {
+                                    EditState.focused-id = "";
+                                    EditState.text-focused = false;
+                                }
+                            }
+                            key-pressed(event) => {
+                                if (event.text == Key.Escape) { root.open = false; return accept; }
+                                reject
+                            }
+                        }
+                        if field.text == "": Text {
+                            x: 10px;
+                            text: "Search parts";
+                            color: Theme.text-tertiary;
+                            font-size: Theme.font-body;
+                            vertical-alignment: center;
+                        }
+                    }
+                    SegmentedControl {
+                        items: ["Grid", "List"];
+                        current: root.list-view ? 1 : 0;
+                        compact: true;
+                        floating: false;
+                        selected(i) => { root.cmd("view", "", i == 1 ? "list" : "grid"); }
+                    }
+                    Text {
+                        text: root.count;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Library picker, New/Delete, then the filters (POLA-162, moved from the sidebar).
+                HorizontalLayout {
+                    height: 28px;
+                    spacing: 4px;
+                    if !root.naming: IconButton { icon: "‹"; size: 24px; y: 2px; clicked => { root.cmd("step", "", "-1"); } }
+                    if !root.naming: Text {
+                        text: "Library: " + (root.active == "" ? "Default" : root.active);
+                        min-width: 160px;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if !root.naming: IconButton { icon: "›"; size: 24px; y: 2px; clicked => { root.cmd("step", "", "1"); } }
+                    if !root.naming: ToolButton { label: "New library…"; clicked => { root.cmd("new", "", ""); root.naming = true; } }
+                    if !root.naming && root.active != "": ToolButton {
+                        label: "Delete library";
+                        clicked => { root.cmd("delete", "", ""); }
+                    }
+                    if root.naming: Rectangle {
+                        width: 240px;
+                        border-radius: Theme.radius-control;
+                        background: Theme.control-bg;
+                        name-input := TextInput {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            vertical-alignment: center;
+                            single-line: true;
+                            init => { self.focus(); }
+                            changed has-focus => { EditState.text-focused = self.has-focus; }
+                            accepted => {
+                                root.cmd("create", "", self.text);
+                                root.naming = false;
+                            }
+                            key-pressed(event) => {
+                                if (event.text == Key.Escape) {
+                                    root.cmd("cancel", "", "");
+                                    root.naming = false;
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                        if name-input.text == "": Text {
+                            x: 10px;
+                            text: "Library name, then Enter";
+                            color: Theme.text-tertiary;
+                            font-size: Theme.font-body;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    IconButton { icon: "‹"; size: 22px; y: 3px; clicked => { root.cmd("type", "", "-1"); } }
+                    Text {
+                        text: "Type: " + root.type-label;
+                        min-width: 110px;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton { icon: "›"; size: 22px; y: 3px; clicked => { root.cmd("type", "", "1"); } }
+                    IconButton { icon: "‹"; size: 22px; y: 3px; clicked => { root.cmd("vendor", "", "-1"); } }
+                    Text {
+                        text: "Vendor: " + root.vendor-label;
+                        min-width: 110px;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton { icon: "›"; size: 22px; y: 3px; clicked => { root.cmd("vendor", "", "1"); } }
+                    SegmentedControl {
+                        items: ["All", "Metric", "Inch"];
+                        current: root.units;
+                        compact: true;
+                        floating: false;
+                        selected(i) => { root.cmd("units", "", i); }
+                    }
+                    ToolButton {
+                        label: "Hidden";
+                        active: root.show-hidden;
+                        clicked => { root.cmd("hidden", "", ""); }
+                    }
+                }
+
+                if root.rows.length == 0: Text {
+                    text: root.filtered ? "No parts match the filters." : field.text == "" ? "No imported parts yet. Use Import STEP… (or drop .step files here)." : "No imported parts match.";
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                }
+
+                // Not interactive: a pointer drag on a part starts a part drag, not a scroll.
+                list := Flickable {
+                    vertical-stretch: 1;
+                    interactive: false;
+                    viewport-height: root.list-view ? list-layout.preferred-height
+                        : root.rows.length > 0 ? root.rows[root.rows.length - 1].y + 148px : 0px;
+
+                    // Grid: positions from `library::grid_layout` (tile 120×140, gap 8, header 28).
+                    if !root.list-view: Rectangle {
+                        for item in root.rows: Rectangle {
+                            x: item.x + 8px;
+                            y: item.y;
+                            width: item.header ? list.width - 16px : 120px;
+                            height: item.header ? 28px : 140px;
+                            border-radius: Theme.radius-control;
+                            background: item.header ? transparent : tile-touch.has-hover ? Theme.control-hover : Theme.control-bg;
+                            opacity: item.hidden ? 0.45 : 1;
+                            if item.header: HorizontalLayout {
+                                spacing: 8px;
+                                padding-left: 4px;
+                                Icon {
+                                    name: item.expanded ? "chevron-down" : "chevron-right";
+                                    tint: Theme.text-tertiary;
+                                    width: 12px;
+                                    height: 12px;
+                                    y: 8px;
+                                }
+                                ListRow {
+                                    label: item.label;
+                                    detail: item.detail;
+                                    clicked => { root.toggle(item.id); }
+                                }
+                            }
+                            if !item.header && item.has-thumb: Image {
+                                x: 10px;
+                                y: 8px;
+                                width: 100px;
+                                height: 90px;
+                                source: item.thumb;
+                                image-fit: contain;
+                            }
+                            if !item.header && !item.has-thumb: Rectangle {
+                                x: 10px;
+                                y: 8px;
+                                width: 100px;
+                                height: 90px;
+                                border-radius: Theme.radius-control;
+                                background: item.tint.transparentize(0.6);
+                                Text {
+                                    text: item.letter;
+                                    color: Theme.text;
+                                    font-size: 28px;
+                                    font-weight: 650;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if !item.header: Text {
+                                x: 6px;
+                                y: 102px;
+                                width: 108px;
+                                text: item.detail;
+                                color: Theme.text;
+                                font-size: Theme.font-caption;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+                            if !item.header: Text {
+                                x: 6px;
+                                y: 119px;
+                                width: 108px;
+                                text: item.label;
+                                color: Theme.text-secondary;
+                                font-size: Theme.font-caption;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+                            tile-touch := PartTouch {
+                                enabled: !item.header;
+                                drag(k, x, y) => { root.part-drag(item.id, k, x, y); }
+                                menu(x, y) => { root.part-menu(item.id, x, y); }
+                            }
+                        }
+                    }
+
+                    // List: one row per part with a 40 px thumbnail.
+                    list-layout := VerticalLayout {
+                        visible: root.list-view;
+                        width: list.width;
+                        alignment: start;
+                        for item in root.list-view ? root.rows : []: HorizontalLayout {
+                            spacing: 10px;
+                            padding-left: item.header ? 8px : 20px;
+                            padding-right: 8px;
+                            height: item.header ? 28px : 44px;
+                            opacity: item.hidden ? 0.45 : 1;
+                            if item.header: Rectangle {
+                                width: 14px;
+                                Icon {
+                                    name: item.expanded ? "chevron-down" : "chevron-right";
+                                    tint: Theme.text-tertiary;
+                                    width: 12px;
+                                    height: 12px;
+                                    y: 8px;
+                                }
+                            }
+                            if item.header: ListRow {
+                                label: item.label;
+                                detail: item.detail;
+                                clicked => { root.toggle(item.id); }
+                            }
+                            if !item.header: Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: Theme.radius-control;
+                                background: row-touch.has-hover ? Theme.control-hover : transparent;
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    padding: 2px;
+                                    if !item.has-thumb: Glyph { letter: item.letter; tint: item.tint; y: 10px; }
+                                    if item.has-thumb: Image { source: item.thumb; width: 40px; height: 40px; image-fit: contain; }
+                                    Text { text: item.detail; width: 140px; color: Theme.text; font-size: Theme.font-body; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { text: item.label; horizontal-stretch: 2; color: Theme.text; font-size: Theme.font-body; vertical-alignment: center; overflow: elide; }
+                                    Text { text: item.info; horizontal-stretch: 1; color: Theme.text-secondary; font-size: Theme.font-caption; vertical-alignment: center; overflow: elide; }
+                                }
+                                row-touch := PartTouch {
+                                    drag(k, x, y) => { root.part-drag(item.id, k, x, y); }
+                                    menu(x, y) => { root.part-menu(item.id, x, y); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

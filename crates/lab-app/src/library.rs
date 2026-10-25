@@ -62,6 +62,8 @@ pub struct LibraryState {
     pub show_hidden: bool,
     /// "New library…" from the part menu: the part the new library starts with.
     pub pending_part: Option<String>,
+    /// POLA-165: grid columns the library menu reported for its width.
+    pub columns: usize,
 }
 
 pub struct LibraryFilter<'a> {
@@ -175,6 +177,7 @@ pub fn rows(catalog: &Catalog, f: &LibraryFilter, collapsed: &BTreeSet<String>) 
             thumb: Default::default(),
             has_thumb: false,
             hidden: false,
+            ..Default::default()
         });
         if expanded {
             out.extend(members.iter().map(|p| {
@@ -183,13 +186,15 @@ pub fn rows(catalog: &Catalog, f: &LibraryFilter, collapsed: &BTreeSet<String>) 
                 id: p.id.as_str().into(),
                 label: p.name.as_str().into(),
                 detail: p.part_number.as_str().into(),
-                letter: "".into(),
-                tint: slint::Color::from_argb_u8(0, 0, 0, 0),
+                letter: letter.into(),
+                tint,
                 header: false,
                 expanded: false,
                 has_thumb: thumb.is_some(),
                 thumb: thumb.unwrap_or_default(),
                 hidden: f.hidden.contains(&p.id),
+                info: if p.vendor.is_empty() { p.category.as_str().into() } else { format!("{} · {}", p.vendor, p.category).into() },
+                ..Default::default()
             }}));
         }
     }
@@ -230,8 +235,49 @@ fn unique_name(libs: &[UserLibrary], name: &str) -> Option<String> {
     Some(name)
 }
 
+/// Library menu tile size and gap, and the group header height (POLA-165).
+pub const TILE_W: f32 = 120.0;
+pub const TILE_H: f32 = 140.0;
+pub const TILE_GAP: f32 = 8.0;
+pub const HEADER_H: f32 = 28.0;
+
+/// Grid positions: a header takes a full row, parts fill `columns` slots per row.
+pub fn grid_layout(rows: &[LibraryRow], columns: usize) -> Vec<(f32, f32)> {
+    let columns = columns.max(1);
+    let (mut y, mut col, mut out) = (0.0, 0, Vec::with_capacity(rows.len()));
+    for r in rows {
+        if r.header {
+            if col > 0 {
+                y += TILE_H + TILE_GAP;
+                col = 0;
+            }
+            out.push((0.0, y));
+            y += HEADER_H + TILE_GAP;
+        } else {
+            if col == columns {
+                y += TILE_H + TILE_GAP;
+                col = 0;
+            }
+            out.push((col as f32 * (TILE_W + TILE_GAP), y));
+            col += 1;
+        }
+    }
+    out
+}
+
 pub fn fill(app: &AppState, models: &UiModels) {
-    sync(&models.library, rows(&app.catalog, &filter(app, app.library.vendor.as_deref()), &app.library.collapsed));
+    let f = filter(app, app.library.vendor.as_deref());
+    let mut rows = rows(&app.catalog, &f, &app.library.collapsed);
+    if let Some(ui) = models.ui.upgrade() {
+        let total = candidates(&app.catalog, &LibraryFilter { query: "", group: None, units: UnitFilter::All, ..f }).len();
+        let shown: usize = rows.iter().filter(|r| r.header).filter_map(|r| r.detail.parse::<usize>().ok()).sum();
+        ui.set_library_count(if shown == total { format!("{total} parts") } else { format!("{shown} of {total} parts") }.into());
+    }
+    let pos = grid_layout(&rows, app.library.columns);
+    for (r, (x, y)) in rows.iter_mut().zip(pos) {
+        (r.x, r.y) = (x, y);
+    }
+    sync(&models.library, rows);
 }
 
 fn strings(items: Vec<slint::SharedString>) -> slint::ModelRc<slint::SharedString> {
@@ -252,6 +298,7 @@ pub fn sync_ui(ui: &AppWindow, app: &AppState) {
     ui.set_library_units(l.units as i32);
     ui.set_library_show_hidden(l.show_hidden);
     ui.set_library_filtered(l.group.is_some() || l.vendor.is_some() || l.units != UnitFilter::All);
+    ui.set_library_list_view(s.library_view == "list");
 }
 
 /// One sidebar library command (POLA-162). Saves the settings when they changed.
@@ -334,6 +381,16 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
         "hidden" => {
             save = false;
             app.library.show_hidden = !app.library.show_hidden;
+        }
+        // POLA-165 library menu: Grid | List (saved) and the column count for its width.
+        "view" => app.settings.library_view = arg.to_string(),
+        "columns" => {
+            let n = arg.parse().unwrap_or(1);
+            if n == app.library.columns {
+                return;
+            }
+            save = false;
+            app.library.columns = n;
         }
         _ => return,
     }
@@ -456,6 +513,26 @@ mod tests {
         assert_eq!(found[1].id, "thorlabs:KM100");
         let collapsed = rows(&catalog, &filt("", true, &none), &BTreeSet::from(["posts".to_string()]));
         assert_eq!(collapsed.len(), 3);
+    }
+
+    #[test]
+    fn grid_layout_rows() {
+        let part = LibraryRow::default();
+        let header = LibraryRow { header: true, ..Default::default() };
+        let rows: Vec<_> = std::iter::once(header.clone())
+            .chain(std::iter::repeat(part.clone()).take(5))
+            .chain(std::iter::once(header))
+            .chain(std::iter::repeat(part).take(2))
+            .collect();
+        let (row, h, w) = (TILE_H + TILE_GAP, HEADER_H + TILE_GAP, TILE_W + TILE_GAP);
+        let y1 = h;
+        let y2 = h + row;
+        let y3 = h + 2.0 * row;
+        let y4 = y3 + h;
+        assert_eq!(
+            grid_layout(&rows, 3),
+            [(0.0, 0.0), (0.0, y1), (w, y1), (2.0 * w, y1), (0.0, y2), (w, y2), (0.0, y3), (0.0, y4), (w, y4)]
+        );
     }
 
     #[test]
