@@ -11,6 +11,7 @@ use bevy::{
 };
 use lab_core::{NodeId, SelectionTarget};
 
+use crate::glb::GlbLod;
 use crate::host::{EventSender, MsaaSamples, PendingRequests, SettleFrames};
 use crate::scene::{SceneIndex, from_render};
 use crate::{FrameRequest, PointerButton, ViewportEvent, ViewportInput};
@@ -76,7 +77,7 @@ fn update(
     pending: Res<PendingRequests>,
     mut state: ResMut<PartBox>,
     active: Res<PartBoxActive>,
-    (index, events, msaa, mut settle): (Res<SceneIndex>, Res<EventSender>, Res<MsaaSamples>, ResMut<SettleFrames>),
+    (index, events, msaa, mut settle, lods): (Res<SceneIndex>, Res<EventSender>, Res<MsaaSamples>, ResMut<SettleFrames>, Query<&GlbLod>),
     spawned: Query<Entity, With<BoxEntity>>,
     sources: Query<(&GlobalTransform, Option<&Children>)>,
     pieces: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform, Option<&Aabb>)>,
@@ -96,7 +97,7 @@ fn update(
                 let Ok((root_gt, _)) = sources.get(root) else { continue };
                 let to_part = root_gt.affine().inverse();
                 let (mut min, mut max) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-                let descendants: Vec<Entity> = descendants(root, &sources);
+                let descendants: Vec<Entity> = descendants(root, &sources, &lods);
                 for e in descendants {
                     let Ok((mesh, material, gt, aabb)) = pieces.get(e) else { continue };
                     let rel = Transform::from_matrix(Mat4::from(to_part * gt.affine()));
@@ -135,7 +136,7 @@ fn update(
                         clear_color: ClearColorConfig::Custom(Color::srgb(0.16, 0.17, 0.19)),
                         ..default()
                     },
-                    if msaa.0 > 1 { Msaa::Sample4 } else { Msaa::Off },
+                    match msaa.0 { 8 => Msaa::Sample8, 4 => Msaa::Sample4, 2 => Msaa::Sample2, _ => Msaa::Off },
                     RenderTarget::TextureView(BOX_VIEW),
                     Projection::Perspective(PerspectiveProjection { fov: FOV, near: 0.0005, far: 10.0, ..default() }),
                     orbit.transform(),
@@ -204,10 +205,14 @@ fn update(
     }
 }
 
-fn descendants(root: Entity, sources: &Query<(&GlobalTransform, Option<&Children>)>) -> Vec<Entity> {
+/// Skips the coarse GLB LODs: without their `VisibilityRange` they would draw over LOD0 (POLA-158).
+fn descendants(root: Entity, sources: &Query<(&GlobalTransform, Option<&Children>)>, lods: &Query<&GlbLod>) -> Vec<Entity> {
     let mut out = Vec::new();
     let mut stack = vec![root];
     while let Some(e) = stack.pop() {
+        if lods.get(e).is_ok_and(|lod| !lod.primary) {
+            continue;
+        }
         out.push(e);
         if let Ok((_, Some(children))) = sources.get(e) {
             stack.extend(children.iter());
