@@ -35,7 +35,7 @@ pub(crate) struct GlbLod {
     pickable: bool,
     /// LOD0: the only LOD that carries `SceneNode`, so outline and framing see one copy of the
     /// part (POLA-58). Every LOD carries `PickId` (M8: picking at any distance).
-    primary: bool,
+    pub(crate) primary: bool,
     ready: bool,
 }
 
