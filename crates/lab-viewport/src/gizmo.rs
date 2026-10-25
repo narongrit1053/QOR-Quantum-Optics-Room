@@ -15,6 +15,7 @@ use bevy::{
 use lab_catalog::Catalog;
 use lab_core::part::Frame;
 use lab_core::{Attach, Document, Joint, Node, NodeId, Parent, SelectionTarget, Shape, compute_holes};
+use lab_mates::constraints::FreeMotion;
 use lab_mates::joints::{Dof, dofs};
 
 use crate::camera::{OrbitCamera, PointerState, camera_at, handle_input, to_camera_space};
@@ -66,6 +67,8 @@ pub(crate) struct Drag {
     /// in the room at the press.
     pub dof: Option<usize>,
     pub joint: Option<(DVec3, DQuat)>,
+    /// Constrained drags: the free motion at the press and the parent frame's room pose.
+    free: Option<(FreeMotion, (DVec3, DQuat))>,
     last: Option<(Attach, DVec3, DQuat)>,
 }
 
@@ -112,6 +115,15 @@ pub(crate) fn handles(doc: &Document, catalog: &Catalog, node: &Node, tool: Tool
             _ => vec![GizmoHandle::Joint],
         };
     }
+    // A constrained node moves only along its free degrees of freedom (POLA-160).
+    if let Some((free, _)) = constrained_motion(doc, node) {
+        return match tool {
+            Tool::Move | Tool::Select if free.slides.len() == 1 => vec![GizmoHandle::Slide],
+            Tool::Move | Tool::Select if free.slides.len() > 1 => vec![GizmoHandle::Plane],
+            Tool::Rotate if free.turn.is_some() => vec![GizmoHandle::Ring],
+            _ => Vec::new(),
+        };
+    }
     let mate = mate_frames(doc, catalog, node);
     match tool {
         Tool::Measure | Tool::Constrain | Tool::Joint => Vec::new(),
@@ -149,6 +161,29 @@ fn mate_frames(doc: &Document, catalog: &Catalog, node: &Node) -> Option<(Frame,
     let pf = lab_mates::connector_frame(parent_def, parent_conn, &parent.params)?;
     let cf = lab_mates::connector_frame(catalog.get(&node.part)?, self_conn, &node.params)?;
     Some((pf, cf, range))
+}
+
+/// Free motion of a constrained node in its parent frame, and the parent frame's room pose.
+fn constrained_motion(doc: &Document, node: &Node) -> Option<(FreeMotion, (DVec3, DQuat))> {
+    let Attach::Constrained { constraints } = &node.attach else { return None };
+    let parent = lab_mates::constraints::world_pose(doc, node.parent)?;
+    Some((lab_mates::constraints::free_motion((node.position, node.rotation), constraints), parent))
+}
+
+/// Normal of the plane a constrained Plane drag moves in (parent frame).
+fn slide_normal(free: &FreeMotion) -> DVec3 {
+    match free.slides[..] {
+        [a, b] => a.cross(b).normalize(),
+        _ => DVec3::Z,
+    }
+}
+
+/// Room-frame centre and axis of the rotate ring.
+fn ring_axis(doc: &Document, catalog: &Catalog, node: &Node) -> Option<(DVec3, DVec3)> {
+    match constrained_motion(doc, node) {
+        Some((free, (pp, pq))) => free.turn.map(|(o, a)| (pp + pq * o, pq * a)),
+        None => Some((room_anchor(doc, catalog, node)?, DVec3::Z)),
+    }
 }
 
 /// Whether direction `z` of node `id`'s part frame is vertical in the room.
@@ -229,7 +264,8 @@ fn plane_angle(o: DVec3, axis: DVec3, grab: DVec3, (ro, rd): (DVec3, DVec3)) -> 
 impl Drag {
     pub(crate) fn new(doc: &Document, catalog: &Catalog, node: &Node, handle: GizmoHandle, grab: DVec3) -> Option<Drag> {
         let mut start = node.clone();
-        if handle == GizmoHandle::Plane && matches!(node.parent, Parent::Node(_)) {
+        let free = constrained_motion(doc, node);
+        if handle == GizmoHandle::Plane && matches!(node.parent, Parent::Node(_)) && free.is_none() {
             // Moving a node that sits on a node: it continues free on its root, where it is now.
             let (position, rotation) = doc.node_pose(node.id)?;
             start.parent = doc.root_platform(node.id).map_or(Parent::Room, Parent::Platform);
@@ -247,6 +283,7 @@ impl Drag {
             handle,
             dof,
             joint,
+            free,
             anchor: room_anchor(doc, catalog, node)?,
             start,
             root: root_frame(doc, node.id),
@@ -265,6 +302,9 @@ impl Drag {
         shift: bool,
         ctrl: bool,
     ) -> Option<(Attach, DVec3, DQuat)> {
+        if self.free.is_some() {
+            return self.free_update(ray, shift);
+        }
         let start = &self.start;
         let turn = DQuat::from_rotation_z(self.root.1);
         match self.handle {
@@ -331,6 +371,16 @@ impl Drag {
     /// from the start, Ring and joint rotations turn `v` degrees, slides set `v` mm.
     pub(crate) fn exact(&self, doc: &Document, catalog: &Catalog, v: f64) -> Option<(Attach, DVec3, DQuat)> {
         let start = &self.start;
+        if let Some((free, _)) = &self.free {
+            return match self.handle {
+                GizmoHandle::Plane => {
+                    let dir = (self.last.as_ref()?.1 - start.position).normalize_or_zero();
+                    (dir != DVec3::ZERO).then(|| self.free_slide(dir * v))
+                }
+                GizmoHandle::Slide => Some(self.free_slide(*free.slides.first()? * v)),
+                _ => self.free_turn(v.to_radians()),
+            };
+        }
         match self.handle {
             GizmoHandle::Plane => {
                 let dir = (self.last.as_ref()?.1 - start.position).truncate().normalize_or_zero();
@@ -356,6 +406,44 @@ impl Drag {
             _ => false,
         };
         if rot { DragUnit::Degrees } else { DragUnit::Mm }
+    }
+
+    /// Constrained drags, worked in the parent frame: the ray and grab are mapped into it.
+    fn free_update(&self, ray: (DVec3, DVec3), shift: bool) -> Option<(Attach, DVec3, DQuat)> {
+        let (free, (pp, pq)) = self.free.as_ref()?;
+        let inv = pq.inverse();
+        let (ro, rd) = (inv * (ray.0 - *pp), inv * ray.1);
+        let grab = inv * (self.grab - *pp);
+        match self.handle {
+            GizmoHandle::Plane => {
+                let n = slide_normal(free);
+                let denom = rd.dot(n);
+                let t = (grab - ro).dot(n) / denom;
+                (denom.abs() > 1e-9 && t > 0.0).then(|| self.free_slide(ro + rd * t - grab))
+            }
+            GizmoHandle::Slide => {
+                let axis = *free.slides.first()?;
+                let t = line_param(grab, axis, (ro, rd))?;
+                Some(self.free_slide(axis * if shift { t } else { t.round() }))
+            }
+            GizmoHandle::Ring => {
+                let (o, axis) = free.turn?;
+                let raw = plane_angle(o, axis, grab, (ro, rd))?;
+                self.free_turn(if shift { raw } else { (raw / ROTATE_STEP).round() * ROTATE_STEP })
+            }
+            GizmoHandle::Joint => None,
+        }
+    }
+
+    fn free_slide(&self, delta: DVec3) -> (Attach, DVec3, DQuat) {
+        let s = &self.start;
+        (s.attach.clone(), s.position + delta, s.rotation)
+    }
+
+    fn free_turn(&self, angle: f64) -> Option<(Attach, DVec3, DQuat)> {
+        let (o, axis) = self.free.as_ref()?.0.turn?;
+        let (s, r) = (&self.start, DQuat::from_axis_angle(axis, angle));
+        Some((s.attach.clone(), o + r * (s.position - o), (r * s.rotation).normalize()))
     }
 
     fn joint_value(&self, i: usize, v: f64) -> Option<(Attach, DVec3, DQuat)> {
@@ -417,11 +505,17 @@ fn plane_point((o, d): (DVec3, DVec3), z: f64) -> Option<DVec3> {
     (t > 0.0).then(|| o + d * t)
 }
 
-/// Where a press ray meets the ring's plane, when that is within the ring's grab band.
-fn ring_grab(anchor: DVec3, radius: f64, ray: (DVec3, DVec3)) -> Option<DVec3> {
-    let p = plane_point(ray, anchor.z)?;
-    let d = (p - anchor).truncate().length() / radius.max(1e-9);
-    (RING_GRAB.0..=RING_GRAB.1).contains(&d).then_some(p)
+/// Where a press ray meets the ring's plane (through `centre`, normal `axis`), when that is
+/// within the ring's grab band.
+fn ring_grab(centre: DVec3, axis: DVec3, radius: f64, (o, d): (DVec3, DVec3)) -> Option<DVec3> {
+    let denom = d.dot(axis);
+    let t = (centre - o).dot(axis) / denom;
+    if denom.abs() < 1e-9 || t <= 0.0 {
+        return None;
+    }
+    let p = o + d * t;
+    let r = (p - centre).length() / radius.max(1e-9);
+    (RING_GRAB.0..=RING_GRAB.1).contains(&r).then_some(p)
 }
 
 /// Parameter along the line `p + t·axis` of the point closest to `ray`.
@@ -476,21 +570,22 @@ fn gizmo_input(
                         let Some(ray) = ray_at(pos) else { continue };
                         let available = handles(doc, &catalog.0, node, gizmo.tool);
                         // Handles, and in Move mode the selected part itself (as the plane handle).
+                        let body = [GizmoHandle::Joint, GizmoHandle::Plane, GizmoHandle::Slide]
+                            .into_iter()
+                            .find(|h| available.contains(h));
                         let filter = |e: Entity| {
                             handles_q.contains(e)
-                                || ((available.contains(&GizmoHandle::Plane) || available.contains(&GizmoHandle::Joint))
-                                    && picks.get(e).is_ok_and(|p| p.0 == SelectionTarget::Node(id)))
+                                || (body.is_some() && picks.get(e).is_ok_and(|p| p.0 == SelectionTarget::Node(id)))
                         };
                         let settings = MeshRayCastSettings::default().with_filter(&filter);
                         let grabbed = match ray_cast.cast_ray(ray, &settings).first() {
                             Some((entity, hit)) => {
-                                let body = if available.contains(&GizmoHandle::Joint) { GizmoHandle::Joint } else { GizmoHandle::Plane };
-                                Some((handles_q.get(*entity).copied().unwrap_or(body), from_render(hit.point)))
+                                handles_q.get(*entity).ok().copied().or(body).map(|h| (h, from_render(hit.point)))
                             }
                             None if available.contains(&GizmoHandle::Ring) => {
                                 let radius = f64::from(gizmo.radius / crate::scene::MM);
-                                room_anchor(doc, &catalog.0, node)
-                                    .and_then(|anchor| ring_grab(anchor, radius, render_ray(ray)))
+                                ring_axis(doc, &catalog.0, node)
+                                    .and_then(|(centre, axis)| ring_grab(centre, axis, radius, render_ray(ray)))
                                     .map(|p| (GizmoHandle::Ring, p))
                             }
                             None => None,
@@ -610,6 +705,7 @@ fn update_gizmo(
     }
     let Some(anchor) = room_anchor(doc, &catalog.0, node) else { return };
     let radius = gizmo_radius(&catalog.0, node);
+    let free = constrained_motion(doc, node);
 
     let (strong, faint) = gizmo
         .materials
@@ -631,13 +727,26 @@ fn update_gizmo(
     for handle in available {
         let (mesh, material, transform) = match handle {
             GizmoHandle::Joint => continue,
-            GizmoHandle::Plane => (
-                meshes.add(Annulus::new(r * 0.8, r * 1.2)),
-                faint.clone(),
-                Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
-                    .with_translation(Vec3::Y * 0.0005),
-            ),
-            GizmoHandle::Ring => (meshes.add(Torus::new(RING.0 * r, RING.1 * r)), strong.clone(), Transform::default()),
+            GizmoHandle::Plane => {
+                // Annulus normal +Z onto the drag plane: room up, or a constrained node's slide plane.
+                let normal = free
+                    .as_ref()
+                    .map_or(Vec3::Y, |(f, (_, pq))| crate::scene::normal_to_render(*pq * slide_normal(f)));
+                (
+                    meshes.add(Annulus::new(r * 0.8, r * 1.2)),
+                    faint.clone(),
+                    Transform::from_rotation(Quat::from_rotation_arc(Vec3::Z, normal)).with_translation(normal * 0.0005),
+                )
+            }
+            GizmoHandle::Ring => {
+                let (centre, axis) = ring_axis(doc, &catalog.0, node).unwrap_or((anchor, DVec3::Z));
+                (
+                    meshes.add(Torus::new(RING.0 * r, RING.1 * r)),
+                    strong.clone(),
+                    Transform::from_rotation(Quat::from_rotation_arc(Vec3::Y, crate::scene::normal_to_render(axis)))
+                        .with_translation(to_render(centre) - to_render(anchor)),
+                )
+            }
             GizmoHandle::Slide => {
                 let axis = slide_axis(doc, &catalog.0, node).unwrap_or(Vec3::Y);
                 let length = r * 1.5;
@@ -662,16 +771,18 @@ fn draw_on_top(gizmo: Res<Gizmo>, handles: Query<(&GizmoHandle, &GlobalTransform
     }
     let color = Color::srgb(10.0 / 255.0, 132.0 / 255.0, 1.0);
     let r = gizmo.radius;
-    let flat = |g: &GlobalTransform| Isometry3d::new(g.translation(), Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+    // Circles lie in the isometry's XY plane: the annulus already does, the torus lies in XZ.
+    let at = |g: &GlobalTransform, turn: Quat| Isometry3d::new(g.translation(), g.rotation() * turn);
     for (handle, global) in &handles {
         match handle {
             GizmoHandle::Plane => {
-                lines.circle(flat(global), r * 0.8, color);
-                lines.circle(flat(global), r * 1.2, color);
+                lines.circle(at(global, Quat::IDENTITY), r * 0.8, color);
+                lines.circle(at(global, Quat::IDENTITY), r * 1.2, color);
             }
             GizmoHandle::Ring => {
-                lines.circle(flat(global), r * RING.0, color);
-                lines.circle(flat(global), r * RING.1, color);
+                let flat = at(global, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+                lines.circle(flat, r * RING.0, color);
+                lines.circle(flat, r * RING.1, color);
             }
             GizmoHandle::Joint => {}
             GizmoHandle::Slide => {
@@ -684,6 +795,9 @@ fn draw_on_top(gizmo: Res<Gizmo>, handles: Query<(&GizmoHandle, &GlobalTransform
 
 /// Render-space direction of a mated node's slide axis.
 fn slide_axis(doc: &Document, catalog: &Catalog, node: &Node) -> Option<Vec3> {
+    if let Some((free, (_, pq))) = constrained_motion(doc, node) {
+        return Some(crate::scene::normal_to_render(pq * *free.slides.first()?));
+    }
     let (parent, _, _) = mate_frames(doc, catalog, node)?;
     let Parent::Node(pid) = node.parent else { return None };
     let (_, angle) = root_frame(doc, node.id);
@@ -846,8 +960,8 @@ mod tests {
     #[test]
     fn near_miss_still_grabs_the_ring() {
         let anchor = DVec3::new(10.0, 0.0, 5.0);
-        assert!(ring_grab(anchor, 40.0, down(anchor + DVec3::X * 60.0)).is_some());
-        assert!(ring_grab(anchor, 40.0, down(anchor + DVec3::X * 20.0)).is_none());
-        assert!(ring_grab(anchor, 40.0, down(anchor + DVec3::X * 80.0)).is_none());
+        assert!(ring_grab(anchor, DVec3::Z, 40.0, down(anchor + DVec3::X * 60.0)).is_some());
+        assert!(ring_grab(anchor, DVec3::Z, 40.0, down(anchor + DVec3::X * 20.0)).is_none());
+        assert!(ring_grab(anchor, DVec3::Z, 40.0, down(anchor + DVec3::X * 80.0)).is_none());
     }
 }

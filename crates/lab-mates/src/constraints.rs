@@ -27,6 +27,66 @@ pub fn solve(current: (DVec3, DQuat), cons: &[Constraint]) -> (DVec3, DQuat) {
     (p, q)
 }
 
+/// What a constrained child may still do, in the parent frame (POLA-160).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FreeMotion {
+    /// Orthonormal basis of the allowed slides (0 to 3 vectors).
+    pub slides: Vec<DVec3>,
+    /// The one allowed turn: (point on the axis, unit axis).
+    pub turn: Option<(DVec3, DVec3)>,
+}
+
+/// Free slides and turn of the child at `pose` (parent frame) under `cons`.
+pub fn free_motion(pose: (DVec3, DQuat), cons: &[Constraint]) -> FreeMotion {
+    let (p, q) = pose;
+    // Directions the child may not slide along; turn candidates (point, axis, is_line).
+    let mut blocked = Vec::new();
+    let mut turns: Vec<(Option<DVec3>, DVec3, bool)> = Vec::new();
+    let mut no_turn = false;
+    for c in cons {
+        let (lo, _) = ray(&c.child);
+        let (po, pd) = ray(&c.parent);
+        match c.kind {
+            ConstraintKind::Mate | ConstraintKind::Flush => {
+                blocked.push(pd);
+                turns.push((Some(p + q * lo), pd, false));
+            }
+            ConstraintKind::Concentric => {
+                blocked.extend([perp(pd), pd.cross(perp(pd))]);
+                if c.lock_rotation {
+                    no_turn = true;
+                } else {
+                    turns.push((Some(po), pd, true));
+                }
+            }
+            ConstraintKind::Angle => turns.push((None, pd, false)),
+        }
+    }
+    let basis = |dirs: &[DVec3], keep: &mut Vec<DVec3>| {
+        for d in dirs {
+            let r = keep.iter().fold(*d, |r, k| r - *k * r.dot(*k));
+            if r.length() > 1e-6 {
+                keep.push(r.normalize());
+            }
+        }
+    };
+    let mut span = Vec::new();
+    basis(&blocked, &mut span);
+    let n = span.len();
+    basis(&[DVec3::X, DVec3::Y, DVec3::Z], &mut span);
+    let slides = span.split_off(n);
+    let turn = match turns.first() {
+        _ if no_turn => None,
+        None => Some((p, DVec3::Z)),
+        Some(&(_, axis, _)) if turns.iter().any(|t| t.1.cross(axis).length() > 1e-6) => None,
+        Some(&(_, axis, _)) => {
+            let line = turns.iter().find(|t| t.2).and_then(|t| t.0);
+            Some((line.or_else(|| turns.iter().find_map(|t| t.0)).unwrap_or(p), axis))
+        }
+    };
+    FreeMotion { slides, turn }
+}
+
 /// Default kind for a picked pair; None for plane+axis.
 pub fn default_kind(child: &Feature, parent: &Feature) -> Option<ConstraintKind> {
     match (child, parent) {
@@ -161,6 +221,51 @@ mod tests {
         let b = solve(a, &[concentric(), mate(20.0)]);
         assert!((a.0 - DVec3::new(10.0, 5.0, 10.0)).length() < 1e-6, "{}", a.0);
         assert!((b.0 - a.0 - DVec3::new(0.0, 0.0, 10.0)).length() < 1e-6, "{}", b.0);
+    }
+
+    /// Child side face (-X) on a vertical parent face at x = 20 (normal +X).
+    fn side_mate() -> Constraint {
+        con(ConstraintKind::Mate, plane(DVec3::new(-5.0, 0.0, 10.0), -DVec3::X), plane(DVec3::new(20.0, 0.0, 0.0), DVec3::X), 0.0)
+    }
+
+    fn parallel(a: DVec3, b: DVec3) -> bool {
+        a.normalize().cross(b.normalize()).length() < 1e-9
+    }
+
+    #[test]
+    fn free_motion_follows_the_constraints() {
+        let pose = (DVec3::new(25.0, 3.0, 0.0), DQuat::IDENTITY);
+        let m = free_motion(pose, &[side_mate()]);
+        assert_eq!(m.slides.len(), 2);
+        assert!(m.slides.iter().all(|s| s.dot(DVec3::X).abs() < 1e-9), "{m:?}");
+        let (point, axis) = m.turn.unwrap();
+        assert!(parallel(axis, DVec3::X) && (point - DVec3::new(20.0, 3.0, 10.0)).length() < 1e-9, "{m:?}");
+
+        let m = free_motion((DVec3::new(10.0, 5.0, 30.0), DQuat::IDENTITY), &[concentric()]);
+        assert!(m.slides.len() == 1 && parallel(m.slides[0], DVec3::Z), "{m:?}");
+        assert!(m.turn.is_some_and(|(o, a)| parallel(a, DVec3::Z) && (o - DVec3::new(10.0, 5.0, 0.0)).length() < 1e-9));
+        let locked = Constraint { lock_rotation: true, ..concentric() };
+        assert_eq!(free_motion((DVec3::ZERO, DQuat::IDENTITY), &[locked]).turn, None);
+
+        // Post in a holder: seated and coaxial → only the turn about the post axis is left.
+        let seat = con(ConstraintKind::Mate, plane(DVec3::ZERO, -DVec3::Z), plane(DVec3::new(10.0, 5.0, 0.0), DVec3::Z), 0.0);
+        let m = free_motion((DVec3::new(10.0, 5.0, 0.0), DQuat::IDENTITY), &[seat, concentric()]);
+        assert!(m.slides.is_empty(), "{m:?}");
+        let (point, axis) = m.turn.unwrap();
+        assert!(parallel(axis, DVec3::Z) && (point - DVec3::new(10.0, 5.0, 0.0)).length() < 1e-9, "{m:?}");
+    }
+
+    #[test]
+    fn solve_keeps_free_motion() {
+        let start = solve((DVec3::new(25.0, 3.0, 0.0), DQuat::IDENTITY), &[side_mate()]);
+        let (o, a) = free_motion(start, &[side_mate()]).turn.unwrap();
+        let turned = rotate_about(start.0, start.1, o, DQuat::from_axis_angle(a, 30f64.to_radians()));
+        let back = solve(turned, &[side_mate()]);
+        assert!((back.0 - turned.0).length() < 1e-6 && back.1.angle_between(turned.1) < 1e-6, "{back:?}");
+
+        let slid = (DVec3::new(10.0, 5.0, 45.0), DQuat::IDENTITY);
+        let back = solve(slid, &[concentric()]);
+        assert!((back.0 - slid.0).length() < 1e-6, "{back:?}");
     }
 
     #[test]
