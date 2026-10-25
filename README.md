@@ -43,7 +43,7 @@ powershell -ExecutionPolicy Bypass -File scripts/check-offline.ps1
 | Left-drag | Orbit (pans in the top view) |
 | Right/middle-drag, Shift+left-drag | Pan |
 | Wheel | Zoom toward the cursor |
-| Trackpad | Shift + two-finger slide orbits (three-finger slide also orbits if Windows three-finger swipes are set to Nothing) |
+| View cube | Drag the view cube to orbit |
 | Click | Select a part, platform or wall (Esc clears) |
 | `T` / `P` | Top view / 3D view |
 | `F` / `Shift+F` | Frame everything / frame the selection |

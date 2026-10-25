@@ -73,7 +73,7 @@ pub enum ViewportInput {
     PointerLeave,
     /// `delta.y > 0` means scrolling up / away from the user (zoom in).
     Scroll { delta: Vec2, pos: Vec2, mods: Modifiers },
-    /// POLA-157: a three-finger touchpad slide, in px; orbits like a Shift+middle drag.
+    /// POLA-157: a view cube drag, in px; orbits like a Shift+middle drag.
     Orbit { delta: Vec2 },
 }
 

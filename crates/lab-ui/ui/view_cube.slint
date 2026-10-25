@@ -17,6 +17,8 @@ export component ViewCube inherits Rectangle {
     in property <[CubeFaceRow]> faces;
     callback hover(length, length);
     callback clicked(length, length);
+    // POLA-157: pointer moved while pressed (delta in cube px); orbits the view.
+    callback drag(length, length);
     callback home();
 
     width: 96px;
@@ -56,10 +58,33 @@ export component ViewCube inherits Rectangle {
             changed has-hover => {
                 if !self.has-hover { root.hover(-1px, -1px); }
             }
+            property <length> last-x;
+            property <length> last-y;
+            property <bool> dragged;
             pointer-event(e) => {
+                if e.kind == PointerEventKind.down {
+                    self.last-x = self.mouse-x;
+                    self.last-y = self.mouse-y;
+                    self.dragged = false;
+                }
                 if e.kind == PointerEventKind.move { root.hover(self.mouse-x, self.mouse-y); }
             }
-            clicked => { root.clicked(self.mouse-x, self.mouse-y); }
+            // A drag starts past 3 px from the press; then every move orbits.
+            moved => {
+                if !self.dragged && (abs(self.mouse-x - self.pressed-x) > 3px || abs(self.mouse-y - self.pressed-y) > 3px) {
+                    self.dragged = true;
+                    self.last-x = self.pressed-x;
+                    self.last-y = self.pressed-y;
+                }
+                if self.dragged {
+                    root.drag(self.mouse-x - self.last-x, self.mouse-y - self.last-y);
+                    self.last-x = self.mouse-x;
+                    self.last-y = self.mouse-y;
+                }
+            }
+            clicked => {
+                if !self.dragged { root.clicked(self.mouse-x, self.mouse-y); }
+            }
         }
     }
 
