@@ -138,10 +138,16 @@ fn show(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
         ui.set_constrain_kind(p.kind.and_then(|k| KINDS.iter().position(|x| *x == k)).map_or(-1, |i| i as i32));
         ui.set_constrain_solve_all(p.solve_all);
         ui.set_constrain_row(p.row);
-        controller::set_hint(ui, if p.next == 0 { "Pick a face or axis for Component 1" } else { "Pick a face or axis for Component 2" });
+        let hint = match p.slots[p.next].0 {
+            None => format!("Click Component {} in the view", p.next + 1),
+            Some(_) => format!("Pick a face or axis for Component {} in the box", p.next + 1),
+        };
+        controller::set_hint(ui, &hint);
     });
 }
 
+/// A click with the constrain tool (POLA-159): in the main view it chooses a component (a
+/// platform also its hole/plane, the box cannot show one); in the part box it picks the feature.
 pub fn on_feature_point(
     ui: &AppWindow,
     app: &Rc<RefCell<AppState>>,
@@ -149,59 +155,83 @@ pub fn on_feature_point(
     target: SelectionTarget,
     point: DVec3,
     normal: DVec3,
+    in_box: bool,
 ) {
     if !PANEL.with(|p| p.borrow().open) {
         return;
     }
-    let feature = {
+    let resolved = || {
         let a = app.borrow();
         resolve(&a.session.doc, &a.catalog, target, point, normal)
     };
-    let Some(feature) = feature else {
-        show_toast(ui, &app.borrow(), "No face or axis there", false);
-        return;
-    };
-    let slot = PANEL.with(|p| p.borrow().next);
-    if slot == 0 {
-        let SelectionTarget::Node(id) = target else {
-            show_toast(ui, &app.borrow(), "Pick a face or axis on the part to move", false);
+    if in_box {
+        let Some(feature) = resolved() else {
+            show_toast(ui, &app.borrow(), "No face or axis there", false);
             return;
         };
-        if app.borrow().session.doc.node(id).is_some_and(|n| n.locked) {
-            show_toast(ui, &app.borrow(), "Part is locked", false);
-            return;
-        }
-        let retarget = PANEL.with(|p| {
+        let other = PANEL.with(|p| {
             let mut p = p.borrow_mut();
-            let retarget = p.slots[0].0 != Some(target);
-            if retarget {
-                // A new Component 1 starts a new constraint.
-                p.base = None;
-                p.row = -1;
-            }
-            p.slots[0] = (Some(target), Some(feature));
-            p.next = if p.slots[1].1.is_none() { 1 } else { 0 };
-            retarget
+            let next = p.next;
+            let slot = if p.slots[next].0 == Some(target) { Some(next) } else { p.slots.iter().position(|s| s.0 == Some(target)) };
+            let slot = slot?;
+            p.slots[slot].1 = Some(feature);
+            let other = 1 - slot;
+            p.slots[other].1.is_none().then(|| {
+                p.next = other;
+                p.slots[other].0
+            })
         });
-        if retarget {
-            {
-                let mut a = app.borrow_mut();
-                a.session.history.end_gesture();
-                a.session.selection = Some(target);
-                a.send(ViewportRequest::Select(Some(target)));
-            }
-            crate::part_box::open(ui, app, id);
-            controller::refresh(ui, app, models);
+        if let Some(Some(SelectionTarget::Node(n))) = other {
+            crate::part_box::open(ui, app, n);
         }
     } else {
-        if !matches!(target, SelectionTarget::Node(_) | SelectionTarget::Platform(_)) {
-            return;
+        match target {
+            SelectionTarget::Node(id) => {
+                let c1 = PANEL.with(|p| p.borrow().slots[0].0);
+                if c1 == Some(target) {
+                    PANEL.with(|p| p.borrow_mut().next = 0);
+                } else if c1.is_none() {
+                    if app.borrow().session.doc.node(id).is_some_and(|n| n.locked) {
+                        show_toast(ui, &app.borrow(), "Part is locked", false);
+                        return;
+                    }
+                    PANEL.with(|p| {
+                        let mut p = p.borrow_mut();
+                        // A new Component 1 starts a new constraint.
+                        p.base = None;
+                        p.row = -1;
+                        p.slots[0] = (Some(target), None);
+                        p.next = 0;
+                    });
+                    {
+                        let mut a = app.borrow_mut();
+                        a.session.history.end_gesture();
+                        a.session.selection = Some(target);
+                        a.send(ViewportRequest::Select(Some(target)));
+                    }
+                    controller::refresh(ui, app, models);
+                } else {
+                    PANEL.with(|p| {
+                        let mut p = p.borrow_mut();
+                        p.slots[1] = (Some(target), None);
+                        p.next = 1;
+                    });
+                }
+                crate::part_box::open(ui, app, id);
+            }
+            SelectionTarget::Platform(_) => {
+                let Some(feature) = resolved() else {
+                    show_toast(ui, &app.borrow(), "No face or axis there", false);
+                    return;
+                };
+                PANEL.with(|p| {
+                    let mut p = p.borrow_mut();
+                    p.slots[1] = (Some(target), Some(feature));
+                    p.next = if p.slots[0].1.is_none() { 0 } else { 1 };
+                });
+            }
+            _ => return,
         }
-        PANEL.with(|p| {
-            let mut p = p.borrow_mut();
-            p.slots[1] = (Some(target), Some(feature));
-            p.next = if p.slots[0].1.is_none() { 0 } else { 1 };
-        });
     }
     let both = PANEL.with(|p| p.borrow().slots.iter().all(|s| s.1.is_some()));
     if both {
@@ -319,8 +349,17 @@ pub fn panel_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiM
     match id {
         "ok" => return finish(ui, app, false),
         "cancel" => return finish(ui, app, true),
-        "select.0" => PANEL.with(|p| p.borrow_mut().next = 0),
-        "select.1" => PANEL.with(|p| p.borrow_mut().next = 1),
+        "select.0" | "select.1" => {
+            let slot = if id == "select.0" { 0 } else { 1 };
+            let target = PANEL.with(|p| {
+                let mut p = p.borrow_mut();
+                p.next = slot;
+                p.slots[slot].0
+            });
+            if let Some(SelectionTarget::Node(n)) = target {
+                crate::part_box::open(ui, app, n);
+            }
+        }
         "solve_all" => PANEL.with(|p| {
             let mut p = p.borrow_mut();
             p.solve_all = !p.solve_all;

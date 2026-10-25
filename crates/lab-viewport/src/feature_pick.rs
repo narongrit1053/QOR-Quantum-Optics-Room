@@ -90,7 +90,7 @@ fn feature_input(
     // Clicks pick features instead of selecting.
     for click in std::mem::take(&mut clicks.0) {
         if let Some((target, point, normal)) = hit_at(click) {
-            events.send(ViewportEvent::FeaturePoint { target, point, normal });
+            events.send(ViewportEvent::FeaturePoint { target, point, normal, in_box: false });
         }
     }
     // M9 E: hover reports the feature under the pointer, once per frame at most.
