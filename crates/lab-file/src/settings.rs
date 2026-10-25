@@ -49,6 +49,9 @@ pub struct Settings {
     pub hidden_parts: BTreeSet<String>,
     #[serde(default)]
     pub active_library: String,
+    /// POLA-165: library menu view, "grid" or "list" ("" reads as grid).
+    #[serde(default)]
+    pub library_view: String,
 }
 
 /// A user part collection: part ids in insertion order, no duplicates.
@@ -123,6 +126,7 @@ impl Default for Settings {
             libraries: Vec::new(),
             hidden_parts: BTreeSet::new(),
             active_library: String::new(),
+            library_view: "grid".into(),
         }
     }
 }
