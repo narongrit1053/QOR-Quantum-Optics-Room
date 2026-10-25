@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use lab_ui::{AppWindow, CubeFaceRow};
-use lab_viewport::ViewportRequest;
+use lab_viewport::{Vec2, ViewportInput, ViewportRequest};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use std::cell::RefCell;
@@ -18,6 +18,9 @@ use crate::app_state::AppState;
 
 /// Edge length of the widget (logical px); matches `view_cube.slint`.
 const SIZE: f32 = 96.0;
+/// POLA-157: orbit px per cube px, so a drag across the cube turns about 180° (camera.rs orbits
+/// 0.006 rad per px: π / (96 × 0.006) ≈ 5.5).
+const DRAG_GAIN: f32 = 5.5;
 /// Pitch the Top/Bottom faces ease to (the camera's clamp).
 const TOP_PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 /// The default 3D view (camera.rs `spawn_camera`).
@@ -170,6 +173,10 @@ pub fn wire(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
         if let Some((yaw, pitch)) = hit(&faces(yaw, pitch, SIZE), x, y) {
             a.borrow().send(ViewportRequest::ViewDirection { yaw, pitch });
         }
+    });
+    let a = app.clone();
+    ui.on_view_cube_drag(move |dx, dy| {
+        a.borrow().send(ViewportRequest::Input(ViewportInput::Orbit { delta: Vec2::new(dx, dy) * DRAG_GAIN }));
     });
     let a = app.clone();
     ui.on_view_cube_home(move || {

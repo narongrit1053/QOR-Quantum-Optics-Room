@@ -389,6 +389,7 @@ export component AppWindow inherits Window {
     in property <[CubeFaceRow]> cube-faces;
     callback view-cube-hover(length, length);
     callback view-cube-clicked(length, length);
+    callback view-cube-drag(length, length);
     callback view-cube-home();
     callback clear-selection();
     // Library sidebar. drag kind: 0 move, 1 drop, 2 cancel; x/y in window coordinates.
@@ -1316,6 +1317,7 @@ export component AppWindow inherits Window {
             faces: root.cube-faces;
             hover(x, y) => { root.view-cube-hover(x, y); }
             clicked(x, y) => { root.view-cube-clicked(x, y); }
+            drag(dx, dy) => { root.view-cube-drag(dx, dy); }
             home => { root.view-cube-home(); }
         }
 

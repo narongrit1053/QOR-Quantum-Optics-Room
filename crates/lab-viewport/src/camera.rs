@@ -405,7 +405,7 @@ pub(crate) fn handle_input(
                     }
                 }
                 ViewportInput::Orbit { delta } => {
-                    // POLA-157: a three-finger slide is a Shift+middle drag in the pane under the pointer.
+                    // POLA-157: a view cube drag is a Shift+middle drag in the pane under the pointer.
                     let camera = pointer.position.map_or(main, |pos| pane_at(&cameras, pos));
                     let mods = Modifiers { shift: true, ..Default::default() };
                     let press = Press { button: PointerButton::Middle, mods, start: Vec2::ZERO, last: Vec2::ZERO, dragging: true, gizmo: false, camera };

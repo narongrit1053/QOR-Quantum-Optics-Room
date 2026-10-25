@@ -28,7 +28,6 @@ mod relations;
 mod transform;
 mod stack;
 mod thumbs;
-mod touchpad;
 mod scene;
 mod settings_ui;
 mod ui_models;
@@ -116,7 +115,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     stack::connect(&ui, &app);
     scene::connect(&ui, &app, &models);
     file_drop::connect(&ui, &app, &models);
-    touchpad::install(&ui, &app);
     part_box::connect(&ui, &app);
     relations::connect(&ui, &app);
     controller::refresh_all(&ui, &app.borrow(), &models);
