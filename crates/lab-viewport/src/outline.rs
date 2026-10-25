@@ -24,7 +24,7 @@ const HOVER: Color = Color::srgb(0.55, 0.7, 0.9);
 
 /// Width in physical px.
 #[derive(Component)]
-struct Outline(f32);
+pub(crate) struct Outline(f32);
 
 /// M9 G. Nodes outlined like hover (`ViewportRequest::HighlightNodes`).
 #[derive(Resource, Default, PartialEq)]

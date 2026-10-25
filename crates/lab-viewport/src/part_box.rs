@@ -12,6 +12,8 @@ use bevy::{
 use lab_core::{NodeId, SelectionTarget};
 
 use crate::glb::GlbLod;
+use crate::outline::Outline;
+use crate::picking::HighlightLook;
 use crate::host::{EventSender, MsaaSamples, PendingRequests, SettleFrames};
 use crate::scene::{SceneIndex, from_render};
 use crate::{FrameRequest, PointerButton, ViewportEvent, ViewportInput};
@@ -80,7 +82,7 @@ fn update(
     (index, events, msaa, mut settle, lods): (Res<SceneIndex>, Res<EventSender>, Res<MsaaSamples>, ResMut<SettleFrames>, Query<&GlbLod>),
     spawned: Query<Entity, With<BoxEntity>>,
     sources: Query<(&GlobalTransform, Option<&Children>)>,
-    pieces: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform, Option<&Aabb>)>,
+    pieces: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform, Option<&Aabb>, Option<&HighlightLook>), Without<Outline>>,
     pickable: Query<(), With<BoxPiece>>,
     mut cameras: Query<(&mut Camera, &GlobalTransform, &mut Transform), With<PartBoxCamera>>,
     mut ray_cast: MeshRayCast,
@@ -99,7 +101,12 @@ fn update(
                 let (mut min, mut max) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
                 let descendants: Vec<Entity> = descendants(root, &sources, &lods);
                 for e in descendants {
-                    let Ok((mesh, material, gt, aabb)) = pieces.get(e) else { continue };
+                    let Ok((mesh, material, gt, aabb, look)) = pieces.get(e) else { continue };
+                    // A selected piece wears a tinted copy; the box wants its real finish.
+                    let material = match look {
+                        Some(HighlightLook::Standard { material, .. }) => material,
+                        _ => &material.0,
+                    };
                     let rel = Transform::from_matrix(Mat4::from(to_part * gt.affine()));
                     if let Some(aabb) = aabb {
                         for corner in corners(aabb) {
@@ -111,7 +118,7 @@ fn update(
                         BoxEntity,
                         BoxPiece,
                         Mesh3d(mesh.0.clone()),
-                        MeshMaterial3d(material.0.clone()),
+                        MeshMaterial3d(material.clone()),
                         rel,
                         RenderLayers::layer(BOX_LAYER),
                     ));
