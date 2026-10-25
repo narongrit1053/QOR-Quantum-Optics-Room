@@ -190,13 +190,23 @@ pub fn connect_input(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
 
     let ui_weak = ui.as_weak();
     let a = app.clone();
-    ui.on_viewport_scroll(move |dx, dy, x, y| {
+    ui.on_viewport_scroll(move |dx, dy, x, y, shift| {
         let Some(ui) = ui_weak.upgrade() else { return };
         let scale = ui.window().scale_factor();
-        a.borrow().send(ViewportRequest::Input(ViewportInput::Scroll {
-            delta: Vec2::new(dx * scale, dy * scale),
+        let delta = Vec2::new(dx * scale, dy * scale);
+        let app = a.borrow();
+        // POLA-157: Shift + two-finger slide orbits (pans in Top view). Both axes pass through,
+        // so it works whether the slide arrives as vertical or horizontal scroll. Slint's scroll
+        // delta already follows the fingers, like a drag; 1 px per px roughly matches the
+        // three-finger slide (PX_PER_PAD per pad width).
+        if shift && app.trackpad_active {
+            app.send(ViewportRequest::Input(ViewportInput::Orbit { delta }));
+            return;
+        }
+        app.send(ViewportRequest::Input(ViewportInput::Scroll {
+            delta,
             pos: Vec2::new(x * scale, y * scale),
-            mods: Modifiers::default(),
+            mods: Modifiers { shift, ..Default::default() },
         }));
     });
 

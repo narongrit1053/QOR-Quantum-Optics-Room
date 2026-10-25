@@ -382,7 +382,7 @@ export component AppWindow inherits Window {
     callback scene-row-action(int /* kind */, int /* id */, string /* "delete" | "lock" | "unlock" | "toggle" */);
     // M0 viewport input. kind: 0 down, 1 up, 2 move, 3 cancel. button: 0 left, 1 right, 2 middle, 3 other.
     callback viewport-pointer(int, int, length, length, bool, bool, bool);
-    callback viewport-scroll(length, length, length, length);
+    callback viewport-scroll(length, length, length, length, bool /* shift */);
     callback viewport-left();
     callback view-mode-requested(int);
     // M8 view cube (view_cube.rs): faces drawn front-to-back; positions in the cube's own px.
@@ -777,7 +777,7 @@ export component AppWindow inherits Window {
                             event.modifiers.alt);
                     }
                     scroll-event(event) => {
-                        root.viewport-scroll(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y);
+                        root.viewport-scroll(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y, event.modifiers.shift);
                         accept
                     }
                     changed has-hover => {
