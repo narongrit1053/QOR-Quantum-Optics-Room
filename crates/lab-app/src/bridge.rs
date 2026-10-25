@@ -105,11 +105,11 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     crate::transform::on_transform_requested(&ui, &app, &models, id, parent, attach, position, rotation, done);
                 }
                 ViewportEvent::PartPoint { point, normal } => crate::wizard::on_part_point(&ui, point, normal),
-                ViewportEvent::FeaturePoint { target, point, normal } => {
+                ViewportEvent::FeaturePoint { target, point, normal, in_box } => {
                     if crate::joint::is_active() {
                         crate::joint::on_feature_point(&ui, &app, &models, target, point, normal);
                     } else {
-                        crate::constrain::on_feature_point(&ui, &app, &models, target, point, normal);
+                        crate::constrain::on_feature_point(&ui, &app, &models, target, point, normal, in_box);
                     }
                 }
                 ViewportEvent::FeatureHover { target, point, normal } => {

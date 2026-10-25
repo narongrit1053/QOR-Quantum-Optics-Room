@@ -194,6 +194,7 @@ fn update(
                             target: SelectionTarget::Node(open.node),
                             point: from_render(hit.point),
                             normal: DVec3::new(n.x as f64, -n.z as f64, n.y as f64).normalize_or_zero(),
+                            in_box: true,
                         });
                     }
                     ViewportInput::PointerLeave => open.press = None,

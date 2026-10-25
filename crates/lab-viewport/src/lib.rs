@@ -318,7 +318,8 @@ pub enum ViewportEvent {
     CameraOrient { yaw: f32, pitch: f32 },
     /// M8. A click with the constrain tool: hit point and surface normal in the target's frame
     /// (part frame for a node, platform frame for a platform), mm, +Z up.
-    FeaturePoint { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
+    /// `in_box`: the click was in the part box (POLA-159), not the main view.
+    FeaturePoint { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3, in_box: bool },
     /// M9 D. A right click without drag (the target is selected first); `pos` in physical px.
     ContextMenu { target: Option<SelectionTarget>, pos: Vec2 },
     /// M9 E. Like `FeaturePoint`, on pointer move while `Tool::Joint`/`Constrain` is active,
