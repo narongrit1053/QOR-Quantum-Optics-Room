@@ -429,7 +429,7 @@ fn run_on_demand(
                         ViewportInput::PointerDown { .. } => pointer_pressed = true,
                         ViewportInput::PointerUp { .. } => pointer_pressed = false,
                         ViewportInput::PointerMove { .. } if pointer_pressed => input_motion = true,
-                        ViewportInput::Scroll { .. } => input_motion = true,
+                        ViewportInput::Scroll { .. } | ViewportInput::Orbit { .. } => input_motion = true,
                         _ => {}
                     }
                     pending.push(FrameRequest::Input(input));
