@@ -103,6 +103,7 @@ export component StartPage inherits Rectangle {
                 PillButton { label: "Open…"; clicked => { root.action("file.open"); } }
                 PillButton { label: "Open Demo"; clicked => { root.action("file.open_demo"); } }
                 PillButton { label: "Browse Library"; clicked => { root.action("library.browse"); } }
+                PillButton { label: "Thorlabs Catalog"; clicked => { root.action("catalog.open"); } }
             }
 
             if root.error != "": Text {

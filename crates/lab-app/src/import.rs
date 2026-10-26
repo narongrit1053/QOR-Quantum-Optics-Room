@@ -11,6 +11,7 @@ use lab_core::Finish;
 use lab_core::glam::DVec3;
 use lab_core::part::{ConnectorDef, ConnectorKind, Feature, Frame, Gender, Geometry, PartDef};
 use lab_geom::TriMesh;
+use lab_catalog::book::BookItem;
 use lab_import::{ImportOptions, Progress, SourceUp};
 use lab_ui::AppWindow;
 use lab_viewport::{DragItem, Modifiers, PartDrag, Vec2, ViewportRequest};
@@ -209,7 +210,7 @@ fn start(ui: &AppWindow) {
             })
             .ok();
         };
-        let result = convert(&step, &library, Spec { vendor, part_number, name, category, finish_index, opts }, &progress);
+        let result = convert(&step, &library, Spec { vendor, part_number, name, category, finish_index, opts, meta: Vec::new() }, &progress);
         let message = match result {
             Ok((def, imported)) => Ok((
                 def.id.clone(),
@@ -353,8 +354,13 @@ fn named_id(n: &Named) -> String {
     format!("{}:{}", n.vendor.to_lowercase(), n.part_number)
 }
 
+/// One batch file; a catalog-book job has no file yet and downloads `item.step` first.
+type Job = (PathBuf, Named, Option<&'static BookItem>);
+
 struct Batch {
-    jobs: VecDeque<(PathBuf, Named)>,
+    jobs: VecDeque<Job>,
+    /// A "Download & import list" batch of the catalog book (POLA-173).
+    book: bool,
     total: usize,
     imported: usize,
     skipped: usize,
@@ -386,11 +392,6 @@ pub fn choose_folder(ui: &AppWindow) {
 /// Imports every `.step`/`.stp` file directly in `dir` (no recursion), one at a time on a
 /// worker thread, with the form's finish and up axis.
 fn start_batch(ui: &AppWindow, dir: &Path) {
-    let Some(library) = lab_catalog::user_dir() else {
-        ui.set_import_error("The user library folder (%APPDATA%\\LabSetup\\library) is not available.".into());
-        ui.set_import_step(3);
-        return;
-    };
     let mut files: Vec<PathBuf> =
         std::fs::read_dir(dir).map(|entries| entries.filter_map(|e| e.ok()).map(|e| e.path()).collect()).unwrap_or_default();
     files.retain(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp")));
@@ -400,11 +401,40 @@ fn start_batch(ui: &AppWindow, dir: &Path) {
         ui.set_import_step(3);
         return;
     }
+    start_batch_files(ui, files);
+}
+
+/// Imports `files`, named from their stems.
+fn start_batch_files(ui: &AppWindow, files: Vec<PathBuf>) {
     let stems: Vec<String> = files.iter().map(|p| p.file_stem().unwrap_or_default().to_string_lossy().into_owned()).collect();
-    let jobs: VecDeque<_> = files.into_iter().zip(names_from_stems(&stems)).collect();
+    let jobs = files.into_iter().zip(names_from_stems(&stems)).map(|(p, n)| (p, n, None)).collect();
+    run_batch(ui, jobs, false);
+}
+
+/// "Download & import list" (POLA-173): downloads and imports each catalog-book part, named
+/// from the book.
+pub fn start_book_batch(ui: &AppWindow, items: Vec<&'static BookItem>) {
+    let jobs = items
+        .into_iter()
+        .map(|i| {
+            let named =
+                Named { vendor: "Thorlabs".into(), part_number: i.part.clone(), name: i.name.clone(), category: category_of(&i.part) };
+            (PathBuf::new(), named, Some(i))
+        })
+        .collect();
+    run_batch(ui, jobs, true);
+}
+
+fn run_batch(ui: &AppWindow, jobs: VecDeque<Job>, book: bool) {
+    let Some(library) = lab_catalog::user_dir() else {
+        ui.set_import_error("The user library folder (%APPDATA%\\LabSetup\\library) is not available.".into());
+        ui.set_import_step(3);
+        return;
+    };
     let batch = Batch {
         total: jobs.len(),
         jobs,
+        book,
         imported: 0,
         skipped: 0,
         failed: Vec::new(),
@@ -430,14 +460,26 @@ fn next_job(ui: &AppWindow) {
     let job = BATCH.with(|b| {
         let mut b = b.borrow_mut();
         let batch = b.as_mut()?;
-        while let Some((path, named)) = batch.jobs.pop_front() {
+        while let Some((path, named, item)) = batch.jobs.pop_front() {
             let id = named_id(&named);
             if user_ids.contains(&id) {
                 batch.skipped += 1;
                 batch.ids.push((named.vendor.clone(), id));
                 continue;
             }
-            let text = format!("Importing {} of {}: {}", batch.total - batch.jobs.len(), batch.total, named.part_number);
+            let of = format!("{} of {}: {}", batch.total - batch.jobs.len(), batch.total, named.part_number);
+            let meta = item.map_or_else(Vec::new, |i| {
+                [
+                    ("description", Some(&i.description)),
+                    ("url", Some(&i.url)),
+                    ("cad_pdf", i.cad_pdf.as_ref()),
+                    ("step_url", i.step.as_ref()),
+                ]
+                .into_iter()
+                .filter_map(|(k, v)| Some((k.to_string(), v?.clone())))
+                .chain([("source".to_string(), "thorlabs-book".to_string())])
+                .collect()
+            });
             let spec = Spec {
                 vendor: named.vendor.clone(),
                 part_number: named.part_number.clone(),
@@ -449,20 +491,36 @@ fn next_job(ui: &AppWindow) {
                     finish: Some(finish_of(batch.finish_index)),
                     ..Default::default()
                 },
+                meta,
             };
-            return Some((path, named, spec, batch.library.clone(), text));
+            return Some((path, named, item, spec, batch.library.clone(), of));
         }
         None
     });
-    let Some((path, named, spec, library, text)) = job else { return end_batch(ui) };
-    ui.set_import_progress(text.into());
+    let Some((path, named, item, spec, library, of)) = job else { return end_batch(ui) };
+    let verb = if item.is_some() { "Downloading" } else { "Importing" };
+    ui.set_import_progress(format!("{verb} {of}").into());
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let w = ui.as_weak();
     std::thread::spawn(move || {
+        let path = match item {
+            Some(i) => crate::import_url::download_step(&i.part, i.step.as_deref().unwrap_or_default()).inspect(|_| {
+                let w = w.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = w.upgrade().filter(|_| GENERATION.load(Ordering::SeqCst) == generation) {
+                        ui.set_import_progress(format!("Importing {of}").into());
+                    }
+                })
+                .ok();
+            }),
+            None => Ok(path),
+        };
         // A panic must count as a failure, or the batch waits forever for this file.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| convert(&path, &library, spec, &|_| {})))
-            .map_err(|_| "the importer panicked".to_string())
-            .and_then(|r| r.map(|_| ()).map_err(|e| e.to_string()));
+        let result = path.and_then(|path| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| convert(&path, &library, spec, &|_| {})))
+                .map_err(|_| "the importer panicked".to_string())
+                .and_then(|r| r.map(|_| ()).map_err(|e| e.to_string()))
+        });
         slint::invoke_from_event_loop(move || {
             if GENERATION.load(Ordering::SeqCst) != generation {
                 return; // cancelled
@@ -476,7 +534,7 @@ fn next_job(ui: &AppWindow) {
                             batch.ids.push((named.vendor.clone(), named_id(&named)));
                         }
                         Err(error) => {
-                            eprintln!("import folder: {} failed: {error}", path.display());
+                            eprintln!("import folder: {} failed: {error}", named.part_number);
                             batch.failed.push(named.part_number.clone());
                         }
                     }
@@ -492,13 +550,16 @@ fn next_job(ui: &AppWindow) {
 /// after their vendor and shows the summary.
 fn end_batch(ui: &AppWindow) {
     let Some(batch) = BATCH.with(|b| b.borrow_mut().take()) else { return };
-    let summary = format!(
+    let mut summary = format!(
         "{} imported, {} skipped, {} failed ({:.0} s)",
         batch.imported,
         batch.skipped,
         batch.failed.len(),
         batch.started.elapsed().as_secs_f64()
     );
+    if batch.book && !batch.failed.is_empty() {
+        summary += &format!(": {}", batch.failed.join(", "));
+    }
     eprintln!("import folder: {summary}");
     if !batch.failed.is_empty() {
         eprintln!("import folder: failed: {}", batch.failed.join(", "));
@@ -522,6 +583,9 @@ fn end_batch(ui: &AppWindow) {
         library::reload_catalog(&mut a, models);
         library::sync_ui(ui, &a);
         crate::thumbs::render_missing(&a);
+        if batch.book {
+            crate::catalog_book::after_import(ui, &a);
+        }
         controller::show_toast(ui, &a, &summary, false);
     });
     ui.set_import_step(0);
@@ -534,6 +598,8 @@ struct Spec {
     category: String,
     finish_index: i32,
     opts: ImportOptions,
+    /// Extra `PartDef.meta` entries; they override the defaults (POLA-173: catalog-book details).
+    meta: Vec<(String, String)>,
 }
 
 /// Blocking: converts `step`, detects its features and connectors and writes the part to
@@ -551,6 +617,12 @@ fn convert(
         mesh.append(&m);
     }
     let features = lab_import::features::detect(&mesh);
+    let mut meta = BTreeMap::from([
+        ("finish".to_string(), FINISHES[spec.finish_index.clamp(0, 2) as usize].to_string()),
+        ("source".to_string(), step.file_name().unwrap_or_default().to_string_lossy().into_owned()),
+        ("step_hash".to_string(), step_hash),
+    ]);
+    meta.extend(spec.meta);
     let mut connectors =
         vec![ConnectorDef { name: "seat".into(), kind: ConnectorKind::HoleGridSeat, frame: seat_frame(&features) }];
     connectors.extend(hole_connectors(&features));
@@ -565,11 +637,7 @@ fn convert(
         geometry: Geometry::Mesh { asset: imported.asset.clone() },
         connectors,
         optical_ports: Vec::new(),
-        meta: BTreeMap::from([
-            ("finish".to_string(), FINISHES[spec.finish_index.clamp(0, 2) as usize].to_string()),
-            ("source".to_string(), step.file_name().unwrap_or_default().to_string_lossy().into_owned()),
-            ("step_hash".to_string(), step_hash),
-        ]),
+        meta,
         features,
     };
     lab_import::write_part(library, &def)?;
@@ -638,6 +706,7 @@ pub fn quick_insert(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<Ui
         category: category.into(),
         finish_index: 0,
         opts: ImportOptions { source_up: SourceUp::Y, finish: Some(finish_of(0)), ..Default::default() },
+        meta: Vec::new(),
     };
     let w = ui.as_weak();
     std::thread::spawn(move || {

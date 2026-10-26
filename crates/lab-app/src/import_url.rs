@@ -106,7 +106,7 @@ fn curl(args: &[&str], stdin: Option<&str>) -> Result<Vec<u8>, String> {
 
 /// Resolves `url` to a STEP file and downloads it into `%LOCALAPPDATA%\LabSetup\downloads`.
 pub fn download(url: &str) -> Result<PathBuf, String> {
-    let (step_url, file_name) = match classify(url)? {
+    let (step_url, file_name): (String, String) = match classify(url)? {
         UrlSource::Thorlabs { part } => {
             let query = format!(
                 r#"{{"query":"{{ products(storeId:\"Thorlabs-Website\", cultureName:\"en-US\", query:\"{part}\", first:5){{ items {{ code assets {{ name url group }} }} }} }}"}}"#
@@ -125,13 +125,24 @@ pub fn download(url: &str) -> Result<PathBuf, String> {
             (u, name)
         }
     };
+    save_step(&file_name, &step_url)
+}
+
+/// Downloads catalog part `part`'s STEP file to `%LOCALAPPDATA%\LabSetup\downloads\<part>.step`
+/// ('/' written as '_').
+pub fn download_step(part: &str, step_url: &str) -> Result<PathBuf, String> {
+    save_step(&format!("{}.step", part.replace('/', "_")), step_url)
+}
+
+/// Downloads `step_url` into the downloads folder as `file_name` and checks it is a STEP file.
+fn save_step(file_name: &str, step_url: &str) -> Result<PathBuf, String> {
     let dir = std::env::var_os("LOCALAPPDATA")
         .map(|d| PathBuf::from(d).join("LabSetup").join("downloads"))
         .ok_or("%LOCALAPPDATA% is not set.")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     let path = dir.join(file_name);
     let target = path.to_string_lossy().into_owned();
-    curl(&["-o", &target, &step_url], None)?;
+    curl(&["-o", &target, step_url], None)?;
     let head = std::fs::read(&path).unwrap_or_default();
     if head.len() < 1024 || !head.starts_with(b"ISO-10303-21") {
         let _ = std::fs::remove_file(&path);

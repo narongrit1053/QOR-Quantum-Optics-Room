@@ -6,6 +6,7 @@ mod app_state;
 mod beams;
 mod bom;
 mod bridge;
+mod catalog_book;
 mod clipboard;
 mod constrain;
 mod context_menu;
