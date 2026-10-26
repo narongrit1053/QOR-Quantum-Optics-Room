@@ -843,6 +843,14 @@ pub fn node_view(
         fields.push(InspectorFieldData { label: "Size".into(), value: size });
     }
     fields.push(InspectorFieldData { label: "Finish".into(), value: finish });
+    // Catalog-book details (POLA-173); the inspector shows the links as buttons.
+    if let Some(def) = def {
+        for (key, label) in [("description", "Description"), ("url", "Page"), ("cad_pdf", "CAD PDF"), ("step_url", "STEP")] {
+            if let Some(value) = def.meta.get(key).filter(|v| !v.is_empty()) {
+                fields.push(InspectorFieldData { label: label.into(), value: value.clone() });
+            }
+        }
+    }
 
     let mated = matches!(node.attach, Attach::Mate { .. });
     let length = |id: &str, label: &str, value: f64, enabled: bool| EditFieldData {

@@ -155,3 +155,12 @@ export struct PaletteItem {
     group: string,
     shortcut: string,
 }
+
+// POLA-173: a Thorlabs catalog book row (search results and the pick list).
+// badge: "In library", "No STEP" or "".
+export struct CatalogRow {
+    part: string,
+    name: string,
+    badge: string,
+    selected: bool,
+}

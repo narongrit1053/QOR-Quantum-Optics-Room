@@ -53,6 +53,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     });
 
     crate::import::connect(ui, app, models);
+    crate::catalog_book::connect(ui, app);
     crate::palette::connect(ui, app, models);
     crate::settings_ui::connect(ui, app);
 
@@ -556,6 +557,8 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         }
         "import.step" => crate::import::choose_file(ui, app, models),
         "import.url" => crate::import::choose_url(ui),
+        "catalog.open" => crate::catalog_book::open(ui, &app.borrow()),
+        id if id.starts_with("open.url:") => crate::catalog_book::open_url(&id["open.url:".len()..]),
         "library.import_folder" => crate::import::choose_folder(ui),
         "import.step_insert" => crate::import::insert_dialog(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),

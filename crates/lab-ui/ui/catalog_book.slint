@@ -1,0 +1,255 @@
+// "Thorlabs Catalog…" (POLA-173): browse the catalog book, pick parts into a list, then
+// download and import the whole list. Filtering and the list live in Rust (catalog_book.rs).
+
+import { LineEdit, ComboBox, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { PillButton, IconButton } from "components.slint";
+import { CatalogRow } from "types.slint";
+
+component RowView inherits Rectangle {
+    in property <CatalogRow> item;
+    callback clicked();
+    height: 28px;
+    border-radius: 4px;
+    background: item.selected ? Theme.accent-soft : touch.has-hover ? Theme.control-hover : transparent;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text {
+            text: item.part;
+            width: 110px;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: item.name;
+            horizontal-stretch: 1;
+            color: Theme.text-secondary;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if item.badge != "": Text {
+            text: item.badge;
+            color: item.badge == "No STEP" ? Theme.warning : Theme.accent-text;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component Link inherits PillButton {
+    in property <string> url;
+    callback open(string);
+    enabled: root.url != "";
+    clicked => { root.open(root.url); }
+}
+
+export component CatalogBook inherits Rectangle {
+    in-out property <bool> open;
+    in property <[CatalogRow]> rows;
+    in property <string> count;
+    in property <[string]> categories;
+    in-out property <int> category;
+    in property <string> part;
+    in property <string> part-name;
+    in property <string> path;
+    in property <string> description;
+    in property <string> url;
+    in property <string> cad-pdf;
+    in property <string> step-url;
+    in property <bool> listed;
+    in property <[CatalogRow]> list;
+    // verbs: search(text), category(index), select(part), add, remove(part), clear, link(url), import, close.
+    callback cmd(string /* verb */, string /* arg */);
+
+    visible: root.open;
+    background: Theme.scrim;
+
+    if root.open: TouchArea {
+        scroll-event(event) => { accept }
+    }
+
+    if root.open: FocusScope {
+        focus-on-click: false;
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cmd("close", "");
+            }
+            accept
+        }
+    }
+
+    if root.open: Rectangle {
+        width: min(root.width - 60px, 1180px);
+        height: root.height - 60px;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        background: Theme.sheet-bg;
+        border-radius: Theme.radius-panel;
+        border-width: Theme.border-width;
+        border-color: Theme.sheet-border;
+        TouchArea { }
+
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 16px;
+
+            // Search and results.
+            VerticalLayout {
+                horizontal-stretch: 2;
+                spacing: 8px;
+                Text {
+                    text: "Thorlabs Catalog";
+                    color: Theme.text;
+                    font-size: Theme.font-title;
+                    font-weight: 650;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        init => { self.focus(); }
+                        placeholder-text: "Search part, name or description";
+                        edited(text) => { root.cmd("search", text); }
+                    }
+                    ComboBox {
+                        width: 200px;
+                        model: root.categories;
+                        current-index <=> root.category;
+                        selected(v) => { root.cmd("category", root.category); }
+                    }
+                }
+                Text {
+                    text: root.count;
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    for row in root.rows: RowView {
+                        item: row;
+                        clicked => { root.cmd("select", row.part); }
+                    }
+                }
+            }
+
+            // Details of the selected part.
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 8px;
+                alignment: start;
+                if root.part == "": Text {
+                    text: "Select a part to see its details.";
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-body;
+                }
+                if root.part != "": Text {
+                    text: root.part;
+                    color: Theme.text;
+                    font-size: Theme.font-title;
+                    font-weight: 650;
+                }
+                if root.part != "": Text {
+                    text: root.part-name;
+                    color: Theme.text;
+                    font-size: Theme.font-body;
+                    wrap: word-wrap;
+                }
+                if root.part != "": Text {
+                    text: root.path;
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+                if root.part != "": Text {
+                    text: root.description;
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-body;
+                    wrap: word-wrap;
+                }
+                if root.part != "": HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Link { label: "Open page"; url: root.url; open(u) => { root.cmd("link", u); } }
+                    Link { label: "CAD PDF"; url: root.cad-pdf; open(u) => { root.cmd("link", u); } }
+                    Link { label: "STEP link"; url: root.step-url; open(u) => { root.cmd("link", u); } }
+                }
+                if root.part != "": HorizontalLayout {
+                    alignment: start;
+                    if !root.listed: PillButton {
+                        label: root.step-url == "" ? "No STEP file" : "Add to list";
+                        primary: true;
+                        enabled: root.step-url != "";
+                        clicked => { root.cmd("add", ""); }
+                    }
+                    if root.listed: PillButton {
+                        label: "Remove from list";
+                        clicked => { root.cmd("remove", root.part); }
+                    }
+                }
+            }
+
+            // The pick list.
+            Rectangle {
+                width: 300px;
+                border-radius: Theme.radius-panel;
+                background: Theme.control-hover;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    HorizontalLayout {
+                        Text {
+                            text: "List (" + root.list.length + ")";
+                            horizontal-stretch: 1;
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                        IconButton {
+                            icon: "×";
+                            size: 24px;
+                            clicked => { root.cmd("close", ""); }
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for row in root.list: HorizontalLayout {
+                            RowView {
+                                horizontal-stretch: 1;
+                                item: row;
+                                clicked => { root.cmd("select", row.part); }
+                            }
+                            IconButton {
+                                icon: "−";
+                                size: 24px;
+                                y: 2px;
+                                clicked => { root.cmd("remove", row.part); }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        PillButton {
+                            label: "Clear";
+                            enabled: root.list.length > 0;
+                            clicked => { root.cmd("clear", ""); }
+                        }
+                        PillButton {
+                            label: "Download & import list";
+                            primary: true;
+                            enabled: root.list.length > 0;
+                            clicked => { root.cmd("import", ""); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

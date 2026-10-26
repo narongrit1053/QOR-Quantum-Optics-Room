@@ -8,13 +8,14 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
-import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay, DragValueField } from "overlays.slint";
 import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
+import { CatalogBook } from "catalog_book.slint";
 import { ViewCube, CubeFaceRow } from "view_cube.slint";
 import { Icon } from "icons.slint";
 import { WizardPanel } from "wizard.slint";
@@ -31,7 +32,7 @@ import { ConstrainPanel } from "constrain_panel.slint";
 import { RelationsBar, RelationChip } from "relations_bar.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 export { RelationChip } from "relations_bar.slint";
@@ -462,6 +463,22 @@ export component AppWindow inherits Window {
     callback import-start();
     callback import-cancel();
     callback import-define-connectors(string /* part id */);
+    // "Thorlabs Catalog…" (POLA-173).
+    in-out property <bool> catalog-open;
+    in property <[CatalogRow]> catalog-rows;
+    in property <string> catalog-count;
+    in property <[string]> catalog-categories;
+    in-out property <int> catalog-category;
+    in property <string> catalog-part;
+    in property <string> catalog-name;
+    in property <string> catalog-path;
+    in property <string> catalog-description;
+    in property <string> catalog-url;
+    in property <string> catalog-cad-pdf;
+    in property <string> catalog-step-url;
+    in property <bool> catalog-listed;
+    in property <[CatalogRow]> catalog-list;
+    callback catalog-cmd(string /* verb */, string /* arg */);
 
     // Beam-height stack builder (stack.slint); lab-app/src/stack.rs fills and handles it.
     in property <string> stack-optic;
@@ -488,7 +505,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open || root.library-open || root.import-step != 0;
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open || root.library-open || root.import-step != 0 || root.catalog-open;
     changed shortcuts-open => {
         if (!root.shortcuts-open) {
             EditState.focus-viewport += 1;
@@ -1520,7 +1537,14 @@ export component AppWindow inherits Window {
             search(t) => { root.library-search(t); }
             toggle(g) => { root.library-toggle(g); }
             drag(id, k, x, y) => { root.library-drag(id, k, x, y); }
-            cmd(verb, part, arg) => { root.library-cmd(verb, part, arg); }
+            cmd(verb, part, arg) => {
+                if (verb == "catalog") {
+                    root.library-open = false;
+                    root.action("catalog.open");
+                } else {
+                    root.library-cmd(verb, part, arg);
+                }
+            }
             part-menu(id, x, y) => {
                 root.library-menu-part = id;
                 root.library-cmd("menu", id, "");
@@ -1541,6 +1565,26 @@ export component AppWindow inherits Window {
             default-button: root.sheet-default;
             destructive: root.sheet-destructive;
             button(i) => { root.sheet-button(i); }
+        }
+
+        CatalogBook {
+            width: root.width;
+            height: root.height;
+            open <=> root.catalog-open;
+            rows: root.catalog-rows;
+            count: root.catalog-count;
+            categories: root.catalog-categories;
+            category <=> root.catalog-category;
+            part: root.catalog-part;
+            part-name: root.catalog-name;
+            path: root.catalog-path;
+            description: root.catalog-description;
+            url: root.catalog-url;
+            cad-pdf: root.catalog-cad-pdf;
+            step-url: root.catalog-step-url;
+            listed: root.catalog-listed;
+            list: root.catalog-list;
+            cmd(verb, arg) => { root.catalog-cmd(verb, arg); }
         }
 
         ImportDialog {
@@ -1602,7 +1646,7 @@ export component AppWindow inherits Window {
             width: root.width;
             height: root.height;
             // Hidden under the library while browsing, so the menu is on top and gets the keys.
-            open: root.start-page-visible && !root.library-browse;
+            open: root.start-page-visible && !root.library-browse && !root.catalog-open;
             closable: root.start-page-closable;
             recent: root.start-recent;
             error: root.start-error;

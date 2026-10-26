@@ -189,6 +189,7 @@ export component LibraryMenu inherits Rectangle {
                     }
                     if !root.naming: IconButton { icon: "›"; size: 24px; y: 2px; clicked => { root.cmd("step", "", "1"); } }
                     if !root.naming: ToolButton { label: "New library…"; clicked => { root.cmd("new", "", ""); root.naming = true; } }
+                    if !root.naming: ToolButton { label: "Thorlabs Catalog…"; clicked => { root.cmd("catalog", "", ""); } }
                     if !root.naming && root.active != "": ToolButton {
                         label: "Delete library";
                         clicked => { root.cmd("delete", "", ""); }

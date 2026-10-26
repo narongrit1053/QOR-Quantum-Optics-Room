@@ -214,9 +214,21 @@ export component NodeInspector inherits Rectangle {
             dismiss => { root.action("inspector.dismiss_error"); }
         }
         Divider { }
-        for field in root.fields: Field {
-            label: field.label;
-            value: field.value;
+        for field in root.fields: VerticalLayout {
+            // POLA-173: catalog-book details; links open in the browser.
+            if field.label == "Description": Note { text: field.value; }
+            if field.label == "Page" || field.label == "CAD PDF" || field.label == "STEP": Rectangle {
+                height: 26px;
+                Field { width: parent.width; label: field.label; value: "Open ↗"; }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.action("open.url:" + field.value); }
+                }
+            }
+            if field.label != "Description" && field.label != "Page" && field.label != "CAD PDF" && field.label != "STEP": Field {
+                label: field.label;
+                value: field.value;
+            }
         }
         if root.edit-fields.length > 0: Divider { }
         for f in root.edit-fields: VerticalLayout {

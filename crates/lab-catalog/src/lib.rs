@@ -5,6 +5,8 @@
 //! registry); a linear scan over a few hundred parts is well under a millisecond. Upgrade if the
 //! library grows to tens of thousands of parts.
 
+pub mod book;
+
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
