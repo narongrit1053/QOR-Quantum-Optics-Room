@@ -536,6 +536,18 @@ export component AppWindow inherits Window {
     changed focus-tick => {
         keys.focus();
     }
+    // Shortcuts work from launch, and after the start page or the connector wizard opens/closes.
+    init => { keys.focus(); }
+    changed start-page-visible => {
+        if (!root.start-page-visible) {
+            EditState.focus-viewport += 1;
+        }
+    }
+    changed wizard-open => {
+        if (root.wizard-open) {
+            keys.focus();
+        }
+    }
     changed sheet-open => {
         if (!root.sheet-open) {
             EditState.focus-viewport += 1;

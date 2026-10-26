@@ -97,6 +97,10 @@ pub fn unit_system(def: &PartDef) -> Option<Unit> {
     if ["/M", "-M", "_M"].iter().any(|s| p.ends_with(s)) || ["-M-", "_M-", "-M "].iter().any(|s| p.contains(s)) {
         return Some(Unit::Metric);
     }
+    // Thorlabs: no metric suffix means imperial, whatever the (auto-detected) hole threads say.
+    if def.vendor.eq_ignore_ascii_case("thorlabs") {
+        return Some(Unit::Inch);
+    }
     def.connectors.iter().find_map(|c| match &c.kind {
         ConnectorKind::Thread { spec, .. } => {
             let b = spec.as_bytes();
@@ -549,6 +553,14 @@ mod tests {
         .unwrap();
         assert_eq!(unit_system(&threaded), Some(Unit::Inch));
         assert_eq!(unit_system(&def("d", "KM100", "mounts")), None);
+        let mut km = def("thorlabs:KM100", "KM100", "mounts");
+        km.vendor = "Thorlabs".into();
+        km.connectors = serde_json::from_value(serde_json::json!([{
+            "name": "hole_1", "kind": "thread", "spec": "M6", "gender": "female",
+            "frame": { "origin": [0.0, 0.0, 0.0], "z": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0] },
+        }]))
+        .unwrap();
+        assert_eq!(unit_system(&km), Some(Unit::Inch));
         for metric in ["TR50-M", "KC1T_M", "TR50_M", "ST1XY-A_M", "SPT2-M-Stellring1", "AB_M-2", "XR25-M (x)"] {
             assert_eq!(unit_system(&def("e", metric, "posts")), Some(Unit::Metric), "{metric}");
         }
