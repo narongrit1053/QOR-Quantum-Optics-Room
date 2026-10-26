@@ -137,7 +137,7 @@ mod tests {
     /// KM100 + 1" mirror at 75 mm: five parts, mirror centre 75 ± 0.1 mm above the table; 500 mm does not fit.
     #[test]
     fn km100_stack_reaches_75mm() {
-        let (catalog, _) = Catalog::load_default();
+        let (catalog, _) = Catalog::load_builtin();
         let candidates = catalog.in_category("posts");
         let mount = catalog.get("thorlabs:KM100").unwrap();
         assert!(solve_stack(mount, 500.0, &candidates).is_err());
@@ -166,7 +166,7 @@ mod tests {
     fn post_length_lifts_mount() {
         use lab_core::model::{Attach, Document, NodeId, Parent};
         use lab_core::{Command, History, SelectionTarget};
-        let (catalog, _) = Catalog::load_default();
+        let (catalog, _) = Catalog::load_builtin();
         let mount = catalog.get("thorlabs:KM100").unwrap();
         let sol = solve_stack(mount, 75.0, &catalog.in_category("posts")).unwrap();
         let spec = StackSpec { optic: None, mount: mount.id.clone(), base: sol.base, holder: sol.holder, post: sol.post, slide: sol.slide };

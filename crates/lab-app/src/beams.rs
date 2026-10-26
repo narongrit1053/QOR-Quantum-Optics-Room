@@ -170,7 +170,7 @@ mod tests {
     /// inspector turns the beam leaving it.
     #[test]
     fn demo_mirror_rotation_moves_the_beam() {
-        let (catalog, _) = Catalog::load_default();
+        let (catalog, _) = Catalog::load_builtin();
         let mut doc = lab_core::sample::demo_document();
         let m1 = doc.nodes.iter().find(|n| n.name == "M1").unwrap().id;
         let trace = |d: &Document| lab_optics::trace_document(d, &|p| catalog.get(p).cloned());
@@ -193,7 +193,7 @@ mod tests {
     /// POLA-103: the demo beam is focused by L1, split by the PBS and ends on both detectors.
     #[test]
     fn demo_beam_ends_on_the_detectors() {
-        let (catalog, _) = Catalog::load_default();
+        let (catalog, _) = Catalog::load_builtin();
         let doc = lab_core::sample::demo_document();
         let t = lab_optics::trace_document(&doc, &|p| catalog.get(p).cloned());
         let id = |name: &str| doc.nodes.iter().find(|n| n.name.starts_with(name) && !n.name.contains('·')).unwrap().id;
@@ -209,7 +209,7 @@ mod tests {
     /// folding the beam, a lens set focusing it. `LABSETUP_BEAM_SCENE=<path>` writes it as a project.
     #[test]
     fn beam_through_mirror_and_lens_sets() {
-        let (catalog, _) = Catalog::load_default();
+        let (catalog, _) = Catalog::load_builtin();
         let mut doc = Document::new("Beams");
         doc.platforms.push(Platform {
             id: PlatformId(1),

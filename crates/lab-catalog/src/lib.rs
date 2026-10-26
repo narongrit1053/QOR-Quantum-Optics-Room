@@ -81,6 +81,12 @@ impl Catalog {
         Self::load(&dirs)
     }
 
+    /// The built-in library only, ignoring the user library (hermetic tests: a user's imported part
+    /// with the same id would otherwise shadow the built-in one).
+    pub fn load_builtin() -> (Catalog, Vec<CatalogWarning>) {
+        Self::load(&[LibraryDir { path: builtin_dir(), source: Source::BuiltIn }])
+    }
+
     pub fn from_defs(defs: Vec<PartDef>) -> Catalog {
         Self::build(defs.into_iter().map(|d| (d, Source::BuiltIn)).collect())
     }
