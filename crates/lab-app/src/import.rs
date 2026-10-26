@@ -70,6 +70,13 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     });
 
     let w = ui.as_weak();
+    ui.on_import_download(move || {
+        if let Some(ui) = w.upgrade() {
+            download(&ui);
+        }
+    });
+
+    let w = ui.as_weak();
     ui.on_import_start(move || {
         if let Some(ui) = w.upgrade() {
             start(&ui);
@@ -115,6 +122,39 @@ pub fn choose_file(ui: &AppWindow, _app: &Rc<RefCell<AppState>>, _models: &Rc<Ui
                 ui.set_import_step(3);
             }
         }
+    });
+}
+
+/// "Import from URL…" (POLA-170): the URL step of the import dialog.
+pub fn choose_url(ui: &AppWindow) {
+    ui.set_import_step(5);
+}
+
+/// Downloads the dialog's URL on a worker thread, then opens the normal form on the file.
+fn download(ui: &AppWindow) {
+    let url = ui.get_import_url().to_string();
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    ui.set_import_progress("Downloading…".into());
+    ui.set_import_step(2);
+    let w = ui.as_weak();
+    std::thread::spawn(move || {
+        let result = crate::import_url::download(&url);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = w.upgrade() else { return };
+            if GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            match result {
+                Ok(path) => {
+                    prefill(&ui, path);
+                    ui.set_import_step(1);
+                }
+                Err(text) => {
+                    ui.set_import_error(text.into());
+                    ui.set_import_step(3);
+                }
+            }
+        });
     });
 }
 

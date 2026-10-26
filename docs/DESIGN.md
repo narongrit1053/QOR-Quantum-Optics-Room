@@ -30,7 +30,7 @@ Decided with you:
 ### Non-functional
 | Area | Target |
 |---|---|
-| Offline | No network crates in the dependency tree (enforced in CI), no telemetry, all fonts/icons/HDRI bundled |
+| Offline | No network crates in the dependency tree (enforced in CI), no telemetry, all fonts/icons/HDRI bundled. The network is used only when the user runs "Import from URL…", through the OS `curl.exe`; no network crates linked |
 | Idle cost | No frames rendered when nothing changes → ~0% GPU, <1% CPU |
 | Performance | 60 fps at 1080p on an integrated GPU (Iris Xe class) with 2,000 placed parts; 10,000-part stress scene stays interactive (≥30 fps on a discrete GPU) |
 | Startup | ≤ 2 s cold to interactive (catalog index cached; meshes lazy-loaded) |

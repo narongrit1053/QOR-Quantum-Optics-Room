@@ -457,6 +457,8 @@ export component AppWindow inherits Window {
     in property <string> import-error;
     in property <string> import-done-text;
     in property <string> import-part-id;
+    in-out property <string> import-url;
+    callback import-download();
     callback import-start();
     callback import-cancel();
     callback import-define-connectors(string /* part id */);
@@ -1013,6 +1015,10 @@ export component AppWindow inherits Window {
                     clicked => { root.action("import.step"); }
                 }
                 PillButton {
+                    label: "Import from URL…";
+                    clicked => { root.action("import.url"); }
+                }
+                PillButton {
                     label: "Import Folder into Library…";
                     clicked => { root.action("library.import_folder"); }
                 }
@@ -1552,6 +1558,8 @@ export component AppWindow inherits Window {
             error: root.import-error;
             done-text: root.import-done-text;
             part-id: root.import-part-id;
+            url <=> root.import-url;
+            download => { root.import-download(); }
             start => { root.import-start(); }
             cancel => { root.import-cancel(); }
             choose-another => { root.action("import.step"); }
