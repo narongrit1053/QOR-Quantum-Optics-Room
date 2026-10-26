@@ -147,7 +147,7 @@ pub fn start(
         _ => Quality::High,
     });
     let msaa_samples = supported_msaa(&adapter, options.msaa.unwrap_or(quality.msaa_samples()));
-    let shadows = Shadows(options.shadows.unwrap_or(quality.shadows()));
+    let shadows = Shadows(options.shadows.unwrap_or(quality.shadows()), quality.shadows());
     let events = EventSender { events: event_tx, wake_ui: std::sync::Arc::new(wake_ui) };
     events.send(ViewportEvent::Ready {
         adapter: info.name.clone(),
@@ -248,7 +248,7 @@ pub fn smoke_test(document: Document) {
         .init_resource::<SettleFrames>()
         .insert_resource(events)
         .insert_resource(Quality::Balanced)
-        .insert_resource(Shadows(false))
+        .insert_resource(Shadows(false, false))
         .insert_resource(MsaaSamples(1))
         .insert_resource(ViewportSize(Vec2::new(640.0, 480.0)))
         .init_resource::<TargetSize>()
@@ -314,9 +314,9 @@ pub fn adapters(instance: &wgpu::Instance, backends: wgpu::Backends) -> Vec<(Str
     adapters.iter().map(|a| a.get_info()).map(|i| (i.name, i.device_type)).collect()
 }
 
-/// The key light casts shadows (quality default or the user's override).
+/// The key light casts shadows (quality default or the user's override), and the quality default.
 #[derive(Resource, Clone, Copy)]
-pub(crate) struct Shadows(pub bool);
+pub(crate) struct Shadows(pub bool, pub bool);
 
 /// MSAA sample count the camera uses, already checked against the adapter.
 #[derive(Resource, Clone, Copy)]
@@ -450,6 +450,11 @@ fn run_on_demand(
                 ViewportRequest::SetBlueprint(on) => pending.push(FrameRequest::SetBlueprint(on)),
                 ViewportRequest::Isolate(id) => pending.push(FrameRequest::Isolate(id)),
                 ViewportRequest::SetReduceMotion(on) => pending.push(FrameRequest::SetReduceMotion(on)),
+                ViewportRequest::SetShadows(on) => {
+                    let mut shadows = app.world_mut().resource_mut::<Shadows>();
+                    shadows.0 = on.unwrap_or(shadows.1);
+                    pending.push(FrameRequest::SetShadows);
+                }
                 ViewportRequest::InspectPart(id) => pending.push(FrameRequest::InspectPart(id)),
                 ViewportRequest::InspectMarkers(frames) => pending.push(FrameRequest::InspectMarkers(frames)),
                 ViewportRequest::SetBeams(on) => pending.push(FrameRequest::SetBeams(on)),
