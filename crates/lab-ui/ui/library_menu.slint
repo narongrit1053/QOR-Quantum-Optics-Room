@@ -180,7 +180,8 @@ export component LibraryMenu inherits Rectangle {
                     if !root.naming: IconButton { icon: "‹"; size: 24px; y: 2px; clicked => { root.cmd("step", "", "-1"); } }
                     if !root.naming: Text {
                         text: "Library: " + (root.active == "" ? "Default" : root.active);
-                        min-width: 160px;
+                        min-width: 60px;
+                        horizontal-stretch: 1;
                         color: Theme.text;
                         font-size: Theme.font-body;
                         horizontal-alignment: center;
@@ -191,7 +192,7 @@ export component LibraryMenu inherits Rectangle {
                     if !root.naming: ToolButton { label: "New library…"; clicked => { root.cmd("new", "", ""); root.naming = true; } }
                     if !root.naming: ToolButton { label: "Thorlabs Catalog…"; clicked => { root.cmd("catalog", "", ""); } }
                     if !root.naming && root.active != "": ToolButton {
-                        label: "Delete library";
+                        label: "Delete";
                         clicked => { root.cmd("delete", "", ""); }
                     }
                     if root.naming: Rectangle {
@@ -275,7 +276,7 @@ export component LibraryMenu inherits Rectangle {
                 list := Flickable {
                     vertical-stretch: 1;
                     interactive: false;
-                    viewport-height: root.list-view ? list-layout.preferred-height
+                    content-height: root.list-view ? list-layout.preferred-height
                         : root.rows.length > 0 ? root.rows[root.rows.length - 1].y + 148px : 0px;
 
                     // Grid: positions from `library::grid_layout` (tile 120×140, gap 8, header 28).
