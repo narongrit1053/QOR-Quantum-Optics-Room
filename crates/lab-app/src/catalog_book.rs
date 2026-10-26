@@ -2,7 +2,7 @@
 //! `%APPDATA%\LabSetup\catalog-list.json`, and download & import the list in one batch.
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Mutex;
@@ -27,6 +27,10 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
+    /// Decoded thumbnails by part, so no image is decoded twice in a session.
+    static THUMBS: RefCell<HashMap<String, slint::Image>> = RefCell::new(HashMap::new());
+    /// Search debounce: restarted on every keystroke.
+    static SEARCH_TIMER: slint::Timer = slint::Timer::default();
 }
 
 /// "All", then the distinct second-level categories, sorted.
@@ -37,16 +41,33 @@ fn categories() -> Vec<String> {
 
 /// The book items matching `query` (case-insensitive substring of part, name or description)
 /// in second-level category `category` (`None`: all).
+#[cfg_attr(not(test), allow(dead_code))] // the app searches through `search_book`
 pub fn filter<'a>(items: &'a [BookItem], query: &str, category: Option<&str>) -> Vec<&'a BookItem> {
+    filter_indexed(items, &items.iter().map(haystack).collect::<Vec<_>>(), query, category)
+}
+
+/// Part, name and description, lower-cased and joined by newlines (a trimmed query cannot span them).
+fn haystack(i: &BookItem) -> String {
+    format!("{}\n{}\n{}", i.part, i.name, i.description).to_lowercase()
+}
+
+/// `filter` with precomputed `haystacks` (one per item).
+fn filter_indexed<'a>(items: &'a [BookItem], haystacks: &[String], query: &str, category: Option<&str>) -> Vec<&'a BookItem> {
     let query = query.trim().to_lowercase();
     items
         .iter()
-        .filter(|i| category.is_none_or(|c| i.category.get(1).is_some_and(|ic| ic == c)))
-        .filter(|i| {
-            query.is_empty()
-                || [&i.part, &i.name, &i.description].iter().any(|t| t.to_lowercase().contains(&query))
-        })
+        .zip(haystacks)
+        .filter(|(i, _)| category.is_none_or(|c| i.category.get(1).is_some_and(|ic| ic == c)))
+        .filter(|(_, h)| query.is_empty() || h.contains(&query))
+        .map(|(i, _)| i)
         .collect()
+}
+
+/// `filter` over the book, with its search index built once.
+fn search_book(query: &str, category: Option<&str>) -> Vec<&'static BookItem> {
+    static INDEX: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let items = book::thorlabs();
+    filter_indexed(items, INDEX.get_or_init(|| items.iter().map(haystack).collect()), query, category)
 }
 
 fn find(part: &str) -> Option<&'static BookItem> {
@@ -103,7 +124,12 @@ fn thumb_path(item: &BookItem) -> Option<PathBuf> {
 
 /// The cached thumbnail, or an empty image (the placeholder shows through) while missing or failed.
 fn thumb(item: &BookItem) -> slint::Image {
-    thumb_path(item).filter(|p| p.exists()).and_then(|p| load_thumb(&p)).unwrap_or_default()
+    if let Some(image) = THUMBS.with(|t| t.borrow().get(&item.part).cloned()) {
+        return image;
+    }
+    let Some(image) = thumb_path(item).filter(|p| p.exists()).and_then(|p| load_thumb(&p)) else { return Default::default() };
+    THUMBS.with(|t| t.borrow_mut().insert(item.part.clone(), image.clone()));
+    image
 }
 
 /// Slint's image loader has no webp, so webp is decoded here (POLA-180).
@@ -176,6 +202,7 @@ fn fetch_thumbs(ui: slint::Weak<AppWindow>, items: &[&BookItem]) {
 
 fn set_thumb(ui: &AppWindow, part: &str, path: &Path) {
     let Some(image) = load_thumb(path) else { return };
+    THUMBS.with(|t| t.borrow_mut().insert(part.to_string(), image.clone()));
     for model in [ui.get_catalog_rows(), ui.get_catalog_list()] {
         for i in 0..model.row_count() {
             if let Some(mut r) = model.row_data(i).filter(|r| r.part == part) {
@@ -213,7 +240,7 @@ fn refresh(ui: &AppWindow, app: &AppState) {
         let library = in_library(app);
         let categories = categories();
         let category = categories.get(s.category).filter(|_| s.category > 0).map(String::as_str);
-        let hits = filter(book::thorlabs(), &s.query, category);
+        let hits = search_book(&s.query, category);
         let selected = |i: &BookItem| s.selected.as_deref() == Some(i.part.as_str());
         let rows: Vec<CatalogRow> = hits.iter().take(MAX_ROWS).map(|i| row(i, &library, selected(i))).collect();
         ui.set_catalog_rows(ModelRc::new(VecModel::from(rows)));
@@ -224,18 +251,35 @@ fn refresh(ui: &AppWindow, app: &AppState) {
         );
         let list: Vec<CatalogRow> = s.list.iter().filter_map(|p| find(p)).map(|i| row(i, &library, selected(i))).collect();
         ui.set_catalog_list(ModelRc::new(VecModel::from(list)));
-
-        let item = s.selected.as_deref().and_then(find);
-        let text = |f: fn(&BookItem) -> Option<&String>| item.and_then(f).map_or_else(Default::default, |t| t.as_str().into());
-        ui.set_catalog_part(text(|i| Some(&i.part)));
-        ui.set_catalog_name(text(|i| Some(&i.name)));
-        ui.set_catalog_path(item.map_or_else(Default::default, |i| i.category.join(" › ").into()));
-        ui.set_catalog_description(text(|i| Some(&i.description)));
-        ui.set_catalog_url(text(|i| Some(&i.url)));
-        ui.set_catalog_cad_pdf(text(|i| i.cad_pdf.as_ref()));
-        ui.set_catalog_step_url(text(|i| i.step.as_ref()));
-        ui.set_catalog_listed(item.is_some_and(|i| s.list.contains(&i.part)));
+        detail(ui, &s);
     });
+}
+
+/// The detail pane for the selected part.
+fn detail(ui: &AppWindow, s: &State) {
+    let item = s.selected.as_deref().and_then(find);
+    let text = |f: fn(&BookItem) -> Option<&String>| item.and_then(f).map_or_else(Default::default, |t| t.as_str().into());
+    ui.set_catalog_part(text(|i| Some(&i.part)));
+    ui.set_catalog_name(text(|i| Some(&i.name)));
+    ui.set_catalog_path(item.map_or_else(Default::default, |i| i.category.join(" › ").into()));
+    ui.set_catalog_description(text(|i| Some(&i.description)));
+    ui.set_catalog_url(text(|i| Some(&i.url)));
+    ui.set_catalog_cad_pdf(text(|i| i.cad_pdf.as_ref()));
+    ui.set_catalog_step_url(text(|i| i.step.as_ref()));
+    ui.set_catalog_listed(item.is_some_and(|i| s.list.contains(&i.part)));
+}
+
+/// Moves the `selected` flag in both models and updates the detail pane; nothing is rebuilt.
+fn select(ui: &AppWindow, part: &str) {
+    for model in [ui.get_catalog_rows(), ui.get_catalog_list()] {
+        for i in 0..model.row_count() {
+            if let Some(mut r) = model.row_data(i).filter(|r| r.selected != (r.part == part)) {
+                r.selected = r.part == part;
+                model.set_row_data(i, r);
+            }
+        }
+    }
+    STATE.with(|s| detail(ui, &s.borrow()));
 }
 
 /// Shows the window; the list is read from disk each time it opens.
@@ -303,6 +347,18 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
                 // Closed: drop the rows so nothing is kept or laid out.
                 ui.set_catalog_rows(ModelRc::default());
                 ui.set_catalog_list(ModelRc::default());
+                return;
+            }
+            "select" => return select(&ui, &arg),
+            "search" => {
+                let (w, a) = (w.clone(), a.clone());
+                SEARCH_TIMER.with(|t| {
+                    t.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(150), move || {
+                        if let Some(ui) = w.upgrade().filter(|ui| ui.get_catalog_open()) {
+                            refresh(&ui, &a.borrow());
+                        }
+                    })
+                });
                 return;
             }
             "import" => {
