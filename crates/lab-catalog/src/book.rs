@@ -11,6 +11,8 @@ pub struct BookItem {
     pub url: String,
     pub cad_pdf: Option<String>,
     pub step: Option<String>,
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -45,5 +47,8 @@ mod tests {
             let i = book.iter().find(|i| i.part == p).unwrap_or_else(|| panic!("{p} missing"));
             assert!(i.step.is_some(), "{p} has no STEP");
         }
+        assert!(book.iter().find(|i| i.part == "KM100").unwrap().image.is_some(), "KM100 has no image");
+        let n = book.iter().filter(|i| i.image.is_some()).count();
+        assert!(n * 2 > book.len(), "{n} of {} items have an image", book.len());
     }
 }

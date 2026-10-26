@@ -1,15 +1,64 @@
 // "Thorlabs Catalog…" (POLA-173): browse the catalog book, pick parts into a list, then
 // download and import the whole list. Filtering and the list live in Rust (catalog_book.rs).
 
-import { LineEdit, ComboBox, ListView } from "std-widgets.slint";
+import { LineEdit, ComboBox, ListView, ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { PillButton, IconButton } from "components.slint";
 import { CatalogRow } from "types.slint";
 
+// Product image; the neutral background is the placeholder while loading, offline or undecodable.
+component Thumb inherits Rectangle {
+    in property <image> source;
+    background: Theme.control-hover;
+    border-radius: 4px;
+    clip: true;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.source;
+        image-fit: contain;
+    }
+}
+
+component Tile inherits Rectangle {
+    in property <CatalogRow> item;
+    callback clicked();
+    callback add();
+    border-radius: 6px;
+    background: item.selected ? Theme.accent-soft : touch.has-hover ? Theme.control-hover : transparent;
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.clicked(); root.add(); }
+    }
+    VerticalLayout {
+        padding: 6px;
+        spacing: 4px;
+        Thumb { height: 140px; source: item.thumb; }
+        Text {
+            text: item.part;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            font-weight: 600;
+            overflow: elide;
+        }
+        Text {
+            text: item.name;
+            color: Theme.text-secondary;
+            font-size: Theme.font-caption;
+            overflow: elide;
+        }
+        Text {
+            text: item.badge;
+            color: item.badge == "No STEP" ? Theme.warning : Theme.accent-text;
+            font-size: Theme.font-caption;
+        }
+    }
+}
+
 component RowView inherits Rectangle {
     in property <CatalogRow> item;
     callback clicked();
-    height: 28px;
+    height: 44px;
     border-radius: 4px;
     background: item.selected ? Theme.accent-soft : touch.has-hover ? Theme.control-hover : transparent;
     touch := TouchArea { clicked => { root.clicked(); } }
@@ -17,6 +66,7 @@ component RowView inherits Rectangle {
         padding-left: 8px;
         padding-right: 8px;
         spacing: 8px;
+        Thumb { width: 40px; height: 40px; y: 2px; source: item.thumb; }
         Text {
             text: item.part;
             width: 110px;
@@ -67,6 +117,8 @@ export component CatalogBook inherits Rectangle {
     in property <[CatalogRow]> list;
     // verbs: search(text), category(index), select(part), add, remove(part), clear, link(url), import, close.
     callback cmd(string /* verb */, string /* arg */);
+    // List or Grid; outside the `if root.open` so the choice lasts the session.
+    in-out property <bool> grid;
 
     visible: root.open;
     background: Theme.scrim;
@@ -125,16 +177,39 @@ export component CatalogBook inherits Rectangle {
                         selected(v) => { root.cmd("category", root.category); }
                     }
                 }
-                Text {
-                    text: root.count;
-                    color: Theme.text-tertiary;
-                    font-size: Theme.font-caption;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.count;
+                        horizontal-stretch: 1;
+                        color: Theme.text-tertiary;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                    PillButton { label: "List"; primary: !root.grid; clicked => { root.grid = false; } }
+                    PillButton { label: "Grid"; primary: root.grid; clicked => { root.grid = true; } }
                 }
-                ListView {
+                if !root.grid: ListView {
                     vertical-stretch: 1;
                     for row in root.rows: RowView {
                         item: row;
                         clicked => { root.cmd("select", row.part); }
+                    }
+                }
+                if root.grid: ScrollView {
+                    property <length> tile-w: 160px;
+                    property <length> tile-h: 220px;
+                    property <int> cols: max(1, floor(self.visible-width / self.tile-w));
+                    vertical-stretch: 1;
+                    viewport-height: ceil(root.rows.length / self.cols) * self.tile-h;
+                    for row[i] in root.rows: Tile {
+                        x: mod(i, cols) * tile-w;
+                        y: floor(i / cols) * tile-h;
+                        width: tile-w - 8px;
+                        height: tile-h - 8px;
+                        item: row;
+                        clicked => { root.cmd("select", row.part); }
+                        add => { root.cmd("add", ""); }
                     }
                 }
             }

@@ -82,7 +82,7 @@ pub fn step_url_from_graphql(json: &str, part: &str) -> Result<String, String> {
         .ok_or_else(|| format!("Thorlabs has no STEP file for {part}."))
 }
 
-fn curl(args: &[&str], stdin: Option<&str>) -> Result<Vec<u8>, String> {
+pub(crate) fn curl(args: &[&str], stdin: Option<&str>) -> Result<Vec<u8>, String> {
     let mut cmd = Command::new(CURL);
     cmd.args(["-sSfL", "--max-time", "120", "-A", "Mozilla/5.0 LabSetup"]).args(args);
     #[cfg(windows)]
