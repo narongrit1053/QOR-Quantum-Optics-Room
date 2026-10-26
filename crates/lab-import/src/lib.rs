@@ -21,7 +21,7 @@ use crate::glb::{Glb, Material};
 /// LOD0 is the converter's own tessellation, kept undecimated whenever it fits: decimating a
 /// fine mesh or meshing coarsely is what made curved surfaces facet and smear (POLA-152).
 const LOD0_BUDGET: usize = 150_000;
-const TIMEOUT: Duration = Duration::from_secs(60);
+const TIMEOUT: Duration = Duration::from_secs(300);
 /// The coarse retry: reading a 30–50 MB STEP file alone takes about a minute.
 const COARSE_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -102,7 +102,7 @@ pub fn step2glb_path() -> PathBuf {
     candidates.into_iter().find(|p| p.is_file()).unwrap_or_else(|| repo.join(rel))
 }
 
-/// Blocking; call it off the UI thread. Runs step2glb in a temp dir (60 s timeout, kill on
+/// Blocking; call it off the UI thread. Runs step2glb in a temp dir (300 s timeout, kill on
 /// timeout), merges primitives by material, applies `finish` where there is none, clears
 /// `doubleSided`, re-bases, builds LOD0..2 and stores the GLB by content hash under `library`
 /// (an existing file with the same hash is reused).

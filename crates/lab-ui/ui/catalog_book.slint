@@ -155,7 +155,8 @@ export component CatalogBook inherits Rectangle {
 
             // Search and results.
             VerticalLayout {
-                horizontal-stretch: 2;
+                horizontal-stretch: 1;
+                min-width: 0px;
                 spacing: 8px;
                 Text {
                     text: "Thorlabs Catalog";
@@ -215,8 +216,9 @@ export component CatalogBook inherits Rectangle {
             }
 
             // Details of the selected part.
+            // Fixed width: wrapped detail text must not resize the results column.
             VerticalLayout {
-                horizontal-stretch: 1;
+                width: 320px;
                 spacing: 8px;
                 alignment: start;
                 if root.part == "": Text {
