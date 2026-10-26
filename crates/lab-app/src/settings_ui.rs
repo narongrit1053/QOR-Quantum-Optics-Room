@@ -61,11 +61,12 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
     ui.on_settings_apply(move |quality, msaa, shadows, gpu| {
         let Some(ui) = w.upgrade() else { return };
         ui.set_settings_open(false);
-        let (settings, changed) = {
+        let (settings, changed, before_restart) = {
             let mut app = a.borrow_mut();
             let names = adapter_names(&app);
             let s = &mut app.settings;
             let before = (s.render_quality, s.msaa, s.shadows, s.gpu.clone());
+            let before_restart = (s.render_quality, s.msaa, s.gpu.clone());
             s.render_quality = QUALITIES.get(quality as usize).copied().unwrap_or_default();
             s.msaa = MSAA.get(msaa as usize).copied().unwrap_or_default();
             s.shadows = SHADOWS.get(shadows as usize).copied().flatten();
@@ -76,7 +77,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
                 _ => GpuChoice::Auto,
             };
             let changed = before != (s.render_quality, s.msaa, s.shadows, s.gpu.clone());
-            (s.clone(), changed)
+            (s.clone(), changed, before_restart)
         };
         if !changed {
             return;
@@ -86,6 +87,10 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
             crate::controller::show_toast(&ui, &a.borrow(), "Settings could not be saved; see the log.", false);
             return;
         }
-        crate::controller::show_toast(&ui, &a.borrow(), "Restart LabSetup to apply graphics changes.", false);
+        // Shadows apply live; quality, anti-aliasing and GPU are fixed when the viewport starts.
+        a.borrow().send(lab_viewport::ViewportRequest::SetShadows(settings.shadows));
+        if before_restart != (settings.render_quality, settings.msaa, settings.gpu.clone()) {
+            crate::controller::show_toast(&ui, &a.borrow(), "Restart LabSetup to apply graphics changes.", false);
+        }
     });
 }

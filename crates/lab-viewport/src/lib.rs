@@ -155,6 +155,8 @@ pub enum ViewportRequest {
     Isolate(Option<PlatformId>),
     /// POLA-52. Windows "reduce animations": camera moves jump instead of animating.
     SetReduceMotion(bool),
+    /// POLA-183. Key light shadows on/off; `None` is the render quality's default.
+    SetShadows(Option<bool>),
     /// POLA-60. Show only catalog part `id` at the origin, unrotated, framed; the document is
     /// hidden but kept. `None` returns to the document and restores the camera.
     InspectPart(Option<String>),
@@ -367,6 +369,8 @@ pub(crate) enum FrameRequest {
     SetBlueprint(bool),
     Isolate(Option<PlatformId>),
     SetReduceMotion(bool),
+    /// Only wakes a frame; the host already updated `Shadows`.
+    SetShadows,
     InspectPart(Option<String>),
     InspectMarkers(Vec<lab_core::part::Frame>),
     RenderThumbnail(String, std::path::PathBuf),

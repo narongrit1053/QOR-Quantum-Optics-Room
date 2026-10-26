@@ -453,7 +453,7 @@ pub(crate) fn handle_input(
             }
             FrameRequest::Select(target) => selected = *target,
             FrameRequest::LoadDocument(_) => selected = None,
-            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) | FrameRequest::RenderThumbnail(..) | FrameRequest::ExportImage(..) | FrameRequest::SetBeams(_) | FrameRequest::HighlightFeature(_) | FrameRequest::SetHidden(_) | FrameRequest::IsolateNodes(_) | FrameRequest::HighlightNodes(_) | FrameRequest::HighlightSnap(_) | FrameRequest::DragValue(_) | FrameRequest::PartBox(_) | FrameRequest::PartBoxInput(_) => {}
+            FrameRequest::ApplyChanges(..) | FrameRequest::SetWallDisplay(_) | FrameRequest::DragPart(_) | FrameRequest::SetTool(_) | FrameRequest::SetBlueprint(_) | FrameRequest::InspectPart(_) | FrameRequest::InspectMarkers(_) | FrameRequest::RenderThumbnail(..) | FrameRequest::ExportImage(..) | FrameRequest::SetBeams(_) | FrameRequest::HighlightFeature(_) | FrameRequest::SetHidden(_) | FrameRequest::IsolateNodes(_) | FrameRequest::HighlightNodes(_) | FrameRequest::HighlightSnap(_) | FrameRequest::DragValue(_) | FrameRequest::PartBox(_) | FrameRequest::PartBoxInput(_) | FrameRequest::SetShadows => {}
         }
     }
 }
@@ -814,6 +814,20 @@ mod tests {
         orbit.current.pitch = MAX_PITCH;
         orbit.start_tween();
         assert!(!orthographic(&orbit));
+    }
+
+    #[test]
+    fn orbit_keeps_the_pivot_still_on_screen() {
+        let view = View { focus: Vec3::new(0.5, 0.0, -1.0), yaw: 0.3, pitch: 0.4, distance: 4.0 };
+        let mut orbit = OrbitCamera::new(view);
+        let pivot = Vec3::new(1.0, 0.8, 0.5);
+        let local = |o: &OrbitCamera| o.current.transform().to_matrix().inverse().transform_point3(pivot);
+        let before = local(&orbit);
+        let press = Press { button: PointerButton::Middle, mods: Modifiers { shift: true, ..Default::default() }, start: Vec2::ZERO, last: Vec2::ZERO, dragging: true, gizmo: false, camera: Entity::PLACEHOLDER };
+        for _ in 0..20 {
+            drag(&mut orbit, press, Vec2::new(17.0, -9.0), 800.0, Some(pivot));
+        }
+        assert!((local(&orbit) - before).length() < 1e-3, "{before} -> {}", local(&orbit));
     }
 
     #[test]

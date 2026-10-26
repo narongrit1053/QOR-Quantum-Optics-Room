@@ -65,16 +65,24 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
     }
 }
 
-/// Beam height minus the exit height of a part with a `source` port dropped on a platform
+/// Beam height minus the exit height of a part with a `source` port dropped on a platform or a node on one
 /// (M4-PLAN POLA-62); `None` for anything else.
 fn laser_lift(app: &AppState, part: &str, request: &PlaceRequest) -> Option<f64> {
-    if !matches!(request.parent, Parent::Platform(_)) {
-        return None;
-    }
+    let doc = &app.session.doc;
+    // Drop point's height above the platform top it ends up on (a node may sit on a platform).
+    let base = match request.parent {
+        Parent::Platform(_) => request.position.z,
+        Parent::Node(n) => {
+            let (np, nq) = lab_mates::constraints::world_pose(doc, Parent::Node(n))?;
+            let (pp, _) = lab_mates::constraints::world_pose(doc, Parent::Platform(doc.root_platform(n)?))?;
+            (np + nq * request.position).z - pp.z
+        }
+        Parent::Room => return None,
+    };
     let port = app.catalog.get(part)?.optical_ports.iter().find(|p| p.kind == "source")?;
     // Exit height above the seat (the seat may not be at z = 0).
     let seat = app.catalog.get(part)?.connector("seat").map_or(0.0, |c| c.frame.origin.z);
-    Some(app.stack.beam_height - (port.frame.origin.z - seat))
+    Some(app.stack.beam_height - base - (port.frame.origin.z - seat))
 }
 
 /// A `generic:riser` of the head's footprint and height `lift`, at the head's drop pose.
