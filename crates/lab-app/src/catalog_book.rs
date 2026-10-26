@@ -101,10 +101,30 @@ fn thumb_path(item: &BookItem) -> Option<PathBuf> {
     Some(dir.join(format!("{}.{ext}", item.part.replace(['/', '\\'],"_"))))
 }
 
-/// The cached thumbnail, or an empty image (the placeholder shows through) while missing,
-/// failed or in a format Slint cannot decode.
+/// The cached thumbnail, or an empty image (the placeholder shows through) while missing or failed.
 fn thumb(item: &BookItem) -> slint::Image {
-    thumb_path(item).filter(|p| p.exists()).and_then(|p| slint::Image::load_from_path(&p).ok()).unwrap_or_default()
+    thumb_path(item).filter(|p| p.exists()).and_then(|p| load_thumb(&p)).unwrap_or_default()
+}
+
+/// Slint's image loader has no webp, so webp is decoded here (POLA-180).
+fn load_thumb(path: &Path) -> Option<slint::Image> {
+    if path.extension().is_none_or(|e| e != "webp") {
+        return slint::Image::load_from_path(path).ok();
+    }
+    let file = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let mut decoder = image_webp::WebPDecoder::new(file).ok()?;
+    let (w, h) = decoder.dimensions();
+    let mut buf = vec![0; decoder.output_buffer_size()?];
+    decoder.read_image(&mut buf).ok()?;
+    if decoder.has_alpha() {
+        let mut pixels = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
+        pixels.make_mut_bytes().copy_from_slice(&buf);
+        Some(slint::Image::from_rgba8(pixels))
+    } else {
+        let mut pixels = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(w, h);
+        pixels.make_mut_bytes().copy_from_slice(&buf);
+        Some(slint::Image::from_rgb8(pixels))
+    }
 }
 
 /// Download queue (popped from the back), parts that failed this session, worker flag.
@@ -155,7 +175,7 @@ fn fetch_thumbs(ui: slint::Weak<AppWindow>, items: &[&BookItem]) {
 }
 
 fn set_thumb(ui: &AppWindow, part: &str, path: &Path) {
-    let Ok(image) = slint::Image::load_from_path(path) else { return };
+    let Some(image) = load_thumb(path) else { return };
     for model in [ui.get_catalog_rows(), ui.get_catalog_list()] {
         for i in 0..model.row_count() {
             if let Some(mut r) = model.row_data(i).filter(|r| r.part == part) {
@@ -220,7 +240,12 @@ fn refresh(ui: &AppWindow, app: &AppState) {
 
 /// Shows the window; the list is read from disk each time it opens.
 pub fn open(ui: &AppWindow, app: &AppState) {
-    STATE.with(|s| s.borrow_mut().list = load_list());
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.list = load_list();
+        // The search box opens empty, so the filter must too.
+        s.query.clear();
+    });
     ui.set_catalog_categories(ModelRc::new(VecModel::from(categories().into_iter().map(Into::into).collect::<Vec<_>>())));
     ui.set_catalog_category(STATE.with(|s| s.borrow().category) as i32);
     refresh(ui, app);

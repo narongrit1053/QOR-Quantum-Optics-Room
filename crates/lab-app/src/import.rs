@@ -41,6 +41,8 @@ thread_local! {
     static QUEUE: RefCell<std::collections::VecDeque<PathBuf>> = const { RefCell::new(std::collections::VecDeque::new()) };
     /// The running "Import Folder into Library…" batch (POLA-163).
     static BATCH: RefCell<Option<Batch>> = const { RefCell::new(None) };
+    /// The error step shows a failed URL download: "Choose another file" returns to the URL step.
+    static URL_FAILED: RefCell<bool> = const { RefCell::new(false) };
 }
 
 /// The `Finish` stored in an imported part's `meta["finish"]` (AnodizedBlack if unknown).
@@ -63,6 +65,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     ui.on_import_cancel(move || {
         GENERATION.fetch_add(1, Ordering::SeqCst);
         QUEUE.with(|q| q.borrow_mut().clear());
+        URL_FAILED.with(|f| *f.borrow_mut() = false);
         if let Some(ui) = w.upgrade() {
             // A cancelled batch keeps what it imported: a second run resumes.
             end_batch(&ui);
@@ -94,7 +97,17 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
 }
 
 /// "Import STEP…" and "Choose another file": the native open dialog, then the form.
-pub fn choose_file(ui: &AppWindow, _app: &Rc<RefCell<AppState>>, _models: &Rc<UiModels>) {
+pub fn choose_file(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<UiModels>) {
+    // The dialog's buttons reach Rust only through this action (app.slint is not ours to wire):
+    // on the done step it is "Place", after a failed download "Choose another file" means another URL.
+    match ui.get_import_step() {
+        4 => {
+            place(ui, app, &ui.get_import_part_id(), None);
+            return ui.set_import_step(0);
+        }
+        3 if URL_FAILED.with(|f| f.replace(false)) => return ui.set_import_step(5),
+        _ => {}
+    }
     let w = ui.as_weak();
     show_file_dialog_local(owner_hwnd(ui.window()), DialogKind::OpenSteps, None, move |result| {
         let Some(ui) = w.upgrade() else { return };
@@ -151,6 +164,7 @@ fn download(ui: &AppWindow) {
                     ui.set_import_step(1);
                 }
                 Err(text) => {
+                    URL_FAILED.with(|f| *f.borrow_mut() = true);
                     ui.set_import_error(text.into());
                     ui.set_import_step(3);
                 }
@@ -317,16 +331,26 @@ pub fn recategorize_imported(dir: &Path) -> usize {
     changed
 }
 
+/// A catalog-book part's library category: its book path below "Optomechanics ›
+/// Optomechanical Components", two levels deep ('/' inside a name becomes '-'); `None` if the
+/// path is shorter.
+pub fn book_category(item: &BookItem) -> Option<String> {
+    let levels: Vec<String> = item.category.iter().skip(2).take(2).map(|c| c.replace('/', "-")).collect();
+    (!levels.is_empty()).then(|| levels.join("/"))
+}
+
 /// "ThorLabs - F6MSS12 (M6 x 0.25 Fine Hex Adjusters)" → Thorlabs, F6MSS12, the parenthesis
 /// text as the name. Part numbers that collide get their parenthesis text appended.
 pub fn names_from_stems(stems: &[String]) -> Vec<Named> {
     const PREFIX: &str = "thorlabs - ";
+    let has_prefix = |stem: &str| stem.trim().get(..PREFIX.len()).is_some_and(|p| p.eq_ignore_ascii_case(PREFIX));
+    // A file without the prefix joins the folder's library ("BE1-Step" among Thorlabs files).
+    let other = if stems.iter().any(|s| has_prefix(s)) { "Thorlabs" } else { "Other" };
     let mut named: Vec<(Named, Option<String>)> = stems
         .iter()
         .map(|stem| {
             let stem = stem.trim();
-            let thorlabs = stem.get(..PREFIX.len()).is_some_and(|p| p.eq_ignore_ascii_case(PREFIX));
-            let (vendor, rest) = if thorlabs { ("Thorlabs", stem[PREFIX.len()..].trim()) } else { ("Other", stem) };
+            let (vendor, rest) = if has_prefix(stem) { ("Thorlabs", stem[PREFIX.len()..].trim()) } else { (other, stem) };
             let (part, paren) = match (rest.find('('), rest.rfind(')')) {
                 (Some(open), Some(close)) if close > open => {
                     (rest[..open].trim().to_string(), Some(rest[open + 1..close].trim().to_string()).filter(|p| !p.is_empty()))
@@ -484,7 +508,7 @@ fn next_job(ui: &AppWindow) {
                 vendor: named.vendor.clone(),
                 part_number: named.part_number.clone(),
                 name: named.name.clone(),
-                category: named.category.to_string(),
+                category: item.and_then(book_category).unwrap_or_else(|| named.category.to_string()),
                 finish_index: batch.finish_index,
                 opts: ImportOptions {
                     source_up: if batch.up == 0 { SourceUp::Y } else { SourceUp::Z },
@@ -498,6 +522,8 @@ fn next_job(ui: &AppWindow) {
         None
     });
     let Some((path, named, item, spec, library, of)) = job else { return end_batch(ui) };
+    let file = path.file_name().map_or_else(|| named.part_number.clone(), |f| f.to_string_lossy().into_owned());
+    ui.set_import_file(format!("{file} ({})", of.split(':').next().unwrap_or_default()).into());
     let verb = if item.is_some() { "Downloading" } else { "Importing" };
     ui.set_import_progress(format!("{verb} {of}").into());
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -863,7 +889,27 @@ mod tests {
         assert_eq!((n[3].part_number.as_str(), n[4].part_number.as_str()), ("F19SS050 (A)", "F19SS050 (B)"));
         assert_eq!(n[5].category, "mounts/fixed");
         assert_eq!(n[6].category, "stages");
-        assert_eq!((n[7].vendor.as_str(), n[7].part_number.as_str(), n[7].category), ("Other", "Widget 7", "imported"));
+        assert_eq!((n[7].vendor.as_str(), n[7].part_number.as_str(), n[7].category), ("Thorlabs", "Widget 7", "imported"));
+        assert_eq!(names_from_stems(&["Widget 7".to_string()])[0].vendor, "Other");
+    }
+
+    #[test]
+    fn book_parts_take_the_book_category() {
+        let mut item = BookItem {
+            part: "SM1L05".into(),
+            name: "Lens Tube".into(),
+            description: String::new(),
+            category: ["Optomechanics", "Optomechanical Components", "Lens Tube Systems", "Ø1/2\" Lens Tubes", "x"]
+                .map(String::from)
+                .to_vec(),
+            url: String::new(),
+            cad_pdf: None,
+            step: None,
+            image: None,
+        };
+        assert_eq!(book_category(&item).as_deref(), Some("Lens Tube Systems/Ø1-2\" Lens Tubes"));
+        item.category.truncate(2);
+        assert_eq!(book_category(&item), None);
     }
 
     #[test]
