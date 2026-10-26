@@ -3,12 +3,14 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use lab_catalog::book::{self, BookItem};
 use lab_ui::{AppWindow, CatalogRow};
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::app_state::AppState;
 
@@ -88,6 +90,82 @@ pub fn open_url(url: &str) {
     }
 }
 
+/// `%LOCALAPPDATA%\LabSetup\thumbs\<part, / → _>.<ext>` for an item with an image.
+fn thumb_path(item: &BookItem) -> Option<PathBuf> {
+    let url = item.image.as_deref()?;
+    let ext = url.split('?').next()?.rsplit('.').next()?.to_lowercase();
+    if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) {
+        return None;
+    }
+    let dir = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("LabSetup").join("thumbs");
+    Some(dir.join(format!("{}.{ext}", item.part.replace(['/', '\\'],"_"))))
+}
+
+/// The cached thumbnail, or an empty image (the placeholder shows through) while missing,
+/// failed or in a format Slint cannot decode.
+fn thumb(item: &BookItem) -> slint::Image {
+    thumb_path(item).filter(|p| p.exists()).and_then(|p| slint::Image::load_from_path(&p).ok()).unwrap_or_default()
+}
+
+/// Download queue (popped from the back), parts that failed this session, worker flag.
+static QUEUE: Mutex<Vec<(String, String, PathBuf)>> = Mutex::new(Vec::new());
+static FAILED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+static RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Replaces the queue with the missing thumbnails of `items` (in order) and starts the single
+/// worker thread if it is not running; the worker exits when the queue is empty.
+fn fetch_thumbs(ui: slint::Weak<AppWindow>, items: &[&BookItem]) {
+    let failed = FAILED.lock().unwrap().clone();
+    let mut jobs: Vec<_> = items
+        .iter()
+        .filter(|i| !failed.contains(&i.part))
+        .filter_map(|i| Some((i.part.clone(), i.image.clone()?, thumb_path(i)?)))
+        .filter(|(_, _, p)| !p.exists())
+        .collect();
+    jobs.reverse();
+    let empty = jobs.is_empty();
+    *QUEUE.lock().unwrap() = jobs;
+    if empty || RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        let job = QUEUE.lock().unwrap().pop();
+        let Some((part, url, path)) = job else {
+            RUNNING.store(false, Ordering::SeqCst);
+            // A search may have queued work between the pop and the store.
+            if QUEUE.lock().unwrap().is_empty() || RUNNING.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            continue;
+        };
+        let tmp = path.with_extension("part");
+        let done = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .map_err(|e| e.to_string())
+            .and_then(|_| crate::import_url::curl(&[&url], None))
+            .and_then(|bytes| std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string()));
+        if let Err(error) = done {
+            eprintln!("thumbnail {part}: {error}");
+            FAILED.lock().unwrap().insert(part);
+            continue;
+        }
+        let _ = ui.upgrade_in_event_loop(move |ui| set_thumb(&ui, &part, &path));
+    });
+}
+
+fn set_thumb(ui: &AppWindow, part: &str, path: &Path) {
+    let Ok(image) = slint::Image::load_from_path(path) else { return };
+    for model in [ui.get_catalog_rows(), ui.get_catalog_list()] {
+        for i in 0..model.row_count() {
+            if let Some(mut r) = model.row_data(i).filter(|r| r.part == part) {
+                r.thumb = image.clone();
+                model.set_row_data(i, r);
+            }
+        }
+    }
+}
+
 /// Part numbers of the Thorlabs parts in the user library.
 fn in_library(app: &AppState) -> BTreeSet<String> {
     let c = &app.catalog;
@@ -106,7 +184,7 @@ fn row(item: &BookItem, library: &BTreeSet<String>, selected: bool) -> CatalogRo
     } else {
         ""
     };
-    CatalogRow { part: item.part.as_str().into(), name: item.name.as_str().into(), badge: badge.into(), selected }
+    CatalogRow { part: item.part.as_str().into(), name: item.name.as_str().into(), badge: badge.into(), selected, thumb: thumb(item) }
 }
 
 fn refresh(ui: &AppWindow, app: &AppState) {
@@ -119,6 +197,7 @@ fn refresh(ui: &AppWindow, app: &AppState) {
         let selected = |i: &BookItem| s.selected.as_deref() == Some(i.part.as_str());
         let rows: Vec<CatalogRow> = hits.iter().take(MAX_ROWS).map(|i| row(i, &library, selected(i))).collect();
         ui.set_catalog_rows(ModelRc::new(VecModel::from(rows)));
+        fetch_thumbs(ui.as_weak(), &hits[..hits.len().min(MAX_ROWS)]);
         ui.set_catalog_count(
             if hits.len() > MAX_ROWS { format!("showing {MAX_ROWS} of {}", hits.len()) } else { format!("{} parts", hits.len()) }
                 .into(),
@@ -195,6 +274,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
             "link" => return open_url(&arg),
             "close" => {
                 ui.set_catalog_open(false);
+                QUEUE.lock().unwrap().clear();
                 // Closed: drop the rows so nothing is kept or laid out.
                 ui.set_catalog_rows(ModelRc::default());
                 ui.set_catalog_list(ModelRc::default());
@@ -235,6 +315,7 @@ mod tests {
             url: format!("https://www.thorlabs.com/item/{part}"),
             cad_pdf: None,
             step: None,
+            image: None,
         }
     }
 
