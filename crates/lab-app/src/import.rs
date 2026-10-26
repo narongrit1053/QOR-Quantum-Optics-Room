@@ -127,7 +127,7 @@ fn prefill(ui: &AppWindow, path: PathBuf) {
     ui.set_import_part_number(part.as_str().into());
     ui.set_import_name(part.as_str().into());
     if ui.get_import_category().is_empty() {
-        ui.set_import_category("imported".into());
+        ui.set_import_category(category_of(&part).into());
     }
     FILE.with(|f| *f.borrow_mut() = Some(path));
 }
@@ -220,18 +220,60 @@ const CATEGORIES: &[(&str, &[&str])] = &[
     ),
     ("fiber", &["ADAFC", "CAPF", "CAPN", "PM20", "SM1FC", "SM1SMA", "SFL", "FC-"]),
     ("hardware", &["F19", "F6M", "LN6"]),
+    ("optics/lenses", &["LA", "LC", "LE", "AC", "BE"]),
 ];
 
 /// The category of a part number by prefix; a "-Stellring…" set ring takes its base part's.
+/// A leading "ThorLabs - " and a trailing "-Step" are ignored.
 pub fn category_of(part_number: &str) -> &'static str {
-    let upper = part_number.to_uppercase();
-    let base = upper.split("-STELLRING").next().unwrap_or(&upper);
+    let upper = part_number.trim().to_uppercase();
+    let upper = upper.strip_prefix("THORLABS - ").unwrap_or(&upper);
+    let upper = upper.strip_suffix("-STEP").unwrap_or(upper);
+    let base = upper.split("-STELLRING").next().unwrap_or(upper);
     CATEGORIES
         .iter()
         .flat_map(|(category, prefixes)| prefixes.iter().map(move |p| (*category, *p)))
         .filter(|(_, p)| base.starts_with(p))
         .max_by_key(|(_, p)| p.len())
         .map_or("imported", |(category, _)| category)
+}
+
+/// Gives every part under `dir/parts` with category "imported" the category of its part
+/// number, where one is known; rewrites only those files. Returns how many changed.
+pub fn recategorize_imported(dir: &Path) -> usize {
+    let mut changed = 0;
+    let mut stack = vec![dir.join("parts")];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "toml") {
+                continue;
+            }
+            let mut def: PartDef = match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| toml::from_str(&t).map_err(|e| e.to_string())) {
+                Ok(def) => def,
+                Err(error) => {
+                    eprintln!("library: {}: skipped: {error}", path.display());
+                    continue;
+                }
+            };
+            let category = category_of(&def.part_number);
+            if def.category != "imported" || category == "imported" {
+                continue;
+            }
+            def.category = category.into();
+            let tmp = path.with_extension("toml.tmp");
+            let written = toml::to_string(&def).map_err(std::io::Error::other).and_then(|t| std::fs::write(&tmp, t)).and_then(|_| std::fs::rename(&tmp, &path));
+            match written {
+                Ok(()) => changed += 1,
+                Err(error) => eprintln!("library: {}: not recategorized: {error}", path.display()),
+            }
+        }
+    }
+    changed
 }
 
 /// "ThorLabs - F6MSS12 (M6 x 0.25 Fine Hex Adjusters)" → Thorlabs, F6MSS12, the parenthesis
@@ -545,11 +587,12 @@ pub fn quick_insert(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<Ui
         part = format!("{part} ({})", &hash[..6]);
     }
     toast(&format!("Converting {part}…"));
+    let category = category_of(&part);
     let spec = Spec {
         vendor: vendor.into(),
         part_number: part.clone(),
         name: part,
-        category: "imported".into(),
+        category: category.into(),
         finish_index: 0,
         opts: ImportOptions { source_up: SourceUp::Y, finish: Some(finish_of(0)), ..Default::default() },
     };
@@ -709,5 +752,46 @@ mod tests {
         assert_eq!(n[5].category, "mounts/fixed");
         assert_eq!(n[6].category, "stages");
         assert_eq!((n[7].vendor.as_str(), n[7].part_number.as_str(), n[7].category), ("Other", "Widget 7", "imported"));
+    }
+
+    #[test]
+    fn import_category_of_strips_vendor_and_step() {
+        assert_eq!(category_of("ThorLabs - KM100"), "mounts/kinematic");
+        assert_eq!(category_of("ThorLabs - TR50-M"), "posts/posts");
+        assert_eq!(category_of("ThorLabs - CT101"), "mounts/fixed");
+        assert_eq!(category_of("ThorLabs - PH50-M"), "posts/holders");
+        assert_eq!(category_of("LA1289-A-ML"), "optics/lenses");
+        assert_eq!(category_of("BE1-Step"), "optics/lenses");
+        assert_eq!(category_of("LB1"), "imported");
+        assert_eq!(category_of("Widget 7"), "imported");
+    }
+
+    #[test]
+    fn import_recategorize_imported_is_idempotent() {
+        let dir = std::env::temp_dir().join(format!("labsetup-recat-{}", std::process::id()));
+        let parts = dir.join("parts").join("imported");
+        std::fs::create_dir_all(&parts).unwrap();
+        for (file, number) in [("km.toml", "KM100"), ("w.toml", "Widget")] {
+            let def = PartDef {
+                id: format!("other:{number}"),
+                version: 1,
+                vendor: "Other".into(),
+                part_number: number.into(),
+                name: number.into(),
+                category: "imported".into(),
+                tags: Vec::new(),
+                geometry: Geometry::Mesh { asset: "x.glb".into() },
+                connectors: Vec::new(),
+                optical_ports: Vec::new(),
+                meta: BTreeMap::new(),
+                features: Vec::new(),
+            };
+            std::fs::write(parts.join(file), toml::to_string(&def).unwrap()).unwrap();
+        }
+        assert_eq!(recategorize_imported(&dir), 1);
+        assert_eq!(recategorize_imported(&dir), 0);
+        let read = |f: &str| toml::from_str::<PartDef>(&std::fs::read_to_string(parts.join(f)).unwrap()).unwrap().category;
+        assert_eq!((read("km.toml"), read("w.toml")), ("mounts/kinematic".to_string(), "imported".to_string()));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

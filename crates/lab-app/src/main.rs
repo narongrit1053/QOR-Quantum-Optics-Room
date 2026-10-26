@@ -100,6 +100,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.io = Some(io);
     state.autosave_available = autosave_available;
     state.recovery = recovery;
+    if let Some(dir) = lab_catalog::user_dir() {
+        crate::import::recategorize_imported(&dir);
+    }
     let (catalog, warnings) = lab_catalog::Catalog::load_default();
     for w in &warnings {
         eprintln!("library: {}: {}", w.path.display(), w.message);
