@@ -1,6 +1,6 @@
 // Library menu (A, POLA-165): a centred overlay with the part library as a grid of tiles or a
-// list, the library picker, search and filters. Pressing a part starts the library drag; when
-// the pointer leaves the panel the menu closes and the drag goes on into the viewport.
+// list, the library picker, search and filters. Dragging a part hides the menu at once and the
+// drag goes on into the viewport; clicking a part places it with the next click (POLA-185).
 
 import { Theme } from "theme.slint";
 import { LibraryRow } from "types.slint";
@@ -28,10 +28,11 @@ component PartTouch inherits TouchArea {
         } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
             root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
         } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+            // Cleared first: a click with no move arms placing, which sets `active` again.
+            DragState.active = false;
             if (!DragState.cancelled) {
                 root.drag(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
             }
-            DragState.active = false;
             DragState.cancelled = false;
         } else if (event.kind == PointerEventKind.cancel) {
             if (!DragState.cancelled) { root.drag(2, 0, 0); }
@@ -63,6 +64,10 @@ export component LibraryMenu inherits Rectangle {
     // A tile drag in progress keeps the (closed, transparent) menu alive: its pointer grab
     // carries the drag into the viewport.
     property <bool> dragging;
+    // POLA-185: a click (no move) on a part arms placing: the part follows the pointer until a
+    // left click drops it, or Esc / a right click cancels it.
+    property <bool> placing;
+    property <string> placing-id;
     property <int> columns: Math.max(1, Math.floor((list.width - 16px + 8px) / 128px));
     changed columns => { root.cmd("columns", "", root.columns); }
     init => { root.cmd("columns", "", root.columns); }
@@ -72,19 +77,41 @@ export component LibraryMenu inherits Rectangle {
         field.select-all();
     }
 
-    visible: root.open || root.dragging;
+    visible: root.open || root.dragging || root.placing;
     changed open => {
         if (root.open) { field.focus(); }
     }
 
     function part-drag(id: string, kind: int, x: length, y: length) {
         if (root.browse) { return; }
-        root.dragging = kind == 0;
-        if (kind == 0 && root.open && (x < panel.absolute-position.x || x > panel.absolute-position.x + panel.width
-                || y < panel.absolute-position.y || y > panel.absolute-position.y + panel.height)) {
+        if (kind == 1 && !root.dragging) {
+            root.placing-id = id;
+            root.placing = true;
             root.open = false;
+            DragState.active = true;
+            DragState.source = 1;
+            return;
         }
+        root.dragging = kind == 0;
+        root.open = kind != 0;
         root.drag(id, kind, x, y);
+    }
+
+    // Esc (app shortcuts) during a menu drag or placing: cancel it and show the menu again.
+    public function cancel() {
+        root.drag(root.placing-id, 2, 0, 0);
+        if (root.dragging || root.placing) { root.open = true; }
+        root.dragging = false;
+        root.placing = false;
+    }
+
+    function place(kind: int, x: length, y: length) {
+        root.drag(root.placing-id, kind, x, y);
+        if (kind != 0) {
+            root.placing = false;
+            DragState.active = false;
+            root.open = true;
+        }
     }
 
     // A click outside the panel closes it.
@@ -405,6 +432,22 @@ export component LibraryMenu inherits Rectangle {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Placing: every pointer move goes the drag path; left click drops, right click cancels.
+    if root.placing: TouchArea {
+        mouse-cursor: grabbing;
+        changed mouse-x => { root.place(0, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+        changed mouse-y => { root.place(0, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+        pointer-event(event) => {
+            DragState.shift = event.modifiers.shift;
+            DragState.ctrl = event.modifiers.control;
+            if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                root.place(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.right) {
+                root.place(2, 0, 0);
             }
         }
     }
