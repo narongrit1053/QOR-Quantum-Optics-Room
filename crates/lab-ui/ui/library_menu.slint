@@ -52,6 +52,8 @@ export component LibraryMenu inherits Rectangle {
     in property <bool> filtered;
     in property <bool> list-view;
     in property <string> count;
+    // Opened from the start page (POLA-169): no project, so parts cannot be dragged out.
+    in property <bool> browse;
     callback search(string);
     callback toggle(string /* group */);
     callback drag(string /* part id */, int, length, length);
@@ -76,6 +78,7 @@ export component LibraryMenu inherits Rectangle {
     }
 
     function part-drag(id: string, kind: int, x: length, y: length) {
+        if (root.browse) { return; }
         root.dragging = kind == 0;
         if (kind == 0 && root.open && (x < panel.absolute-position.x || x > panel.absolute-position.x + panel.width
                 || y < panel.absolute-position.y || y > panel.absolute-position.y + panel.height)) {

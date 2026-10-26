@@ -22,6 +22,8 @@ use crate::glb::{Glb, Material};
 /// fine mesh or meshing coarsely is what made curved surfaces facet and smear (POLA-152).
 const LOD0_BUDGET: usize = 150_000;
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// The coarse retry: reading a 30–50 MB STEP file alone takes about a minute.
+const COARSE_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct ImportOptions {
     /// Up axis of the STEP model. `Y` for Thorlabs (SolidWorks), `Z` otherwise.
@@ -65,7 +67,7 @@ pub struct Imported {
 pub enum ImportError {
     #[error("The STEP converter was not found at {0}.")]
     SidecarMissing(PathBuf),
-    #[error("The conversion took longer than 60 seconds and was stopped.")]
+    #[error("The conversion took too long and was stopped.")]
     Timeout,
     #[error("{message}")]
     Failed { code: i32, message: String },
@@ -121,12 +123,24 @@ pub fn import_step(
     let start = opts.angular_deflection;
     let mut tries = vec![start];
     tries.extend([0.2, 0.3, 0.5].into_iter().filter(|&a| a > start));
+    let out = tmp.0.join("out.glb");
+    let load = || -> Result<Merged, ImportError> {
+        let glb = Glb::parse(&std::fs::read(&out)?).map_err(ImportError::BadGlb)?;
+        merge(&glb, opts.finish.as_ref())
+    };
     let mut merged = None;
     for a in tries {
-        let out = tmp.0.join("out.glb");
-        run_step2glb(&exe, step, &out, a, opts.source_up, &tmp.0)?;
-        let glb = Glb::parse(&std::fs::read(&out)?).map_err(ImportError::BadGlb)?;
-        let m = merge(&glb, opts.finish.as_ref())?;
+        match run_step2glb(&exe, step, &out, a, None, opts.source_up, &tmp.0, TIMEOUT) {
+            // The default 0.05 mm linear deflection meshes some detailed parts for minutes
+            // (CT1, MS3-M, LX20-M; POLA-169): one coarse try, which takes seconds.
+            Err(ImportError::Timeout) => {
+                run_step2glb(&exe, step, &out, 0.5, Some(0.5), opts.source_up, &tmp.0, COARSE_TIMEOUT)?;
+                merged = Some(load()?);
+                break;
+            }
+            result => result?,
+        }
+        let m = load()?;
         let fits = m.triangles() <= LOD0_BUDGET;
         merged = Some(m);
         if fits {
@@ -218,14 +232,23 @@ fn find_part_file(dir: &Path, id: &str) -> Option<PathBuf> {
     None
 }
 
-fn run_step2glb(exe: &Path, step: &Path, out: &Path, deflection: f64, up: SourceUp, tmp: &Path) -> Result<(), ImportError> {
+fn run_step2glb(
+    exe: &Path,
+    step: &Path,
+    out: &Path,
+    deflection: f64,
+    linear: Option<f64>,
+    up: SourceUp,
+    tmp: &Path,
+    timeout: Duration,
+) -> Result<(), ImportError> {
     let err_path = tmp.join("stderr.txt");
     let mut cmd = Command::new(exe);
-    cmd.arg(step)
-        .arg(out)
-        .arg("-a")
-        .arg(deflection.to_string())
-        .arg("--source-up")
+    cmd.arg(step).arg(out).arg("-a").arg(deflection.to_string());
+    if let Some(l) = linear {
+        cmd.arg("-l").arg(l.to_string());
+    }
+    cmd.arg("--source-up")
         .arg(if up == SourceUp::Y { "y" } else { "z" })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -241,7 +264,7 @@ fn run_step2glb(exe: &Path, step: &Path, out: &Path, deflection: f64, up: Source
         if let Some(s) = child.try_wait()? {
             break s;
         }
-        if started.elapsed() > TIMEOUT {
+        if started.elapsed() > timeout {
             let _ = child.kill();
             let _ = child.wait();
             return Err(ImportError::Timeout);

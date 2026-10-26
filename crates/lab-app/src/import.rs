@@ -213,7 +213,7 @@ const CATEGORIES: &[(&str, &[&str])] = &[
     ("posts/holders", &["PH"]),
     ("posts/clamps", &["RA", "SWC"]),
     ("mounts/kinematic", &["KM", "KS", "KC", "K5X", "K6X", "POLARIS"]),
-    ("mounts/fixed", &["VM", "LM", "LRM", "CL", "HMM", "SCP", "SPT", "ST1XY", "CXY", "CT"]),
+    ("mounts/fixed", &["VM", "LM", "LRM", "CL", "HMM", "SCP", "SPT", "ST1XY", "CXY", "CT", "SM05", "SM16", "SSP"]),
     (
         "stages",
         &["DT", "DTS", "DDR", "XR", "XRN", "XYR", "XYT", "LX", "MT", "MVS", "PT", "T12", "GM", "AMA", "MMP", "OCT", "RB", "MK"],
@@ -419,7 +419,10 @@ fn next_job(ui: &AppWindow) {
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let w = ui.as_weak();
     std::thread::spawn(move || {
-        let result = convert(&path, &library, spec, &|_| {}).map(|_| ()).map_err(|e| e.to_string());
+        // A panic must count as a failure, or the batch waits forever for this file.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| convert(&path, &library, spec, &|_| {})))
+            .map_err(|_| "the importer panicked".to_string())
+            .and_then(|r| r.map(|_| ()).map_err(|e| e.to_string()));
         slint::invoke_from_event_loop(move || {
             if GENERATION.load(Ordering::SeqCst) != generation {
                 return; // cancelled
@@ -762,6 +765,9 @@ mod tests {
         assert_eq!(category_of("ThorLabs - PH50-M"), "posts/holders");
         assert_eq!(category_of("LA1289-A-ML"), "optics/lenses");
         assert_eq!(category_of("BE1-Step"), "optics/lenses");
+        assert_eq!(category_of("SM05NT1"), "mounts/fixed");
+        assert_eq!(category_of("SM16RR"), "mounts/fixed");
+        assert_eq!(category_of("SSP05"), "mounts/fixed");
         assert_eq!(category_of("LB1"), "imported");
         assert_eq!(category_of("Widget 7"), "imported");
     }

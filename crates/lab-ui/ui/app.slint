@@ -497,8 +497,11 @@ export component AppWindow inherits Window {
             EditState.focus-viewport += 1;
         }
     }
+    // The library was opened from the start page (POLA-169); closing it shows the page again.
+    property <bool> library-browse;
     changed library-open => {
         if (!root.library-open) {
+            root.library-browse = false;
             EditState.focus-viewport += 1;
         }
     }
@@ -1507,6 +1510,7 @@ export component AppWindow inherits Window {
             filtered: root.library-filtered;
             list-view: root.library-list-view;
             count: root.library-count;
+            browse: root.library-browse;
             search(t) => { root.library-search(t); }
             toggle(g) => { root.library-toggle(g); }
             drag(id, k, x, y) => { root.library-drag(id, k, x, y); }
@@ -1589,11 +1593,19 @@ export component AppWindow inherits Window {
         StartPage {
             width: root.width;
             height: root.height;
-            open: root.start-page-visible;
+            // Hidden under the library while browsing, so the menu is on top and gets the keys.
+            open: root.start-page-visible && !root.library-browse;
             closable: root.start-page-closable;
             recent: root.start-recent;
             error: root.start-error;
-            action(id) => { root.action(id); }
+            action(id) => {
+                if (id == "library.browse") {
+                    root.library-browse = true;
+                    root.library-open = true;
+                } else {
+                    root.action(id);
+                }
+            }
             close => { root.start-page-visible = false; }
         }
 
