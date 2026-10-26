@@ -488,7 +488,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open || root.library-open;
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open || root.library-open || root.import-step != 0;
     changed shortcuts-open => {
         if (!root.shortcuts-open) {
             EditState.focus-viewport += 1;

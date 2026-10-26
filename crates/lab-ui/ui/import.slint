@@ -56,7 +56,7 @@ export component ImportDialog inherits Rectangle {
     }
 
     changed step => {
-        if (root.step == 1 || root.step == 5) {
+        if (root.step == 1) {
             keys.focus();
         }
     }
@@ -152,6 +152,7 @@ export component ImportDialog inherits Rectangle {
             if root.step == 5: VerticalLayout {
                 spacing: 10px;
                 LineEdit {
+                    init => { self.focus(); }
                     text <=> root.url;
                     placeholder-text: "https://www.thorlabs.com/item/PBS122";
                     accepted => { if (root.url != "") { root.download(); } }
