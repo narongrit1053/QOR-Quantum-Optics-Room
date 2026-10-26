@@ -121,12 +121,24 @@ pub fn import_step(
     let start = opts.angular_deflection;
     let mut tries = vec![start];
     tries.extend([0.2, 0.3, 0.5].into_iter().filter(|&a| a > start));
+    let out = tmp.0.join("out.glb");
+    let load = || -> Result<Merged, ImportError> {
+        let glb = Glb::parse(&std::fs::read(&out)?).map_err(ImportError::BadGlb)?;
+        merge(&glb, opts.finish.as_ref())
+    };
     let mut merged = None;
     for a in tries {
-        let out = tmp.0.join("out.glb");
-        run_step2glb(&exe, step, &out, a, opts.source_up, &tmp.0)?;
-        let glb = Glb::parse(&std::fs::read(&out)?).map_err(ImportError::BadGlb)?;
-        let m = merge(&glb, opts.finish.as_ref())?;
+        match run_step2glb(&exe, step, &out, a, None, opts.source_up, &tmp.0) {
+            // The default 0.05 mm linear deflection meshes some detailed parts for minutes
+            // (CT1, MS3-M, LX20-M; POLA-169): one coarse try, which takes seconds.
+            Err(ImportError::Timeout) => {
+                run_step2glb(&exe, step, &out, 0.5, Some(0.5), opts.source_up, &tmp.0)?;
+                merged = Some(load()?);
+                break;
+            }
+            result => result?,
+        }
+        let m = load()?;
         let fits = m.triangles() <= LOD0_BUDGET;
         merged = Some(m);
         if fits {
@@ -218,14 +230,22 @@ fn find_part_file(dir: &Path, id: &str) -> Option<PathBuf> {
     None
 }
 
-fn run_step2glb(exe: &Path, step: &Path, out: &Path, deflection: f64, up: SourceUp, tmp: &Path) -> Result<(), ImportError> {
+fn run_step2glb(
+    exe: &Path,
+    step: &Path,
+    out: &Path,
+    deflection: f64,
+    linear: Option<f64>,
+    up: SourceUp,
+    tmp: &Path,
+) -> Result<(), ImportError> {
     let err_path = tmp.join("stderr.txt");
     let mut cmd = Command::new(exe);
-    cmd.arg(step)
-        .arg(out)
-        .arg("-a")
-        .arg(deflection.to_string())
-        .arg("--source-up")
+    cmd.arg(step).arg(out).arg("-a").arg(deflection.to_string());
+    if let Some(l) = linear {
+        cmd.arg("-l").arg(l.to_string());
+    }
+    cmd.arg("--source-up")
         .arg(if up == SourceUp::Y { "y" } else { "z" })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
