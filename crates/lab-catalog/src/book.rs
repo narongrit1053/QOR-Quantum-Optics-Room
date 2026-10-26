@@ -20,13 +20,19 @@ struct Book {
     items: Vec<BookItem>,
 }
 
-/// The embedded Thorlabs optomechanics book (include_str! of data/thorlabs-optomechanics.json), parsed once.
+/// The embedded Thorlabs books (optomechanics, then optical elements), parsed once and de-duplicated by part.
 pub fn thorlabs() -> &'static [BookItem] {
     static BOOK: OnceLock<Vec<BookItem>> = OnceLock::new();
     BOOK.get_or_init(|| {
-        serde_json::from_str::<Book>(include_str!("../data/thorlabs-optomechanics.json"))
-            .expect("embedded Thorlabs book is valid JSON")
-            .items
+        let mut seen = std::collections::HashSet::new();
+        [
+            include_str!("../data/thorlabs-optomechanics.json"),
+            include_str!("../data/thorlabs-optical-elements.json"),
+        ]
+        .into_iter()
+        .flat_map(|s| serde_json::from_str::<Book>(s).expect("embedded Thorlabs book is valid JSON").items)
+        .filter(|i| seen.insert(i.part.clone()))
+        .collect()
     })
 }
 
@@ -48,6 +54,7 @@ mod tests {
             assert!(i.step.is_some(), "{p} has no STEP");
         }
         assert!(book.iter().find(|i| i.part == "KM100").unwrap().image.is_some(), "KM100 has no image");
+        assert!(book.iter().any(|i| i.category[0] == "Optical Elements"), "no optical elements");
         let n = book.iter().filter(|i| i.image.is_some()).count();
         assert!(n * 2 > book.len(), "{n} of {} items have an image", book.len());
     }
