@@ -35,7 +35,24 @@ pub struct Snap {
 /// Best snap near a hit, priority: circular edge centre (rim of a fitted cylinder within `radius`),
 /// vertex, mid-edge (sharp edges > 30°) within `radius`, else the centroid of the coplanar region.
 pub fn snap_at(mesh: &TriMesh, point: DVec3, normal: DVec3, radius: f64) -> Option<Snap> {
-    let m = Mesh::new(mesh);
+    SnapMesh::new(mesh).snap_at(point, normal, radius)
+}
+
+/// A part mesh welded once, for repeated snaps on it (hover); cache it per mesh.
+pub struct SnapMesh(Mesh);
+
+impl SnapMesh {
+    pub fn new(mesh: &TriMesh) -> Self {
+        SnapMesh(Mesh::new(mesh))
+    }
+
+    /// As [`snap_at`].
+    pub fn snap_at(&self, point: DVec3, normal: DVec3, radius: f64) -> Option<Snap> {
+        snap_in(&self.0, point, normal, radius)
+    }
+}
+
+fn snap_in(m: &Mesh, point: DVec3, normal: DVec3, radius: f64) -> Option<Snap> {
     let hit = m.under(point, normal)?;
     let face_n = m.tris[hit].n;
     let frame = |kind, origin, z: DVec3| Snap { kind, frame: Frame { origin, z, x: basis(z).0 } };

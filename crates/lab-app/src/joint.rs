@@ -4,6 +4,7 @@
 //! OK keeps it, Cancel undoes it. The inspector's Joint section edits a placed joint.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::f64::consts::{PI, TAU};
 use std::rc::Rc;
 
@@ -11,8 +12,7 @@ use lab_core::glam::{DMat3, DQuat, DVec3};
 use lab_core::part::Frame;
 use lab_core::units::{LengthUnit, format_angle_deg, format_length, parse_angle_deg, parse_length};
 use lab_core::{Attach, Command, Document, Joint, JointKind, Limit, Node, NodeId, Parent, SelectionTarget, compute_holes};
-use lab_geom::TriMesh;
-use lab_import::snaps::{SnapKind, snap_at};
+use lab_import::snaps::{SnapKind, SnapMesh};
 use lab_mates::constraints::world_pose;
 use lab_mates::joints::{Dof, dofs, rigid_group};
 use lab_ui::{AppWindow, EditField};
@@ -48,8 +48,8 @@ struct State {
     /// an undo entry.
     gesture: Option<NodeId>,
     applied: bool,
-    /// CPU mesh of the last hovered node (part frame).
-    mesh: Option<(NodeId, Rc<TriMesh>)>,
+    /// Welded part meshes (part frame) by asset: hover snaps reuse them.
+    meshes: HashMap<String, Rc<SnapMesh>>,
 }
 
 thread_local! {
@@ -61,7 +61,7 @@ pub fn reset(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
     let had_first = STATE.with(|s| {
         let mut s = s.borrow_mut();
         s.active = active;
-        s.mesh = None;
+        s.meshes.clear();
         s.first.take().is_some()
     });
     if had_first {
@@ -81,7 +81,7 @@ pub fn is_active() -> bool {
 
 pub fn on_feature_hover(app: &Rc<RefCell<AppState>>, target: SelectionTarget, point: DVec3, normal: DVec3) {
     if !is_active() {
-        return;
+        return crate::constrain::on_feature_hover(app, target, point, normal);
     }
     let snap = resolve(&app.borrow(), target, point, normal);
     app.borrow().send(ViewportRequest::HighlightSnap(snap.map(|(frame, kind)| (target, frame, glyph(kind)))));
@@ -216,17 +216,22 @@ fn resolve(a: &AppState, target: SelectionTarget, point: DVec3, normal: DVec3) -
     let doc = &a.session.doc;
     match target {
         SelectionTarget::Node(id) => {
-            let mesh = STATE.with(|s| s.borrow().mesh.as_ref().filter(|(n, _)| *n == id).map(|(_, m)| m.clone()));
-            let mesh = match mesh {
+            let node = doc.node(id)?;
+            let def = a.catalog.get(&node.part)?;
+            let key = match &def.geometry {
+                lab_core::part::Geometry::Mesh { asset } => asset.clone(),
+                _ => format!("{}#{:?}", node.part, node.params),
+            };
+            let cached = STATE.with(|s| s.borrow().meshes.get(&key).cloned());
+            let mesh = match cached {
                 Some(m) => m,
                 None => {
-                    let node = doc.node(id)?;
-                    let m = Rc::new(crate::constrain::part_mesh(a.catalog.get(&node.part)?, node)?);
-                    STATE.with(|s| s.borrow_mut().mesh = Some((id, m.clone())));
+                    let m = Rc::new(SnapMesh::new(&crate::constrain::part_mesh(def, node)?));
+                    STATE.with(|s| s.borrow_mut().meshes.insert(key, m.clone()));
                     m
                 }
             };
-            snap_at(&mesh, point, normal, SNAP_MM).map(|s| (s.frame, s.kind))
+            mesh.snap_at(point, normal, SNAP_MM).map(|s| (s.frame, s.kind))
         }
         SelectionTarget::Platform(pid) => {
             let holes = compute_holes(doc.platform(pid)?).ok()?;
@@ -536,6 +541,7 @@ pub fn rigid(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lab_geom::TriMesh;
 
     /// A child already seated on the joint keeps its pose: the start values absorb the twist.
     #[test]
@@ -572,8 +578,9 @@ mod tests {
         for (_, m) in &lab_parts::generate("post_holder", &params).unwrap().pieces {
             mesh.append(m);
         }
-        let side = snap_at(&mesh, DVec3::new(15.0, 0.0, 25.0), DVec3::X, SNAP_MM);
-        let top = snap_at(&mesh, DVec3::new(8.0, 0.0, 50.0), DVec3::Z, SNAP_MM);
+        let mesh = SnapMesh::new(&mesh);
+        let side = mesh.snap_at(DVec3::new(15.0, 0.0, 25.0), DVec3::X, SNAP_MM);
+        let top = mesh.snap_at(DVec3::new(8.0, 0.0, 50.0), DVec3::Z, SNAP_MM);
         assert!(top.is_some_and(|s| s.kind == SnapKind::EdgeCentre), "top {top:?} side {side:?}");
     }
 

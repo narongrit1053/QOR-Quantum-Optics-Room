@@ -2,18 +2,19 @@
 //! axis per component; the constraint applies live as one gesture, OK keeps it, Cancel undoes it. The inspector's Constraints rows edit, re-solve and delete.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use lab_app::{EditError, EditOutcome};
-use lab_catalog::Catalog;
 use lab_core::glam::DVec3;
-use lab_core::part::{Feature, Geometry, PartDef};
+use lab_core::glam::DQuat;
+use lab_core::part::{Feature, Frame, Geometry, PartDef};
 use lab_core::units::{LengthUnit, format_angle_deg, format_length, parse_angle_deg, parse_length};
-use lab_core::{Attach, Command, Constraint, ConstraintKind, Document, Node, Parent, SelectionTarget, compute_holes};
+use lab_core::{Attach, Command, Constraint, ConstraintKind, Node, Parent, SelectionTarget, compute_holes};
 use lab_geom::TriMesh;
 use lab_mates::constraints::{constrain, default_kind, solve};
 use lab_ui::{AppWindow, ConstraintRow, EditField};
-use lab_viewport::ViewportRequest;
+use lab_viewport::{SnapGlyph, ViewportRequest};
 
 use crate::app_state::AppState;
 use crate::controller::{self, show_toast};
@@ -37,9 +38,10 @@ struct Panel {
     base: Option<Vec<Constraint>>,
     /// The gesture has an undo entry.
     applied: bool,
-    solve_all: bool,
     row: i32,
     models: Option<Rc<UiModels>>,
+    /// CPU part meshes (part frame) by asset, for picks and hover.
+    meshes: HashMap<String, Rc<TriMesh>>,
 }
 
 thread_local! {
@@ -67,7 +69,6 @@ pub fn reset(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
         *p.borrow_mut() = Panel {
             open: true,
             slots: [(selected.map(SelectionTarget::Node), None), (None, None)],
-            solve_all: ui.get_constrain_solve_all(),
             row: -1,
             models: Some(models.clone()),
             ..Panel::default()
@@ -136,7 +137,6 @@ fn show(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
         ui.set_constrain_geometry2(geometry(&p.slots[1].1).into());
         ui.set_constrain_next(p.next as i32);
         ui.set_constrain_kind(p.kind.and_then(|k| KINDS.iter().position(|x| *x == k)).map_or(-1, |i| i as i32));
-        ui.set_constrain_solve_all(p.solve_all);
         ui.set_constrain_row(p.row);
         let hint = match p.slots[p.next].0 {
             None => format!("Click Component {} in the view", p.next + 1),
@@ -160,10 +160,7 @@ pub fn on_feature_point(
     if !PANEL.with(|p| p.borrow().open) {
         return;
     }
-    let resolved = || {
-        let a = app.borrow();
-        resolve(&a.session.doc, &a.catalog, target, point, normal)
-    };
+    let resolved = || resolve(&app.borrow(), target, point, normal);
     if in_box {
         let Some(feature) = resolved() else {
             show_toast(ui, &app.borrow(), "No face or axis there", false);
@@ -258,6 +255,11 @@ fn apply_new(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
         return;
     };
     let kind = kind.unwrap_or(default);
+    if !kinds_for(&child_feature).contains(&kind) {
+        let need = if kind == ConstraintKind::Concentric { "two axes" } else { "two faces" };
+        show_toast(ui, &app.borrow(), &format!("{} needs {need}", kind_label(kind)), false);
+        return;
+    }
     let (command, base) = {
         let a = app.borrow();
         let doc = &a.session.doc;
@@ -275,7 +277,7 @@ fn apply_new(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
             (Feature::Axis { dir: cd, .. }, Feature::Axis { dir: pd, .. }) => {
                 let world = |at| lab_mates::constraints::world_pose(doc, at).map(|(_, q)| q);
                 match (world(Parent::Node(child)), world(parent)) {
-                    (Some(cq), Some(pq)) => (cq * *cd).dot(pq * *pd) < 0.0,
+                    (Some(cq), Some(pq)) => least_motion_flip(cq, *cd, pq, *pd),
                     _ => false,
                 }
             }
@@ -298,6 +300,11 @@ fn apply_new(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
         p.base = Some(base);
     });
     live(ui, app, models, command, "Constrain".into());
+}
+
+/// Flip when the child axis now points against the parent axis, so solving turns it least.
+fn least_motion_flip(child_rotation: DQuat, child_dir: DVec3, parent_rotation: DQuat, parent_dir: DVec3) -> bool {
+    (child_rotation * child_dir).dot(parent_rotation * parent_dir) < 0.0
 }
 
 /// Runs `command` inside the open constrain gesture (one undo step until OK / `+`).
@@ -360,10 +367,6 @@ pub fn panel_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiM
                 crate::part_box::open(ui, app, n);
             }
         }
-        "solve_all" => PANEL.with(|p| {
-            let mut p = p.borrow_mut();
-            p.solve_all = !p.solve_all;
-        }),
         "add" => {
             // Keep what was applied as its own step; the next pair starts a new constraint.
             app.borrow_mut().session.history.end_gesture();
@@ -413,15 +416,38 @@ pub fn panel_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiM
     show(ui, app);
 }
 
-/// The feature under a click, in the target's frame: a detected feature of the part when one is
-/// close, else the one fitted to the clicked triangles; a platform's nearest hole or top plane.
-fn resolve(doc: &Document, catalog: &Catalog, target: SelectionTarget, point: DVec3, normal: DVec3) -> Option<Feature> {
+/// The feature under the pointer, in the target's frame. A part: the surface under the cursor
+/// decides face or axis (as `pick_feature` fits it) and a detected feature of that kind close by
+/// refines it (POLA-182: a flat face no longer snaps to a nearby axis). A platform: its nearest
+/// hole, else its top plane.
+fn resolve(a: &AppState, target: SelectionTarget, point: DVec3, normal: DVec3) -> Option<Feature> {
+    let doc = &a.session.doc;
     match target {
         SelectionTarget::Node(id) => {
             let node = doc.node(id)?;
-            let def = catalog.get(&node.part)?;
-            snap(&def.features, point, normal)
-                .or_else(|| lab_import::features::pick_feature(&part_mesh(def, node)?, point, normal))
+            let def = a.catalog.get(&node.part)?;
+            let key = match &def.geometry {
+                Geometry::Mesh { asset } => asset.clone(),
+                _ => format!("{}#{:?}", node.part, node.params),
+            };
+            let cached = PANEL.with(|p| p.borrow().meshes.get(&key).cloned());
+            let mesh = match cached {
+                Some(m) => Some(m),
+                None => part_mesh(def, node).map(|m| {
+                    let m = Rc::new(m);
+                    PANEL.with(|p| p.borrow_mut().meshes.insert(key, m.clone()));
+                    m
+                }),
+            };
+            // shortcut: pick_feature re-welds the mesh on every call (hover too); cache the weld
+            // in lab-import if hovering big imported parts lags.
+            match mesh.and_then(|m| lab_import::features::pick_feature(&m, point, normal)) {
+                Some(picked) => {
+                    let same: Vec<Feature> = def.features.iter().filter(|f| same_kind(f, &picked)).cloned().collect();
+                    Some(snap(&same, point, normal).unwrap_or(picked))
+                }
+                None => snap(&def.features, point, normal),
+            }
         }
         SelectionTarget::Platform(pid) => {
             let holes = compute_holes(doc.platform(pid)?).ok()?;
@@ -433,6 +459,33 @@ fn resolve(doc: &Document, catalog: &Catalog, target: SelectionTarget, point: DV
         }
         _ => None,
     }
+}
+
+fn same_kind(a: &Feature, b: &Feature) -> bool {
+    matches!((a, b), (Feature::Plane { .. }, Feature::Plane { .. }) | (Feature::Axis { .. }, Feature::Axis { .. }))
+}
+
+/// Hover with the constrain tool (POLA-182): the feature a click would pick, as the snap glyph
+/// (square: face, circle: axis). Parts only while they are a component; platforms anywhere.
+pub fn on_feature_hover(app: &Rc<RefCell<AppState>>, target: SelectionTarget, point: DVec3, normal: DVec3) {
+    let Some(slots) = PANEL.with(|p| {
+        let p = p.borrow();
+        p.open.then(|| [p.slots[0].0, p.slots[1].0])
+    }) else {
+        return;
+    };
+    let feature = match target {
+        SelectionTarget::Node(_) if !slots.contains(&Some(target)) => None,
+        _ => resolve(&app.borrow(), target, point, normal),
+    };
+    let snap = feature.map(|f| {
+        let (origin, z, glyph) = match f {
+            Feature::Plane { origin, normal } => (origin, normal, SnapGlyph::Square),
+            Feature::Axis { origin, dir, .. } => (origin, dir, SnapGlyph::Circle),
+        };
+        (target, Frame { origin, z, x: z.any_orthonormal_vector() }, glyph)
+    });
+    app.borrow().send(ViewportRequest::HighlightSnap(snap));
 }
 
 fn snap(features: &[Feature], point: DVec3, normal: DVec3) -> Option<Feature> {
@@ -488,9 +541,9 @@ fn kind_label(kind: ConstraintKind) -> &'static str {
     }
 }
 
-/// The kinds a pair can take, in the order the kind button cycles through.
-fn valid_kinds(c: &Constraint) -> &'static [ConstraintKind] {
-    match c.child {
+/// The kinds a pair can take (both picks are the same kind of feature), in cycling order.
+fn kinds_for(child: &Feature) -> &'static [ConstraintKind] {
+    match child {
         Feature::Plane { .. } => &[ConstraintKind::Mate, ConstraintKind::Flush, ConstraintKind::Angle],
         Feature::Axis { .. } => &[ConstraintKind::Concentric, ConstraintKind::Angle],
     }
@@ -513,6 +566,7 @@ pub fn rows(node: &Node, units: LengthUnit) -> Vec<ConstraintRow> {
         .map(|(i, c)| ConstraintRow {
             index: i as i32,
             kind: kind_label(c.kind).into(),
+            kinds: Rc::new(slint::VecModel::from(kinds_for(&c.child).iter().map(|k| kind_label(*k).into()).collect::<Vec<slint::SharedString>>())).into(),
             offset: field(format!("constraint.{i}.offset"), "Offset", format_length(c.offset, units), units.suffix()),
             angle: field(format!("constraint.{i}.angle"), "Angle", format_angle_deg(c.angle), "°"),
             flip: c.flip,
@@ -536,13 +590,19 @@ pub fn field_edit(a: &AppState, id: &str, text: &str) -> Result<EditOutcome, Edi
     })
 }
 
-/// `constraint.<i>.kind|flip|lock|delete` clicked.
+/// `constraint.<i>.kind|flip|lock|delete` clicked; `constraint.<i>.kind.<Kind>` chosen.
 pub fn action_edit(a: &AppState, id: &str) -> Result<EditOutcome, EditError> {
-    edit(a, id, |cons, i| match id.rsplit('.').next() {
+    edit(a, id, |cons, i| match id.split('.').nth(2) {
         Some("kind") => {
-            let kinds = valid_kinds(&cons[i]);
-            let at = kinds.iter().position(|k| *k == cons[i].kind).map_or(0, |p| (p + 1) % kinds.len());
-            cons[i].kind = kinds[at];
+            let kinds = kinds_for(&cons[i].child);
+            let at = match id.split('.').nth(3) {
+                Some(label) => kinds.iter().position(|k| kind_label(*k) == label),
+                // Cycles (the panel's table button).
+                None => kinds.iter().position(|k| *k == cons[i].kind).map(|p| (p + 1) % kinds.len()),
+            };
+            if let Some(at) = at {
+                cons[i].kind = kinds[at];
+            }
         }
         Some("flip") => cons[i].flip = !cons[i].flip,
         Some("lock") => cons[i].lock_rotation = !cons[i].lock_rotation,
@@ -593,5 +653,28 @@ mod tests {
         assert!(matches!(hit, Some(Feature::Plane { .. })), "{hit:?}");
         // A side wall matches neither.
         assert!(snap(&features, DVec3::new(20.0, 0.0, 5.0), DVec3::X).is_none());
+    }
+
+    /// Post side axis (fitted sign either way) into an upright holder bore: the upright post
+    /// keeps pointing up, coaxial with the bore, instead of turning upside down.
+    #[test]
+    fn upright_post_goes_into_the_bore_upright() {
+        let bore = Feature::Axis { origin: DVec3::new(5.0, 0.0, 0.0), dir: DVec3::Z, radius: 6.6, hole: true };
+        for sign in [1.0, -1.0] {
+            let side = Feature::Axis { origin: DVec3::ZERO, dir: DVec3::Z * sign, radius: 6.35, hole: false };
+            let flip = least_motion_flip(DQuat::IDENTITY, DVec3::Z * sign, DQuat::IDENTITY, DVec3::Z);
+            let c = Constraint {
+                kind: ConstraintKind::Concentric,
+                child: side,
+                parent: bore.clone(),
+                offset: 0.0,
+                angle: 0.0,
+                flip,
+                lock_rotation: false,
+            };
+            let (p, q) = solve((DVec3::new(20.0, 3.0, 40.0), DQuat::IDENTITY), &[c]);
+            assert!((q * DVec3::Z).dot(DVec3::Z) > 0.999, "sign {sign}: {q}");
+            assert!((p.truncate() - DVec3::new(5.0, 0.0, 0.0).truncate()).length() < 1e-3, "sign {sign}: {p}");
+        }
     }
 }

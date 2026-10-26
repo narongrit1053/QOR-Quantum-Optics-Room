@@ -102,7 +102,14 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         let mut text = ui.get_drag_value().to_string();
         match key.as_str() {
             "\n" | "\r" => {
-                if let Ok(v) = text.parse::<f64>() {
+                // Lengths are typed in the display unit; the drag takes mm.
+                let value = if ui.get_drag_value_unit() == "°" {
+                    text.parse::<f64>().ok()
+                } else {
+                    let units = a.borrow().units();
+                    lab_core::units::parse_length(&text, units).ok()
+                };
+                if let Some(v) = value {
                     a.borrow().send(ViewportRequest::DragValue(v));
                     ui.set_drag_value_open(false);
                 }
@@ -282,6 +289,7 @@ pub fn set_hint(ui: &AppWindow, text: &str) {
 pub fn on_drag_started(ui: &AppWindow, unit: DragUnit) {
     ui.set_drag_value("".into());
     ui.set_drag_value_unit(match unit {
+        DragUnit::Mm if ui.get_display_unit() == unit_index(LengthUnit::Inch) => "in",
         DragUnit::Mm => "mm",
         DragUnit::Degrees => "°",
     }

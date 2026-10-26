@@ -63,7 +63,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("tool.rotate_right", "Rotate +15°", "Tools", "turn nudge clockwise", "R"),
     a("tool.joint", "Joint", "Tools", "constrain mate revolute slider rigid assemble", "J"),
     a("tool.ground", "Ground", "Tools", "fix lock anchor", ""),
-    a("tool.rigid_group", "Rigid Group", "Tools", "joint fuse combine", ""),
+    // Rigid Group returns with multi-selection (POLA-182): one selected node cannot group.
     a("view.hide", "Hide/Show", "View", "visibility toggle selection", "H"),
     a("view.walls", "Hide Room Walls", "View", "room visibility", ""),
     a("view.isolate_selection", "Isolate Selection", "View", "focus hide others", ""),

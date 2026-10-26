@@ -236,6 +236,8 @@ export component AppWindow inherits Window {
     callback part-box-pointer(int, int, length, length, bool, bool, bool);
     callback part-box-scroll(length, length, length, length);
     callback part-box-close();
+    property <length> part-box-x: 300px;
+    property <length> part-box-y: 80px;
     // POLA-147. Constrain Components panel (docked right of the part box).
     in property <bool> constrain-open;
     in property <int> constrain-kind: -1;
@@ -244,7 +246,6 @@ export component AppWindow inherits Window {
     in property <string> constrain-name2;
     in property <string> constrain-geometry2;
     in property <int> constrain-next;
-    in property <bool> constrain-solve-all: true;
     in property <int> constrain-row: -1;
     // M9 G. Relationships bar.
     in property <[RelationChip]> relation-chips;
@@ -878,8 +879,9 @@ export component AppWindow inherits Window {
             }
 
             if root.part-box-open: PartBox {
-                x: 300px;
-                y: 80px;
+                // Two-way, so the constrain panel follows a dragged box (POLA-182).
+                x <=> root.part-box-x;
+                y <=> root.part-box-y;
                 texture: root.part-box-texture;
                 title: root.part-box-title;
                 pointer(kind, button, x, y, shift, ctrl, alt) => { root.part-box-pointer(kind, button, x, y, shift, ctrl, alt); }
@@ -888,15 +890,14 @@ export component AppWindow inherits Window {
             }
 
             if root.constrain-open: ConstrainPanel {
-                x: 300px + 336px + 8px;
-                y: 80px;
+                x: root.part-box-x + 336px + 8px;
+                y: root.part-box-y;
                 kind: root.constrain-kind;
                 name1: root.constrain-name1;
                 geometry1: root.constrain-geometry1;
                 name2: root.constrain-name2;
                 geometry2: root.constrain-geometry2;
                 next-slot: root.constrain-next;
-                solve-all: root.constrain-solve-all;
                 selected-row: root.constrain-row;
                 rows: root.constraint-rows;
                 action(id) => { root.action(id); }
