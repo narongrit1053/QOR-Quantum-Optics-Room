@@ -1,6 +1,8 @@
 // Inspector content for nodes, platforms and the room, and the outline preview card
-// (spec §6.1, §6.4). No std-widgets here (D20): their style clashes with the dark theme.
+// (spec §6.1, §6.4). No std-widgets here (D20): their style clashes with the dark theme. One
+// exception: the constraint kind ComboBox (POLA-182).
 
+import { ComboBox } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow } from "types.slint";
 import { SectionHeader, SegmentedControl, PillButton, IconButton, Field, ListRow } from "components.slint";
@@ -315,24 +317,26 @@ export component NodeInspector inherits Rectangle {
             HorizontalLayout {
                 padding-left: 9px;
                 spacing: 6px;
-                // Cycles through the kinds valid for the picked pair.
-                PillButton {
-                    label: c.kind;
-                    clicked => { root.action("constraint." + c.index + ".kind"); }
+                // The kinds valid for the picked pair.
+                ComboBox {
+                    width: 112px;
+                    model: c.kinds;
+                    current-value: c.kind;
+                    selected(v) => { root.action("constraint." + c.index + ".kind." + v); }
                 }
                 if c.kind == "Concentric": PillButton {
-                    label: c.flip ? "Flipped" : "Flip";
+                    label: "Flip";
                     primary: c.flip;
                     clicked => { root.action("constraint." + c.index + ".flip"); }
                 }
                 if c.kind == "Concentric": PillButton {
-                    label: "Lock rotation";
+                    label: "Lock";
                     primary: c.lock;
                     clicked => { root.action("constraint." + c.index + ".lock"); }
                 }
                 Rectangle { }
-                PillButton {
-                    label: "Delete";
+                IconButton {
+                    icon: "×";
                     destructive: true;
                     clicked => { root.action("constraint." + c.index + ".delete"); }
                 }

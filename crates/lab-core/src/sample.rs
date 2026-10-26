@@ -14,6 +14,8 @@ use crate::units::Mm;
 pub const BEAM_HEIGHT: Mm = 75.0;
 
 const BASE_THICKNESS: Mm = 10.0;
+/// Top of the PH40/M holder on its base (the posts test).
+#[cfg(test)]
 const HOLDER_TOP: Mm = BASE_THICKNESS + 40.0;
 const POST_BOTTOM: Mm = 20.0;
 const POST_RADIUS: Mm = 6.35;
@@ -69,23 +71,24 @@ impl Builder<'_> {
         self.holes.hole_at(HoleRef { col, row }).expect("INVARIANT: the demo hole exists")
     }
 
-    /// Base + post holder + post, ending at `post_top` above the table.
+    /// Base + post holder + post, ending at `post_top` above the table. Base and holder are
+    /// catalog parts (origin at their bottom), so joints and constraints find their features.
     fn post_stack(&mut self, label: &str, at: DVec2, yaw: f64, post_top: Mm) {
-        let rot = DQuat::from_rotation_z(yaw);
+        // BA1/M is long along its local X; the demo base runs along the stack's local Y.
         self.add(
             &format!("{label} · base"),
-            "generic:base-25x75",
-            at.extend(BASE_THICKNESS / 2.0),
-            rot,
-            Shape::Box { size: DVec3::new(25.0, 75.0, BASE_THICKNESS) },
+            "thorlabs:BA1/M",
+            at.extend(0.0),
+            DQuat::from_rotation_z(yaw + FRAC_PI_2),
+            Shape::Part,
             Finish::AnodizedBlack,
         );
         self.add(
             &format!("{label} · post holder"),
-            "generic:post-holder-40",
-            at.extend((BASE_THICKNESS + HOLDER_TOP) / 2.0),
+            "thorlabs:PH40/M",
+            at.extend(BASE_THICKNESS),
             DQuat::IDENTITY,
-            Shape::Cylinder { radius: 12.7, length: HOLDER_TOP - BASE_THICKNESS },
+            Shape::Part,
             Finish::AnodizedBlack,
         );
         let length = post_top - POST_BOTTOM;

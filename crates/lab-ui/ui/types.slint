@@ -57,6 +57,8 @@ export struct EditField {
 export struct ConstraintRow {
     index: int,
     kind: string,
+    // The kinds the picked pair can take (the kind ComboBox).
+    kinds: [string],
     offset: EditField,
     angle: EditField,
     flip: bool,

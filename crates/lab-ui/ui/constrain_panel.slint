@@ -1,5 +1,5 @@
 // POLA-147. Constrain Components panel (Fusion layout): type, two components with their picked
-// geometry, the constraints of Component 1, Solve All, OK / Cancel. Docked right of the part box.
+// geometry, the constraints of Component 1, OK / Cancel. Docked right of the part box.
 // Every click goes out as `action("cpanel.…")`; table fields as `cpanel.constraint.<i>.offset`.
 
 import { Theme } from "theme.slint";
@@ -7,33 +7,26 @@ import { ConstraintRow } from "types.slint";
 import { Panel, IconButton, PillButton } from "components.slint";
 import { NumberField } from "fields.slint";
 
+// Text labels: the UI font has no Mate/Flush glyphs (POLA-182). Disabled when the picked pair
+// cannot take the kind.
 component KindButton inherits Rectangle {
-    in property <string> glyph;
     in property <string> name;
     in property <bool> active;
+    in property <bool> enabled: true;
     callback clicked();
-    width: 40px;
+    width: label.preferred-width + 16px;
     height: 32px;
     border-radius: 6px;
-    background: root.active ? Theme.accent : touch.has-hover ? Theme.panel-border : transparent;
+    background: root.active ? Theme.accent : touch.has-hover && root.enabled ? Theme.panel-border : transparent;
     border-width: 1px;
     border-color: Theme.panel-border;
-    Text {
-        text: root.glyph;
-        color: root.active ? white : Theme.text;
-        font-size: 16px;
+    label := Text {
+        text: root.name;
+        color: root.active ? white : root.enabled ? Theme.text : Theme.text-tertiary;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    touch := TouchArea { clicked => { root.clicked(); } }
-    if touch.has-hover: Rectangle {
-        y: root.height + 2px;
-        width: tip.preferred-width + 10px;
-        height: 20px;
-        background: Theme.sheet-bg;
-        border-radius: 4px;
-        tip := Text { text: root.name; color: Theme.text; font-size: Theme.font-caption; vertical-alignment: center; }
-    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
 component ComponentRow inherits HorizontalLayout {
@@ -60,7 +53,6 @@ export component ConstrainPanel inherits Panel {
     in property <string> name2;
     in property <string> geometry2;
     in property <int> next-slot;
-    in property <bool> solve-all;
     in property <int> selected-row;
     in property <[ConstraintRow]> rows;
     callback action(string /* id */);
@@ -81,10 +73,13 @@ export component ConstrainPanel inherits Panel {
         HorizontalLayout {
             spacing: 6px;
             Text { text: "Type"; color: Theme.text-secondary; width: 92px; vertical-alignment: center; }
-            KindButton { glyph: "⫴"; name: "Mate"; active: root.kind == 0; clicked => { root.action("cpanel.kind.0"); } }
-            KindButton { glyph: "▭"; name: "Flush"; active: root.kind == 1; clicked => { root.action("cpanel.kind.1"); } }
-            KindButton { glyph: "◎"; name: "Concentric"; active: root.kind == 2; clicked => { root.action("cpanel.kind.2"); } }
-            KindButton { glyph: "∠"; name: "Angle"; active: root.kind == 3; clicked => { root.action("cpanel.kind.3"); } }
+            // A picked axis rules out Mate/Flush, a picked face Concentric.
+            property <bool> axis: root.geometry1 == "Axis" || root.geometry2 == "Axis";
+            property <bool> face: root.geometry1 == "Face" || root.geometry2 == "Face";
+            KindButton { name: "Mate"; enabled: !axis; active: root.kind == 0; clicked => { root.action("cpanel.kind.0"); } }
+            KindButton { name: "Flush"; enabled: !axis; active: root.kind == 1; clicked => { root.action("cpanel.kind.1"); } }
+            KindButton { name: "Concentric"; enabled: !face; active: root.kind == 2; clicked => { root.action("cpanel.kind.2"); } }
+            KindButton { name: "Angle"; enabled: !(axis && face); active: root.kind == 3; clicked => { root.action("cpanel.kind.3"); } }
             Rectangle { }
         }
         ComponentRow {
@@ -137,21 +132,6 @@ export component ConstrainPanel inherits Panel {
             spacing: 6px;
             IconButton { icon: "+"; clicked => { root.action("cpanel.add"); } }
             IconButton { icon: "×"; destructive: true; enabled: root.selected-row >= 0; clicked => { root.action("cpanel.delete"); } }
-            Rectangle { }
-        }
-        HorizontalLayout {
-            spacing: 8px;
-            Rectangle {
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Theme.panel-border;
-                background: root.solve-all ? Theme.accent : transparent;
-                Text { text: root.solve-all ? "✓" : ""; color: white; }
-                TouchArea { clicked => { root.action("cpanel.solve_all"); } }
-            }
-            Text { text: "Solve All Constraints"; color: Theme.text; vertical-alignment: center; }
             Rectangle { }
         }
         HorizontalLayout {

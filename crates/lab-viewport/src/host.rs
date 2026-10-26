@@ -187,7 +187,9 @@ pub fn start(
                 .insert_resource(MsaaSamples(msaa_samples))
                 .insert_resource(ViewportSize(Vec2::new(640.0, 480.0)))
                 .init_resource::<TargetSize>()
+                .init_resource::<MainPaused>()
                 .add_systems(First, apply_render_target)
+                .add_systems(PostUpdate, pause_main_cameras)
                 .add_systems(Last, count_down_settle_frames);
             crate::glb::register_sources(&mut app);
             app.add_plugins(
@@ -468,6 +470,11 @@ fn run_on_demand(
                 }
             }
         }
+        // Box orbit/zoom only: the main view has nothing new to draw.
+        let box_only = !dirty
+            && !animating
+            && !pending.is_empty()
+            && pending.iter().all(|r| matches!(r, FrameRequest::PartBoxInput(_)));
         if !pending.is_empty() {
             app.world_mut().resource_mut::<PendingRequests>().0.extend(pending);
             dirty = true;
@@ -497,11 +504,28 @@ fn run_on_demand(
             target = create_texture(device, queue, size.0, size.1);
         }
         let box_target = box_size.and_then(|_| box_free.pop());
-        render_into(app, target, ManualTextureViewHandle(next_view_id), box_target);
+        if box_only {
+            // The main cameras skip this frame and its texture goes straight back.
+            free.push(target.clone());
+        }
+        render_into(app, target, ManualTextureViewHandle(next_view_id), box_target, !box_only);
         next_view_id = next_view_id.wrapping_add(1) % crate::part_box::BOX_VIEW.0;
 
         let world = app.world_mut();
         world.resource_mut::<PendingRequests>().0.clear();
+        if box_only {
+            // Re-activate the main cameras and tick once without rendering, so the main view's
+            // visibility (which picking reads) is current again.
+            let mut paused = world.resource_mut::<MainPaused>();
+            paused.0 = false;
+            for e in std::mem::take(&mut paused.1) {
+                if let Some(mut camera) = world.get_mut::<Camera>(e) {
+                    camera.is_active = true;
+                }
+            }
+            world.run_schedule(Main);
+            world.clear_trackers();
+        }
         let mut redraw = world.resource_mut::<RedrawState>();
         frames_rendered += 1;
         let keep_alive = std::mem::take(&mut redraw.keep_alive);
@@ -589,13 +613,14 @@ impl ResolutionScaler {
 #[derive(Resource, Clone, Copy)]
 pub(crate) struct ViewportSize(pub Vec2);
 
-fn render_into(app: &mut App, target: wgpu::Texture, handle: ManualTextureViewHandle, box_target: Option<wgpu::Texture>) {
+fn render_into(app: &mut App, target: wgpu::Texture, handle: ManualTextureViewHandle, box_target: Option<wgpu::Texture>, main: bool) {
     let view = target.create_view(&wgpu::TextureViewDescriptor {
         label: Some("lab-viewport frame view"),
         ..Default::default()
     });
     let world = app.world_mut();
-    world.resource_mut::<BackBuffer>().0 = Some(target.clone());
+    world.resource_mut::<BackBuffer>().0 = main.then(|| target.clone());
+    world.resource_mut::<MainPaused>().0 = !main;
     let mut views = world.resource_mut::<ManualTextureViews>();
     views.clear();
     views.insert(
@@ -639,6 +664,23 @@ type SceneCameras = (
     Without<crate::export::ExportCamera>,
     Without<crate::part_box::PartBoxCamera>,
 );
+
+/// Set for a frame that only redraws the part box; the main cameras it deactivated.
+#[derive(Resource, Default)]
+pub(crate) struct MainPaused(pub bool, pub Vec<Entity>);
+
+/// After the Update systems (which read `is_active`), so only rendering skips the main view.
+fn pause_main_cameras(mut paused: ResMut<MainPaused>, mut cameras: Query<(Entity, &mut Camera), SceneCameras>) {
+    if !paused.0 {
+        return;
+    }
+    for (e, mut camera) in &mut cameras {
+        if camera.is_active {
+            camera.is_active = false;
+            paused.1.push(e);
+        }
+    }
+}
 
 fn apply_render_target(current: Res<CurrentTarget>, mut cameras: Query<&mut RenderTarget, SceneCameras>) {
     for mut target in &mut cameras {
