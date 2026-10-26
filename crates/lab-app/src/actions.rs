@@ -25,6 +25,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("file.export_png", "Export PNG…", "File", "image screenshot picture render", ""),
     a("file.export_bom", "Export BOM (CSV)…", "File", "bill of materials parts list excel", ""),
     a("import.step", "Import Vendor Part…", "File", "step stp glb mesh cad", ""),
+    a("import.url", "Import from URL…", "File", "url link web download thorlabs step", ""),
     a("library.import_folder", "Import Folder into Library…", "File", "step stp batch directory thorlabs vendor", ""),
     a("import.step_insert", "Insert STEP…", "File", "step stp cad quick drop add", ""),
     a("edit.undo", "Undo", "Edit", "revert", "Ctrl+Z"),

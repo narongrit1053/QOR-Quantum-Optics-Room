@@ -18,7 +18,7 @@ component Field inherits HorizontalLayout {
 }
 
 export component ImportDialog inherits Rectangle {
-    // 0 closed, 1 form, 2 converting, 3 error, 4 done.
+    // 0 closed, 1 form, 2 converting/downloading, 3 error, 4 done, 5 URL.
     in property <int> step;
     in property <string> file-name;
     in-out property <int> vendor;
@@ -31,6 +31,8 @@ export component ImportDialog inherits Rectangle {
     in property <string> error;
     in property <string> done-text;
     in property <string> part-id;
+    in-out property <string> url;
+    callback download();
     callback start();
     callback cancel();
     callback choose-another();
@@ -54,7 +56,7 @@ export component ImportDialog inherits Rectangle {
     }
 
     changed step => {
-        if (root.step == 1) {
+        if (root.step == 1 || root.step == 5) {
             keys.focus();
         }
     }
@@ -74,7 +76,7 @@ export component ImportDialog inherits Rectangle {
             spacing: 12px;
 
             Text {
-                text: "Import STEP: " + root.file-name;
+                text: root.step == 5 ? "Import from URL" : "Import STEP: " + root.file-name;
                 color: Theme.text;
                 font-size: Theme.font-body;
                 font-weight: 600;
@@ -143,6 +145,31 @@ export component ImportDialog inherits Rectangle {
                         primary: true;
                         enabled: root.part-number != "" && root.part-name != "";
                         clicked => { root.start(); }
+                    }
+                }
+            }
+
+            if root.step == 5: VerticalLayout {
+                spacing: 10px;
+                LineEdit {
+                    text <=> root.url;
+                    placeholder-text: "https://www.thorlabs.com/item/PBS122";
+                    accepted => { if (root.url != "") { root.download(); } }
+                }
+                Text {
+                    text: "Thorlabs item page, or a direct link to a .step file";
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    PillButton { label: "Cancel"; clicked => { root.cancel(); } }
+                    PillButton {
+                        label: "Download";
+                        primary: true;
+                        enabled: root.url != "";
+                        clicked => { root.download(); }
                     }
                 }
             }

@@ -555,6 +555,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             refresh_all(ui, &app.borrow(), models);
         }
         "import.step" => crate::import::choose_file(ui, app, models),
+        "import.url" => crate::import::choose_url(ui),
         "library.import_folder" => crate::import::choose_folder(ui),
         "import.step_insert" => crate::import::insert_dialog(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),
