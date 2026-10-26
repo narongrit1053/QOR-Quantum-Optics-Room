@@ -588,11 +588,11 @@ export component AppWindow inherits Window {
                 root.action("library.open");
                 return accept;
             }
-            // Esc cancels a part drag from the sidebar.
+            // Esc cancels a part drag or click-placing (sidebar or library menu).
             if (event.text == Key.Escape && DragState.active) {
                 DragState.cancelled = true;
                 DragState.active = false;
-                if (DragState.source == 2) { root.stack-drag(2, 0, 0); } else { root.library-drag("", 2, 0, 0); }
+                if (DragState.source == 2) { root.stack-drag(2, 0, 0); } else { library-menu.cancel(); }
                 return accept;
             }
             // A sheet owns the keyboard; its own focus scope handles the keys.
