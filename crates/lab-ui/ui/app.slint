@@ -415,7 +415,12 @@ export component AppWindow inherits Window {
     in property <bool> library-filtered;
     in property <bool> library-menu-hidden;
     in property <[string]> library-menu-targets;
-    property <bool> library-naming;
+    in-out property <bool> library-naming;
+    // POLA-203: what the library menu's name field does on Enter ("create", "bundle_save",
+    // "bundle_renamed") and its starting text; the part menu was opened on a bundle row.
+    in-out property <string> library-name-verb: "create";
+    in-out property <string> library-name-default;
+    in property <bool> library-menu-bundle;
     property <string> library-menu-part;
     property <length> library-menu-x;
     property <length> library-menu-y;
@@ -1237,10 +1242,15 @@ export component AppWindow inherits Window {
             hidden: root.library-menu-hidden;
             targets: root.library-menu-targets;
             active-library: root.library-active;
+            bundle: root.library-menu-bundle;
             edit-connectors => { root.library-edit(root.library-menu-part); }
             cmd(verb, arg) => {
                 root.library-cmd(verb, root.library-menu-part, arg);
-                if (verb == "new") { root.library-naming = true; }
+                if (verb == "new") {
+                    root.library-name-verb = "create";
+                    root.library-name-default = "";
+                    root.library-naming = true;
+                }
             }
         }
 
@@ -1516,6 +1526,8 @@ export component AppWindow inherits Window {
             height: root.height;
             open <=> root.library-open;
             naming <=> root.library-naming;
+            name-verb <=> root.library-name-verb;
+            name-default <=> root.library-name-default;
             rows: root.library;
             active: root.library-active;
             type-label: root.library-type;

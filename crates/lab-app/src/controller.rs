@@ -69,6 +69,13 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         let kind = a.borrow().sheet;
         match kind {
             Some(SheetKind::Message) | None => close_sheet(&ui, &mut a.borrow_mut()),
+            Some(SheetKind::DeleteBundle) => {
+                let mut a = a.borrow_mut();
+                close_sheet(&ui, &mut a);
+                if button == 0 {
+                    crate::library::delete_bundle(&ui, &mut a, &m);
+                }
+            }
             Some(_) => files::handle_sheet_button(&ui, &a, &m, button),
         }
     });
@@ -435,6 +442,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             }
         }
         "library.open" => ui.set_library_open(!ui.get_library_open()),
+        "library.save_bundle" => crate::library::save_bundle_prompt(ui, &app.borrow()),
         "library.find" => {
             ui.set_library_open(true);
             ui.invoke_find_part();

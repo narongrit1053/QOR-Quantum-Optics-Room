@@ -44,6 +44,9 @@ component PartTouch inherits TouchArea {
 export component LibraryMenu inherits Rectangle {
     in-out property <bool> open;
     in-out property <bool> naming;
+    // POLA-203: the name field's verb on Enter and its starting text (bundles reuse it).
+    in-out property <string> name-verb: "create";
+    in-out property <string> name-default;
     in property <[LibraryRow]> rows;
     in property <string> active;
     in property <string> type-label;
@@ -79,7 +82,8 @@ export component LibraryMenu inherits Rectangle {
 
     visible: root.open || root.dragging || root.placing;
     changed open => {
-        if (root.open) { field.focus(); }
+        // Opened to name a bundle (POLA-203): the name field keeps the focus.
+        if (root.open && !root.naming) { field.focus(); }
     }
 
     function part-drag(id: string, kind: int, x: length, y: length) {
@@ -216,7 +220,7 @@ export component LibraryMenu inherits Rectangle {
                         overflow: elide;
                     }
                     if !root.naming: IconButton { icon: "›"; size: 24px; y: 2px; clicked => { root.cmd("step", "", "1"); } }
-                    if !root.naming: ToolButton { label: "New library…"; clicked => { root.cmd("new", "", ""); root.naming = true; } }
+                    if !root.naming: ToolButton { label: "New library…"; clicked => { root.name-verb = "create"; root.name-default = ""; root.cmd("new", "", ""); root.naming = true; } }
                     if !root.naming: ToolButton { label: "Catalog…"; clicked => { root.cmd("catalog", "", ""); } }
                     if !root.naming && root.active != "": ToolButton {
                         label: "Delete";
@@ -233,10 +237,11 @@ export component LibraryMenu inherits Rectangle {
                             font-size: Theme.font-body;
                             vertical-alignment: center;
                             single-line: true;
-                            init => { self.focus(); }
+                            text: root.name-default;
+                            init => { self.focus(); self.select-all(); }
                             changed has-focus => { EditState.text-focused = self.has-focus; }
                             accepted => {
-                                root.cmd("create", "", self.text);
+                                root.cmd(root.name-verb, "", self.text);
                                 root.naming = false;
                             }
                             key-pressed(event) => {
@@ -250,7 +255,7 @@ export component LibraryMenu inherits Rectangle {
                         }
                         if name-input.text == "": Text {
                             x: 10px;
-                            text: "Library name, then Enter";
+                            text: root.name-verb == "create" ? "Library name, then Enter" : "Bundle name, then Enter";
                             color: Theme.text-tertiary;
                             font-size: Theme.font-body;
                             vertical-alignment: center;

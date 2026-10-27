@@ -67,6 +67,8 @@ pub enum SheetKind {
     /// "Recover unsaved changes?" for `AppState::recovery[0]`: [Restore] [Discard] [Later],
     /// or only [Later] for a newer format.
     Recovery,
+    /// POLA-203: "Delete bundle?" [Delete] [Cancel] for `LibraryState::bundle_target`.
+    DeleteBundle,
 }
 
 #[allow(dead_code)] // Parts are used only by the file flows (files.rs, T6b).
