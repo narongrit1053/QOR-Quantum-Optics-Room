@@ -850,7 +850,7 @@ mod tests {
     }
 
     fn node(id: u64, part: &str, parent: Parent, attach: Attach, position: DVec3) -> Node {
-        Node {
+        Node { select_lock: false,
             note: String::new(),
             id: NodeId(id),
             name: part.into(),

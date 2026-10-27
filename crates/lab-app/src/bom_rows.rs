@@ -143,7 +143,7 @@ mod tests {
         ]);
         let mut doc = Document::new("t");
         let mut add = |part: &str, len: Option<f64>| {
-            let mut n = Node {
+            let mut n = Node { select_lock: false,
                 note: String::new(),
                 id: NodeId(doc.nodes.len() as u64 + 1),
                 name: if part == "thorlabs:KM100" { "Mount".into() } else { part.into() },

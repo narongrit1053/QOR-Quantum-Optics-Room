@@ -59,6 +59,11 @@ pub enum Command {
         id: NodeId,
         note: String,
     },
+    /// Selection lock: plain clicks pass through the target.
+    SetSelectLock {
+        target: SelectionTarget,
+        on: bool,
+    },
     AddPlatform {
         platform: Box<Platform>,
         index: Option<usize>,
@@ -435,6 +440,29 @@ impl Command {
                 let old = std::mem::replace(&mut node.locked, locked);
                 Ok((Command::SetLocked { id, locked: old }, node_update(id, changed)))
             }
+            Command::SetSelectLock { target, on } => {
+                let (slot, changes) = match target {
+                    SelectionTarget::Node(id) => {
+                        let node = doc.node_mut(id).ok_or(CommandError::UnknownNode(id))?;
+                        let changed = node.select_lock != on;
+                        (&mut node.select_lock, node_update(id, changed))
+                    }
+                    SelectionTarget::Platform(id) => {
+                        let index = doc.platform_index(id).ok_or(CommandError::NoSuchPlatform(id))?;
+                        let p = &mut doc.platforms[index];
+                        let changed = p.select_lock != on;
+                        let changes = if changed {
+                            ChangeSet { platforms_updated: vec![(id, PlatformAspects::default())], ..Default::default() }
+                        } else {
+                            ChangeSet::default()
+                        };
+                        (&mut p.select_lock, changes)
+                    }
+                    SelectionTarget::Room => return Ok((Command::SetSelectLock { target, on }, ChangeSet::default())),
+                };
+                let old = std::mem::replace(slot, on);
+                Ok((Command::SetSelectLock { target, on: old }, changes))
+            }
             Command::SetNote { id, note } => {
                 let node = doc.node_mut(id).ok_or(CommandError::UnknownNode(id))?;
                 let changed = node.note != note;
@@ -608,6 +636,14 @@ impl Command {
             Command::SetPlacement { id, .. } => format!("Move {}", node_name(id)),
             Command::Rename { id, .. } => format!("Rename {}", node_name(id)),
             Command::SetNote { .. } => "Edit Note".into(),
+            Command::SetSelectLock { target, on } => {
+                let name = match target {
+                    SelectionTarget::Node(id) => node_name(id),
+                    SelectionTarget::Platform(id) => doc.platform(*id).map_or_else(|| "Platform".into(), |p| p.name.clone()),
+                    SelectionTarget::Room => "Room".into(),
+                };
+                format!("{} {name}", if *on { "Lock" } else { "Unlock" })
+            }
             Command::AddPlatform { platform, .. } => format!("Add {}", platform.name),
             Command::RemovePlatform(id) => {
                 format!("Delete {}", doc.platform(*id).map_or("Platform", |p| p.name.as_str()))
@@ -752,6 +788,21 @@ mod tests {
         let err = command.apply(&mut d).unwrap_err();
         assert!(expected(&err), "{err:?}");
         assert_eq!(&d, doc, "a failed command must leave the document bit-identical");
+    }
+
+    #[test]
+    fn select_lock_round_trips_and_serializes() {
+        let doc = demo_document();
+        let table = doc.platforms[0].id;
+        let node = doc.nodes[0].id;
+        round_trip(&doc, Command::SetSelectLock { target: SelectionTarget::Platform(table), on: true });
+        round_trip(&doc, Command::SetSelectLock { target: SelectionTarget::Node(node), on: true });
+        let mut d = doc.clone();
+        Command::SetSelectLock { target: SelectionTarget::Platform(table), on: true }.apply(&mut d).unwrap();
+        Command::SetSelectLock { target: SelectionTarget::Node(node), on: true }.apply(&mut d).unwrap();
+        let back: Document = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+        assert!(back.platforms[0].select_lock && back.nodes[0].select_lock);
+        assert!(!doc.to_json().unwrap().contains("select_lock"), "unlocked docs serialize unchanged");
     }
 
     #[test]
@@ -1065,7 +1116,7 @@ mod tests {
     // ---- M2: parents, attachments and assemblies ----
 
     fn part(id: u64, name: &str, parent: Parent, attach: Attach, z: f64) -> Node {
-        Node {
+        Node { select_lock: false,
             note: String::new(),
             id: NodeId(id),
             name: name.into(),
@@ -1142,6 +1193,7 @@ mod tests {
         round_trip(&doc, mate);
         round_trip(&doc, Command::SetLocked { id: ids[0], locked: true });
         round_trip(&doc, Command::SetNote { id: ids[0], note: "aligned 2026-10".into() });
+        round_trip(&doc, Command::SetSelectLock { target: SelectionTarget::Node(ids[0]), on: true });
         let mut params = crate::part::Params::new();
         params.insert("length".into(), crate::part::ParamValue::Number(75.0));
         round_trip(&doc, Command::SetParams { id: ids[2], params });

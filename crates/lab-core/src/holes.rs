@@ -476,7 +476,7 @@ mod tests {
     }
 
     fn platform(outline: Outline, grid: HoleGrid) -> Platform {
-        Platform {
+        Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table A".into(),
             kind: PlatformKind::OpticalTable,
