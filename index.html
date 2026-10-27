@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LabSetup v0.0.1 — plan quantum-optics lab setups in 3D</title>
+<meta name="description" content="LabSetup is an offline, native Windows app for designing quantum-optics lab setups in 3D and as a top view.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="version">v0.0.1 · Windows x64</p>
+    <h1>LabSetup</h1>
+    <p class="pitch">An offline, native Windows app for designing quantum-optics lab setups: optical tables and custom platforms, Thorlabs-style mounting hardware and lasers, shown in 3D and as a top view.</p>
+    <p class="actions">
+      <a class="button" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.1">Download v0.0.1 (Windows x64)</a>
+      <a class="link" href="#features">See what it does</a>
+    </p>
+    <figure class="shot">
+      <img src="img/hero.png" alt="A 1500 × 900 mm optical table in 3D: a laser, three mirrors, a half-wave plate, a polarizing beamsplitter, a lens, a fiber coupler, an iris and a photodiode on posts, with the traced beam path">
+      <figcaption>A small polarization experiment: laser → two steering mirrors → half-wave plate → polarizing beamsplitter. The transmitted beam goes through a lens into a fiber coupler; the reflected beam goes to an iris and a photodiode. Every optic sits on a post stack at 75 mm beam height, and the app traces the beam through them.</figcaption>
+    </figure>
+  </div>
+</header>
+
+<main>
+<section id="features" class="wrap">
+  <h2>What it does</h2>
+
+  <div class="feature">
+    <img src="img/top-view.png" alt="Top orthographic view of the same table with labels, hole grid, dimensions and the beam path">
+    <div>
+      <h3>Top view</h3>
+      <p>The same table as a dimensioned top view, with the hole grid, labels and the beam path. Switch between 3D, Top and Split with one click.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/split-view.png" alt="Split view: 3D on the left, top view on the right">
+    <div>
+      <h3>Split view</h3>
+      <p>3D and top view side by side. Both views show the same scene and update together.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/catalog-book.png" alt="Thorlabs Catalog window searching for kinematic mirror mount, with product images, details and a pick list">
+    <div>
+      <h3>Thorlabs Catalog Book</h3>
+      <p>Browse and search about 16,600 Thorlabs products by part number, name or description. Pick parts into a list, then download and import the whole list.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/library-search.png" alt="Part library in grid view filtered by the search km, showing kinematic mounts">
+    <div>
+      <h3>Part library</h3>
+      <p>Your parts in one searchable grid, filtered by type, vendor and metric or inch. Drag a part from the library onto a table.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/stack-builder.png" alt="Post stack panel set to a 100 mm beam height and a placed stack of base, post holder, post, mount and mirror, with the inspector open">
+    <div>
+      <h3>Beam-height stack builder</h3>
+      <p>Pick an optic and a mount and type the beam height. The app picks a post, post holder and base that reach it and shows the margin left. Drag the stack onto the table; it snaps to a hole.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/custom-platform.png" alt="Inspector editing a custom five-corner breadboard with rounded corners, sitting on an optical table">
+    <div>
+      <h3>Custom platforms</h3>
+      <p>Tables, breadboards and custom plates. Edit the outline corner by corner with fillet radii, set the hole grid and stack a breadboard on a table.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/room-editor.png" alt="An L-shaped room in 3D with the room inspector showing its six corners and a door">
+    <div>
+      <h3>Room editing</h3>
+      <p>Rectangle, L-shape or any polygon. Set wall height and thickness, and add doors and windows to a wall.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/constraints.png" alt="Constrain Components panel set to Concentric, with the post axis picked in the part preview">
+    <div>
+      <h3>Constraints and mating</h3>
+      <p>Mate, flush, concentric and angle constraints between parts. Pick a face or an axis on each part; the preview box helps you pick on small parts.</p>
+    </div>
+  </div>
+
+  <div class="feature">
+    <img src="img/vendor-parts.png" alt="A post holder and post imported from Thorlabs CAD files, placed on a table hole, with the inspector open">
+    <div>
+      <h3>Vendor CAD import</h3>
+      <p>Import STEP files, a URL or a whole folder into the library. Imported parts drop onto table holes like built-in parts.</p>
+    </div>
+  </div>
+</section>
+
+<section id="use-cases" class="wrap">
+  <h2>Use cases</h2>
+
+  <article class="case">
+    <img src="img/hero.png" alt="The polarization and fiber-coupling experiment in 3D">
+    <div>
+      <h3>Plan an experiment before you buy parts</h3>
+      <p>Lay out the optics on a table of the right size, check that the beam reaches every element, and see how much room is left. Change the layout as often as you like; nothing is bolted down yet.</p>
+    </div>
+  </article>
+
+  <article class="case">
+    <img src="img/stack-builder.png" alt="A placed post stack at 100 mm beam height">
+    <div>
+      <h3>Check beam heights and clearances</h3>
+      <p>The stack builder tells you which post and holder reach your beam height and with how much margin. The dimensioned top view shows where every part sits on the hole grid of a crowded table.</p>
+    </div>
+  </article>
+
+  <article class="case">
+    <img src="img/room-editor.png" alt="An L-shaped lab room">
+    <div>
+      <h3>Lay out a whole lab room</h3>
+      <p>Draw the room as a rectangle, an L or any polygon, add doors and windows, and place tables and breadboards in it.</p>
+    </div>
+  </article>
+
+  <article class="case">
+    <img src="img/export-png.png" alt="Export image dialog with screen, 2× and 4K size presets">
+    <div>
+      <h3>Export a parts list and an image</h3>
+      <p>Export the bill of materials as CSV, grouped by vendor and part number with quantities (<a href="samples/parts-list.csv">example</a>). Export the current view as a PNG up to 4K for a proposal or a paper.</p>
+    </div>
+  </article>
+</section>
+
+<section id="samples" class="wrap">
+  <h2>Sample projects</h2>
+  <p>The scenes in these screenshots. Open them with Open… in the LabSetup project menu, or run <code>labsetup.exe &lt;file&gt;</code>.</p>
+  <ul>
+    <li><a href="samples/hero-polarization-fiber.labsetup">hero-polarization-fiber.labsetup</a> — the polarization and fiber-coupling table</li>
+    <li><a href="samples/stack-builder.labsetup">stack-builder.labsetup</a> — the same table plus a stack at 100 mm</li>
+    <li><a href="samples/custom-platforms.labsetup">custom-platforms.labsetup</a> — L-shaped room, table and custom breadboard</li>
+    <li><a href="samples/vendor-parts.labsetup">vendor-parts.labsetup</a> — the stack table plus imported Thorlabs parts</li>
+  </ul>
+</section>
+
+<section id="requirements" class="wrap">
+  <h2>Requirements</h2>
+  <ul>
+    <li>Windows 10 or 11, 64-bit</li>
+    <li>A GPU with DirectX 12</li>
+    <li>No installer: unzip and run <code>labsetup.exe</code></li>
+    <li>Runs offline; projects are plain files on your disk</li>
+  </ul>
+  <p class="actions"><a class="button" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.1">Download v0.0.1 (Windows x64)</a></p>
+</section>
+</main>
+
+<footer class="wrap">
+  <p>LabSetup v0.0.1. Screenshots are from the v0.0.1 release build. Thorlabs is a trademark of Thorlabs, Inc.; LabSetup is not affiliated with Thorlabs.</p>
+</footer>
+
+</body>
+</html>

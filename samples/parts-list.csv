@@ -1,0 +1,19 @@
+﻿Vendor,Part number,Name,Labels,Spec,Quantity
+Generic,,Optical Table 1500 x 900 1500×900,,1500×900×210 mm,1
+Generic,desk,"Desk, 1500 x 750 mm",Desk,,1
+Generic,hwp-1in,"Half-Wave Plate, Ø1""",,,1
+Generic,laser-curtain,"Laser Safety Curtain, 2 x 2 m",,,1
+Generic,laser-head,Laser Head (generic),,,1
+Generic,lens-1in,"Plano-Convex Lens, Ø1"", f = 100 mm","Plano-Convex Lens, Ø1""",,1
+Generic,mirror-1in,"Mirror, Ø1""",,,4
+Generic,pbs-cube-1in,"Polarizing Beamsplitter Cube, 1""",,,1
+Generic,rack-19in-42u,"19"" Rack, 42 U",,,2
+Thorlabs,BA1/M,"Mounting Base, 75 mm x 25 mm",,,1
+Thorlabs,FMP1/M,"Fixed Optic Mount, Ø1"" Optics","FMP1/M mount, FMP1/M mount",,2
+Thorlabs,KM100/M,"Kinematic Mirror Mount, Ø1"" Optics","KM100/M mount, KM100/M mount, KM100/M mount",,4
+Thorlabs,PAF2/M,"Fiber Coupler, FC/PC, f = 7 mm","Fiber Coupler, FC/PC",,1
+Thorlabs,PDA36A/M,Switchable Gain Si Detector,Si Photodiode,,1
+Thorlabs,PH100/M,"Post Holder, Ø12 mm, L = 100 mm",,,1
+Thorlabs,PH75/M,"Post Holder, Ø12 mm, L = 75 mm","Fiber coupler, HWP, Iris, Lens f = 100 mm, M1 mirror, M2 mirror, M3 mirror, PBS, Photodiode",,9
+Thorlabs,RSP1/M,"Rotation Mount, Ø1"" Optics",RSP1/M mount,,1
+Thorlabs,TR20/M,"Optical Post, Ø12 mm, L = 20 mm",,,10
