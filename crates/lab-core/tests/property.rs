@@ -34,7 +34,7 @@ impl Rng {
 
 fn new_node(doc: &Document, platform: PlatformId, rng: &mut Rng) -> Node {
     let id = doc.next_free_id();
-    Node {
+    Node { select_lock: false,
         note: String::new(),
         id: NodeId(id),
         name: format!("Part {id}"),

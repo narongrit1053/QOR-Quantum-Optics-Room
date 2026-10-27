@@ -352,7 +352,7 @@ mod tests {
     }
 
     fn part_node(id: u64, parent: Parent, position: DVec3, rotation: DQuat) -> Node {
-        Node {
+        Node { select_lock: false,
             note: String::new(),
             id: NodeId(id),
             name: format!("n{id}"),
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn world_pose_of_a_mated_child_on_a_rotated_platform() {
         let mut doc = Document::new("t");
-        doc.platforms.push(Platform {
+        doc.platforms.push(Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table".into(),
             kind: PlatformKind::OpticalTable,

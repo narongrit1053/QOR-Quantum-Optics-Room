@@ -114,7 +114,7 @@ mod tests {
 
     fn sample_doc() -> Document {
         let mut doc = Document::new("Test Doc");
-        doc.platforms.push(Platform {
+        doc.platforms.push(Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table 1".into(),
             kind: PlatformKind::OpticalTable,
@@ -127,7 +127,7 @@ mod tests {
             hole_grid: None,
             support: Support::Fixed,
         });
-        doc.nodes.push(lab_core::Node {
+        doc.nodes.push(lab_core::Node { select_lock: false,
             note: String::new(),
             id: NodeId(1),
             name: "Initial".into(),

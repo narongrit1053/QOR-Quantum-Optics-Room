@@ -268,14 +268,14 @@ export component NodeInspector inherits Rectangle {
         if root.beam-laser || root.beam-text != "": HorizontalLayout {
             padding-left: 9px;
             Text {
-                text: "Beam";
+                text: root.beam-laser ? "Laser" : "Beam";
                 color: Theme.text;
                 font-weight: 650;
                 vertical-alignment: center;
             }
             Rectangle { }
             if root.beam-laser: PillButton {
-                label: root.beam-on ? "On" : "Off";
+                label: root.beam-on ? "Laser on" : "Laser off";
                 clicked => { root.action("beam.toggle"); }
             }
         }

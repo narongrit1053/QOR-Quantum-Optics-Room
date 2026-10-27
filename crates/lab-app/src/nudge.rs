@@ -99,7 +99,7 @@ mod tests {
     use lab_core::outline::Outline;
 
     fn node(id: u64, parent: Parent, attach: Attach) -> Node {
-        Node {
+        Node { select_lock: false,
             id: NodeId(id),
             name: format!("n{id}"),
             part: "p".into(),
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn step_moves_root_one_hole() {
         let mut doc = Document::new("t");
-        doc.platforms.push(Platform {
+        doc.platforms.push(Platform { select_lock: false,
             id: PlatformId(1),
             name: "T".into(),
             kind: PlatformKind::OpticalTable,

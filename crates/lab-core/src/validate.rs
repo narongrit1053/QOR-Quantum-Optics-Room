@@ -352,7 +352,7 @@ mod tests {
     }
 
     fn table() -> Platform {
-        Platform {
+        Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table A".into(),
             kind: PlatformKind::OpticalTable,

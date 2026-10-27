@@ -177,7 +177,7 @@ mod tests {
             name: "Zone 1".into(),
             shape: ZoneShape::Circle { center: DVec2::ZERO, radius: 50.0 },
         });
-        let platform = Platform {
+        let platform = Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table A".into(),
             kind: PlatformKind::OpticalTable,

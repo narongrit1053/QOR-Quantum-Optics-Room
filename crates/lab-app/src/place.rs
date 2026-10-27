@@ -122,7 +122,7 @@ pub(crate) fn new_node(
             .and_then(|mesh| mesh.pieces.first().map(|(f, _)| f.clone())),
         Geometry::Mesh { .. } => def.meta.get("finish").map(|f| crate::import::finish_from_meta(f)),
     };
-    Some(Node {
+    Some(Node { select_lock: false,
         note: String::new(),
         id: NodeId(id),
         name: def.name.clone(),

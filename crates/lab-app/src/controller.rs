@@ -439,6 +439,19 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             ui.set_library_open(true);
             ui.invoke_find_part();
         }
+        "selection.lock" | "selection.unlock" => {
+            let target = app.borrow().session.selection;
+            let outcome = match target {
+                Some(t @ (SelectionTarget::Node(_) | SelectionTarget::Platform(_))) => {
+                    let on = id == "selection.lock";
+                    let command = Command::SetSelectLock { target: t, on };
+                    let label = command.label(&app.borrow().session.doc);
+                    Ok(EditOutcome::Command { command, label, select: None, fixes: Vec::new() })
+                }
+                _ => Ok(EditOutcome::Nothing),
+            };
+            apply_outcome(ui, app, models, id, outcome);
+        }
         "beam.toggle" => {
             let outcome = crate::beams::toggle(&app.borrow());
             apply_outcome(ui, app, models, id, outcome);
@@ -512,12 +525,10 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             a.send(ViewportRequest::SetWallDisplay(display));
         }
         "view.context_menu" => {
-            let (target, (w, h)) = {
-                let a = app.borrow();
-                (a.session.selection, a.viewport_size)
-            };
+            let a = app.borrow();
+            let (target, (w, h)) = (a.session.selection, a.viewport_size);
             // shortcut: opens at the viewport centre, not the node's projected origin; needs a projection query to the viewport.
-            crate::context_menu::open(ui, target, lab_viewport::Vec2::new(w as f32 / 2.0, h as f32 / 2.0));
+            crate::context_menu::open(ui, &a, target, lab_viewport::Vec2::new(w as f32 / 2.0, h as f32 / 2.0));
         }
         "view.top" | "view.3d" => {
             let top = id == "view.top";
