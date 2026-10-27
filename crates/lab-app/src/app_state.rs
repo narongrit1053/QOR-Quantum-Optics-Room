@@ -92,7 +92,8 @@ pub struct AppState {
     pub timers: Timers,
     pub catalog: Arc<Catalog>,
     pub library: crate::library::LibraryState,
-    pub stack: crate::stack::StackState,
+    /// Beam height (mm) the laser-head riser lifts to.
+    pub beam_height: f64,
     /// Scene-tree rows (`(kind, id)`) whose children are hidden.
     pub scene_collapsed: std::collections::HashSet<(i32, i32)>,
     /// The viewport sent `Ready`.
@@ -135,7 +136,7 @@ impl AppState {
             timers: Timers::default(),
             catalog: Arc::new(Catalog::default()),
             library: Default::default(),
-            stack: Default::default(),
+            beam_height: 75.0,
             scene_collapsed: Default::default(),
             viewport_ready: false,
             pending_exports: Vec::new(),
