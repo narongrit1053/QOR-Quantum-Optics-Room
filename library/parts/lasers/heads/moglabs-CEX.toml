@@ -1,0 +1,23 @@
+id = "moglabs:CEX"
+vendor = "MOGLabs"
+part_number = "CEX"
+name = "External Cavity Laser Head CEX/CEF"
+category = "lasers/heads"
+tags = ["laser", "source", "ecdl", "metric", "cef"]
+
+[geometry]
+kind = "parametric"
+generator = "laser_head"
+params = { length = 240, width = 95, height = 92.6, axis_height = 58 }
+
+# Seat origin sits on one of the O7.5 (M6 clearance) holes; rows at x = +-37.5, y = -45, 5, 80.
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [37.5, 5, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "output"
+kind = "source"
+clear_aperture = 3
+frame = { origin = [-20, 120, 58], z = [0, 1, 0], x = [1, 0, 0] }
