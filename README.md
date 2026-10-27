@@ -8,13 +8,8 @@ The design, decisions and measurements are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
-Milestone M1 (core and platforms) is built and verified; the board signs it off. On top of M0's demo table, viewport and picking it adds:
-- optical tables, breadboards and custom platforms from Thorlabs-sized presets, with rectangular, rounded, L-shaped or free polygon outlines (filleted corners), metric, imperial or custom hole grids and exclusion zones;
-- an editable room (rectangle or L, any polygon) with mitred walls, doors and windows, and walls that fade when they block the view;
-- inspector editing in millimetres or inches, with undo and redo;
-- `.labsetup` archives, Save as Folder (`project.json`), autosave and crash recovery.
-
-See [docs/DESIGN.md §14](docs/DESIGN.md) for the M1 measurements and §13 for M0.
+Milestones M1-M3 (core, platforms, library and placement, views) are built; M4 vendor import is in progress (see [docs/DESIGN.md](docs/DESIGN.md) §11).
+LabSetup ships no vendor catalog: bring your own as a JSON file, written by hand or with an AI assistant, in the format in [docs/CATALOG-FORMAT.md](docs/CATALOG-FORMAT.md).
 
 ## Build and run
 
