@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LabSetup v0.0.1 — plan quantum-optics lab setups in 3D</title>
+<title>LabSetup v0.0.2 — plan quantum-optics lab setups in 3D</title>
 <meta name="description" content="LabSetup is an offline, native Windows app for designing quantum-optics lab setups in 3D and as a top view.">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -11,11 +11,11 @@
 
 <header class="hero">
   <div class="wrap">
-    <p class="version">v0.0.1 · Windows x64</p>
+    <p class="version">v0.0.2 · Windows x64</p>
     <h1>LabSetup</h1>
     <p class="pitch">An offline, native Windows app for designing quantum-optics lab setups: optical tables and custom platforms, Thorlabs-style mounting hardware and lasers, shown in 3D and as a top view.</p>
     <p class="actions">
-      <a class="button" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.1">Download v0.0.1 (Windows x64)</a>
+      <a class="button" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.2">Download v0.0.2 (Windows x64)</a>
       <a class="link" href="#features">See what it does</a>
     </p>
     <figure class="shot">
@@ -46,9 +46,10 @@
   </div>
 
   <div class="feature">
+    <img src="img/catalog.png" alt="Catalog window listing three parts from a made-up Example Optics catalog, with EX-KM1 selected">
     <div>
-      <h3>Parts catalog</h3>
-      <p>Bring your own parts catalog (JSON). See the docs.</p>
+      <h3 id="bring-your-own-catalog">Bring your own catalog</h3>
+      <p>LabSetup ships without vendor catalogs. Write a small JSON file for the parts you use (by hand or with an AI assistant), drop it in <code>%APPDATA%\LabSetup\catalogs\</code>, and browse, search and import it in the Catalog window. The format is described in <a href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/blob/main/docs/CATALOG-FORMAT.md">docs/CATALOG-FORMAT.md</a>.</p>
     </div>
   </div>
 
@@ -156,12 +157,12 @@
     <li>No installer: unzip and run <code>labsetup.exe</code></li>
     <li>Runs offline; projects are plain files on your disk</li>
   </ul>
-  <p class="actions"><a class="button" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.1">Download v0.0.1 (Windows x64)</a></p>
+  <p class="actions"><a class="button" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.2">Download v0.0.2 (Windows x64)</a></p>
 </section>
 </main>
 
 <footer class="wrap">
-  <p>LabSetup v0.0.1. Screenshots are from the v0.0.1 release build. Thorlabs is a trademark of Thorlabs, Inc.; LabSetup is not affiliated with Thorlabs.</p>
+  <p>LabSetup v0.0.2. Screenshots are from the v0.0.2 and v0.0.2 release builds. Thorlabs is a trademark of Thorlabs, Inc.; LabSetup is not affiliated with Thorlabs.</p>
 </footer>
 
 </body>
