@@ -28,7 +28,6 @@ mod part_box;
 mod place;
 mod relations;
 mod transform;
-mod stack;
 mod thumbs;
 mod scene;
 mod settings_ui;
@@ -117,7 +116,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     controller::connect(&ui, &app, &models);
     export_png::connect(&ui, &app);
     library::connect(&ui, &app, &models);
-    stack::connect(&ui, &app);
     scene::connect(&ui, &app, &models);
     file_drop::connect(&ui, &app, &models);
     part_box::connect(&ui, &app);
@@ -128,7 +126,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         files::show_start_page(&ui, &app.borrow().settings, open_error.as_deref(), false);
     }
     library::fill(&app.borrow(), &models);
-    stack::fill(&ui, &mut app.borrow_mut());
     if !warnings.is_empty() {
         let text = format!("{} library files could not be read; see the log.", warnings.len());
         controller::show_toast(&ui, &app.borrow(), &text, false);

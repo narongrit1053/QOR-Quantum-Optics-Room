@@ -13,7 +13,6 @@ import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, Ico
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
 import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay, DragValueField } from "overlays.slint";
-import { StackPanel } from "stack.slint";
 import { ImportDialog } from "import.slint";
 import { CatalogBook } from "catalog_book.slint";
 import { ViewCube, CubeFaceRow } from "view_cube.slint";
@@ -482,16 +481,6 @@ export component AppWindow inherits Window {
     in property <bool> catalog-empty;
     callback catalog-cmd(string /* verb */, string /* arg */);
 
-    // Beam-height stack builder (stack.slint); lab-app/src/stack.rs fills and handles it.
-    in property <string> stack-optic;
-    in property <string> stack-mount;
-    in property <string> stack-height;
-    in property <string> stack-unit;
-    in property <string> stack-result;
-    in property <bool> stack-fits;
-    callback stack-pick(string, int);
-    callback stack-height-committed(string) -> bool;
-    callback stack-drag(int, length, length);
     // Right edge of the sidebar: drags left of it are not over the viewport.
     out property <length> sidebar-right: sidebar.x + sidebar.width;
     // Development hook for the gallery: an unmodified key press while no text field has
@@ -593,7 +582,7 @@ export component AppWindow inherits Window {
             if (event.text == Key.Escape && DragState.active) {
                 DragState.cancelled = true;
                 DragState.active = false;
-                if (DragState.source == 2) { root.stack-drag(2, 0, 0); } else { library-menu.cancel(); }
+                library-menu.cancel();
                 return accept;
             }
             // A sheet owns the keyboard; its own focus scope handles the keys.
@@ -1059,17 +1048,6 @@ export component AppWindow inherits Window {
                     clicked => { root.action("library.open"); }
                 }
 
-                StackPanel {
-                    optic: root.stack-optic;
-                    mount: root.stack-mount;
-                    height-text: root.stack-height;
-                    unit: root.stack-unit;
-                    result: root.stack-result;
-                    fits: root.stack-fits;
-                    pick(w, s) => { root.stack-pick(w, s); }
-                    height-committed(t) => { return root.stack-height-committed(t); }
-                    drag(k, x, y) => { root.stack-drag(k, x, y); }
-                }
 
                 HorizontalLayout {
                     SectionHeader {

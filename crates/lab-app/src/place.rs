@@ -40,7 +40,7 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 }
                 lift => {
                     if let Some(l) = lift.filter(|l| *l < -0.5) {
-                        let h = a.stack.beam_height;
+                        let h = a.beam_height;
                         toast = Some(format!("Beam at {:.1} mm, above the {h:.1} mm beam height", h - l));
                     }
                     (root.id, format!("Add {}", root.name), Command::AddNode { node: root, index: None })
@@ -82,7 +82,7 @@ fn laser_lift(app: &AppState, part: &str, request: &PlaceRequest) -> Option<f64>
     let port = app.catalog.get(part)?.optical_ports.iter().find(|p| p.kind == "source")?;
     // Exit height above the seat (the seat may not be at z = 0).
     let seat = app.catalog.get(part)?.connector("seat").map_or(0.0, |c| c.frame.origin.z);
-    Some(app.stack.beam_height - base - (port.frame.origin.z - seat))
+    Some(app.beam_height - base - (port.frame.origin.z - seat))
 }
 
 /// A `generic:riser` of the head's footprint and height `lift`, at the head's drop pose.
