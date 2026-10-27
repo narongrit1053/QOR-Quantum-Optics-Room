@@ -14,6 +14,7 @@ fn rows(target: Option<SelectionTarget>) -> &'static [(&'static str, &'static st
             ("tool.move", "Move"),
             ("edit.rotate_90", "Rotate 90°"),
             ("edit.duplicate", "Duplicate"),
+            ("library.save_bundle", "Save as Bundle…"),
             ("view.hide", "Hide"),
             ("view.isolate_selection", "Isolate"),
             ("selection.delete", "Delete"),

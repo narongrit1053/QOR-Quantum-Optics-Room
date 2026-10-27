@@ -16,6 +16,10 @@ use crate::controller;
 use crate::ui_models::UiModels;
 
 pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, request: PlaceRequest) {
+    let bundle = app.borrow_mut().library.bundle.take();
+    if let (Some(name), DragItem::Part(_)) = (bundle, &request.item) {
+        return place_bundle(ui, app, models, &name, &request);
+    }
     let mut toast = None;
     let (root, label, command) = {
         let a = app.borrow();
@@ -62,6 +66,25 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
     controller::execute(ui, app, models, "place", command, label, Some(SelectionTarget::Node(root)), Vec::new());
     if let Some(text) = toast {
         controller::show_toast(ui, &app.borrow(), &text, false);
+    }
+}
+
+/// POLA-203: a library bundle dropped where its ghost (anchor) part would go: one `PlaceAssembly`.
+fn place_bundle(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, name: &str, request: &PlaceRequest) {
+    let (command, root, skipped) = {
+        let a = app.borrow();
+        let Some(bundle) = a.settings.bundles.iter().find(|b| b.name == name) else { return };
+        let keep = |n: &Node| !matches!(n.shape, Shape::Part) || a.catalog.get(&n.part).is_some();
+        let next = a.session.doc.next_free_id();
+        // shortcut: saved rotations are kept, the drop's rotation is ignored.
+        let (nodes, skipped) =
+            crate::clipboard::place_bundle(&bundle.nodes, next, request.parent, &request.attach, request.position, keep);
+        let Some(root) = nodes.first().map(|n| n.id) else { return };
+        (Command::PlaceAssembly { nodes }, root, skipped)
+    };
+    controller::execute(ui, app, models, "place", command, format!("Add bundle {name}"), Some(SelectionTarget::Node(root)), Vec::new());
+    if skipped > 0 {
+        controller::show_toast(ui, &app.borrow(), &format!("Skipped {skipped} missing parts"), false);
     }
 }
 

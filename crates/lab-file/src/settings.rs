@@ -52,6 +52,17 @@ pub struct Settings {
     /// POLA-165: library menu view, "grid" or "list" ("" reads as grid).
     #[serde(default)]
     pub library_view: String,
+    /// POLA-203: saved sets of placed parts, placeable in any project.
+    #[serde(default)]
+    pub bundles: Vec<Bundle>,
+}
+
+/// A saved set: roots first (the first is the anchor, at hole (0,0) or the origin), then
+/// their descendants, parents first.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Bundle {
+    pub name: String,
+    pub nodes: Vec<lab_core::Node>,
 }
 
 /// A user part collection: part ids in insertion order, no duplicates.
@@ -127,6 +138,7 @@ impl Default for Settings {
             hidden_parts: BTreeSet::new(),
             active_library: String::new(),
             library_view: "grid".into(),
+            bundles: Vec::new(),
         }
     }
 }

@@ -8,12 +8,13 @@ use std::rc::Rc;
 
 use lab_catalog::{Catalog, Source};
 use lab_core::part::{ConnectorKind, PartDef};
-use lab_file::UserLibrary;
+use lab_core::SelectionTarget;
+use lab_file::{Bundle, UserLibrary};
 use lab_ui::{AppWindow, LibraryRow};
 use lab_viewport::{DragItem, Modifiers, PartDrag, Vec2, ViewportRequest};
 use slint::ComponentHandle;
 
-use crate::app_state::AppState;
+use crate::app_state::{AppState, SheetKind};
 use crate::ui_models::{UiModels, sync};
 
 type Group = (&'static str, &'static str, &'static str, (u8, u8, u8));
@@ -64,7 +65,14 @@ pub struct LibraryState {
     pub pending_part: Option<String>,
     /// POLA-165: grid columns the library menu reported for its width.
     pub columns: usize,
+    /// POLA-203: the bundle being dragged (its ghost is a `DragItem::Part`), and the bundle a
+    /// rename or delete acts on.
+    pub bundle: Option<String>,
+    pub bundle_target: Option<String>,
 }
+
+/// Library row id prefix of a bundle.
+pub const BUNDLE: &str = "bundle:";
 
 pub struct LibraryFilter<'a> {
     pub query: &'a str,
@@ -225,14 +233,14 @@ fn filter<'a>(app: &'a AppState, vendor: Option<&'a str>) -> LibraryFilter<'a> {
 }
 
 /// Trimmed, non-empty and unique (" 2", " 3"… appended on a clash).
-fn unique_name(libs: &[UserLibrary], name: &str) -> Option<String> {
+fn unique_name(taken: impl Fn(&str) -> bool, name: &str) -> Option<String> {
     let base = name.trim();
     if base.is_empty() {
         return None;
     }
     let mut name = base.to_string();
     let mut i = 2;
-    while libs.iter().any(|l| l.name == name) {
+    while taken(&name) {
         name = format!("{base} {i}");
         i += 1;
     }
@@ -277,11 +285,75 @@ pub fn fill(app: &AppState, models: &UiModels) {
         let shown: usize = rows.iter().filter(|r| r.header).filter_map(|r| r.detail.parse::<usize>().ok()).sum();
         ui.set_library_count(if shown == total { format!("{total} parts") } else { format!("{shown} of {total} parts") }.into());
     }
+    rows.splice(0..0, bundle_rows(app));
     let pos = grid_layout(&rows, app.library.columns);
     for (r, (x, y)) in rows.iter_mut().zip(pos) {
         (r.x, r.y) = (x, y);
     }
     sync(&models.library, rows);
+}
+
+/// POLA-203: a "Bundles" group (id `bundles`) with one row per bundle matching the search.
+fn bundle_rows(app: &AppState) -> Vec<LibraryRow> {
+    let q = app.library.query.trim().to_lowercase();
+    let list: Vec<&Bundle> = app.settings.bundles.iter().filter(|b| b.name.to_lowercase().contains(&q)).collect();
+    if list.is_empty() {
+        return Vec::new();
+    }
+    let tint = slint::Color::from_rgb_u8(255, 149, 0);
+    let expanded = !q.is_empty() || !app.library.collapsed.contains("bundles");
+    let mut out = vec![LibraryRow {
+        id: "bundles".into(),
+        label: "Bundles".into(),
+        detail: list.len().to_string().into(),
+        letter: "B".into(),
+        tint,
+        header: true,
+        expanded,
+        ..Default::default()
+    }];
+    if expanded {
+        out.extend(list.iter().map(|b| {
+            let thumb = b.nodes.first().and_then(|n| crate::thumbs::image(&n.part));
+            LibraryRow {
+                id: format!("{BUNDLE}{}", b.name).into(),
+                label: if b.nodes.len() == 1 { "1 part".into() } else { format!("{} parts", b.nodes.len()).into() },
+                detail: b.name.as_str().into(),
+                letter: "B".into(),
+                tint,
+                has_thumb: thumb.is_some(),
+                thumb: thumb.unwrap_or_default(),
+                info: "Bundle".into(),
+                ..Default::default()
+            }
+        }));
+    }
+    out
+}
+
+/// `library.save_bundle`: asks for a name (default: the set root's name) in the library menu.
+pub fn save_bundle_prompt(ui: &AppWindow, app: &AppState) {
+    let doc = &app.session.doc;
+    let Some(SelectionTarget::Node(id)) = app.session.selection else {
+        crate::controller::show_toast(ui, app, "Select a part to save as a bundle", false);
+        return;
+    };
+    let name = doc.node(lab_app::set_root(doc, id)).map(|n| n.name.clone()).unwrap_or_default();
+    ui.set_library_name_verb("bundle_save".into());
+    ui.set_library_name_default(name.into());
+    ui.set_library_open(true);
+    ui.set_library_naming(true);
+}
+
+/// Deletes `bundle_target` (the confirm sheet's Delete button).
+pub fn delete_bundle(ui: &AppWindow, app: &mut AppState, models: &UiModels) {
+    let Some(name) = app.library.bundle_target.take() else { return };
+    app.settings.bundles.retain(|b| b.name != name);
+    if let Err(error) = lab_file::save_settings(&app.settings) {
+        eprintln!("settings not saved: {error}");
+    }
+    sync_ui(ui, app);
+    fill(app, models);
 }
 
 fn strings(items: Vec<slint::SharedString>) -> slint::ModelRc<slint::SharedString> {
@@ -307,12 +379,14 @@ pub fn sync_ui(ui: &AppWindow, app: &AppState) {
 
 /// One sidebar library command (POLA-162). Saves the settings when they changed.
 fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, part: &str, arg: &str) {
+    let bundle = part.strip_prefix(BUNDLE);
     let step = |i: usize, n: usize| if arg == "-1" { (i + n - 1) % n } else { (i + 1) % n };
     let mut save = true;
     match verb {
         // Part menu about to open: is the part hidden, which libraries can it go to.
         "menu" => {
             let s = &app.settings;
+            ui.set_library_menu_bundle(bundle.is_some());
             ui.set_library_menu_hidden(s.hidden_parts.contains(part));
             ui.set_library_menu_targets(strings(
                 s.libraries.iter().filter(|l| !l.parts.iter().any(|p| p == part)).map(|l| l.name.as_str().into()).collect(),
@@ -325,6 +399,43 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
         }
         "cancel" => {
             app.library.pending_part = None;
+            app.library.bundle_target = None;
+            return;
+        }
+        // POLA-203 bundles.
+        "bundle_save" => {
+            let a = &*app;
+            let Some(SelectionTarget::Node(id)) = a.session.selection else { return };
+            let bundles = &a.settings.bundles;
+            let Some(name) = unique_name(|n| bundles.iter().any(|b| b.name == n), arg) else { return };
+            let nodes = crate::clipboard::bundle_nodes(crate::clipboard::copy(&a.session.doc, &[id]));
+            if nodes.is_empty() {
+                return;
+            }
+            crate::controller::show_toast(ui, a, &format!("Saved bundle {name}"), false);
+            app.settings.bundles.push(Bundle { name, nodes });
+        }
+        "bundle_rename" => {
+            let Some(b) = bundle else { return };
+            app.library.bundle_target = Some(b.to_string());
+            ui.set_library_name_verb("bundle_renamed".into());
+            ui.set_library_name_default(b.into());
+            ui.set_library_naming(true);
+            return;
+        }
+        "bundle_renamed" => {
+            let Some(old) = app.library.bundle_target.take() else { return };
+            let bundles = &app.settings.bundles;
+            let Some(name) = unique_name(|n| n != old && bundles.iter().any(|b| b.name == n), arg) else { return };
+            if let Some(b) = app.settings.bundles.iter_mut().find(|b| b.name == old) {
+                b.name = name;
+            }
+        }
+        "bundle_delete" => {
+            let Some(b) = bundle else { return };
+            app.library.bundle_target = Some(b.to_string());
+            let message = format!("\"{b}\" is removed from the library. Placed copies stay in their projects.");
+            crate::controller::show_sheet(ui, app, SheetKind::DeleteBundle, "Delete bundle?", &message, &["Delete", "Cancel"], 1, 0);
             return;
         }
         "step" => {
@@ -334,7 +445,8 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
             s.active_library = names[step(i, names.len())].to_string();
         }
         "create" => {
-            let Some(name) = unique_name(&app.settings.libraries, arg) else { return };
+            let libs = &app.settings.libraries;
+            let Some(name) = unique_name(|n| libs.iter().any(|l| l.name == n), arg) else { return };
             let parts = app.library.pending_part.take().into_iter().collect();
             app.settings.libraries.push(UserLibrary { name: name.clone(), parts });
             app.settings.active_library = name;
@@ -447,9 +559,25 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     let ui_weak = ui.as_weak();
     let a = app.clone();
     ui.on_library_drag(move |id, kind, x, y| {
-        if let Some(ui) = ui_weak.upgrade() {
-            drag(&ui, &a, DragItem::Part(id.to_string()), kind, x, y);
-        }
+        let Some(ui) = ui_weak.upgrade() else { return };
+        let part = {
+            let mut app = a.borrow_mut();
+            let bundle = id.strip_prefix(BUNDLE).filter(|_| kind != 2);
+            app.library.bundle = bundle.map(str::to_string);
+            match bundle {
+                // shortcut: the ghost is the first bundle part the catalog has, not the whole set;
+                // a set ghost needs its own DragItem in lab-viewport.
+                Some(name) => {
+                    let ghost = app.settings.bundles.iter().find(|b| b.name == name).and_then(|b| {
+                        b.nodes.iter().find(|n| app.catalog.get(&n.part).is_some()).map(|n| n.part.clone())
+                    });
+                    let Some(ghost) = ghost else { return };
+                    ghost
+                }
+                None => id.to_string(),
+            }
+        };
+        drag(&ui, &a, DragItem::Part(part), kind, x, y);
     });
 }
 
