@@ -50,6 +50,7 @@ Helpers are in `scripts/dev` (see its README): `shot.ps1` captures the window, `
 - Commit messages end with a blank line and `Co-Authored-By: <your model> <noreply@anthropic.com or your provider's address>`.
 - Stage paths explicitly; never `git add -A`. Commit only files your task owns.
 - Never push, never rewrite history on `m1`, never delete branches.
+- Base every branch on the current `origin/draft`; old local branches from before 2026-10-27 carry purged history and the pre-push hook will refuse them.
 
 ## Multica basics
 
