@@ -72,6 +72,17 @@ pub fn nudge(doc: &Document, selection: &[NodeId], how: Nudge) -> Result<Option<
                 }
             }
         };
+        // A constrained root keeps its constraints: re-solve the requested pose, as gizmo drags do.
+        let command = match (&node.attach, command) {
+            (
+                Attach::Constrained { constraints },
+                Command::SetPlacement { position, rotation, .. } | Command::SetAttach { position, rotation, .. },
+            ) => {
+                let (position, rotation) = lab_mates::constraints::solve((position, rotation), constraints);
+                Command::SetAttach { id, parent: node.parent, attach: node.attach.clone(), position, rotation }
+            }
+            (_, command) => command,
+        };
         commands.push(command);
     }
     Ok(match commands.len() {
@@ -138,5 +149,39 @@ mod tests {
         assert_eq!(id, NodeId(1));
         assert_eq!(to, LatticeIndex { i: hole.i + 1, j: hole.j });
         assert_eq!(position.truncate(), holes.position(to));
+    }
+
+    #[test]
+    fn turn_and_fine_keep_constraints() {
+        use lab_core::model::{Constraint, ConstraintKind};
+        use lab_core::part::Feature;
+        let axis = |origin| Feature::Axis { origin, dir: DVec3::Z, radius: 6.35, hole: false };
+        let constraints = vec![Constraint {
+            kind: ConstraintKind::Concentric,
+            child: axis(DVec3::new(3.0, 0.0, 0.0)),
+            parent: axis(DVec3::new(10.0, 5.0, 0.0)),
+            offset: 0.0,
+            angle: 0.0,
+            flip: false,
+            lock_rotation: false,
+        }];
+        let mut doc = Document::new("t");
+        let mut part = node(1, Parent::Room, Attach::Constrained { constraints: constraints.clone() });
+        part.position = DVec3::new(7.0, 5.0, 20.0);
+        doc.nodes.push(part);
+
+        let Ok(Some(Command::SetAttach { attach: Attach::Constrained { .. }, position, rotation, .. })) =
+            nudge(&doc, &[NodeId(1)], Nudge::Turn { degrees: 15.0 })
+        else {
+            panic!("expected a constrained SetAttach")
+        };
+        let turned = (DVec3::new(7.0, 5.0, 20.0), DQuat::from_rotation_z(15f64.to_radians()));
+        let (p, q) = lab_mates::constraints::solve(turned, &constraints);
+        assert!((position - p).length() < 1e-9 && rotation.angle_between(q) < 1e-9);
+        // The child axis (at local x = 3) still sits on the parent axis.
+        assert!(((position + rotation * DVec3::new(3.0, 0.0, 0.0)).truncate() - DVec2::new(10.0, 5.0)).length() < 1e-6);
+
+        let fine = nudge(&doc, &[NodeId(1)], Nudge::Fine { dx: 1.0, dy: 0.0 });
+        assert!(matches!(fine, Ok(Some(Command::SetAttach { attach: Attach::Constrained { .. }, .. }))));
     }
 }
