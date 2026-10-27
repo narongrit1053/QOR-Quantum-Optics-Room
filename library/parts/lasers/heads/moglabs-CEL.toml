@@ -1,0 +1,23 @@
+id = "moglabs:CEL"
+vendor = "MOGLabs"
+part_number = "CEL"
+name = "Cateye Laser Head CEL (Rev9+)"
+category = "lasers/heads"
+tags = ["laser", "source", "ecdl", "metric"]
+
+[geometry]
+kind = "parametric"
+generator = "laser_head"
+params = { length = 108, width = 70, height = 86.7, axis_height = 58 }
+
+# Seat origin sits on one of the 4 x M6 holes (50.5 mm square); the snapper puts it on a table hole.
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [25.25, 40.3, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "output"
+kind = "source"
+clear_aperture = 3
+frame = { origin = [0, 54, 58], z = [0, 1, 0], x = [1, 0, 0] }
