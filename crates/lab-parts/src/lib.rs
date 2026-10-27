@@ -68,6 +68,7 @@ const GENERATORS: &[GeneratorInfo] = &[
     gi("spcm", &[("length", 120.0), ("width", 60.0), ("height", 50.0), ("axis_height", 25.0)]),
     gi("crystal_oven", &[("length", 60.0), ("width", 40.0), ("height", 30.0), ("axis_height", 20.0)]),
     gi("laser_head", &[("length", 200.0), ("width", 80.0), ("height", 60.0), ("axis_height", 40.0)]),
+    gi("cel_head", &[("length", 108.0), ("width", 70.0), ("height", 86.7), ("axis_height", 58.0)]),
     gi("riser", &[("length", 100.0), ("width", 75.0), ("height", 25.0)]),
     gi("rack_19in", &[("units", 42.0), ("depth", 800.0)]),
     gi("desk", &[("width", 1500.0), ("depth", 750.0), ("height", 750.0)]),
@@ -339,6 +340,34 @@ fn build(name: &str, p: &dyn Fn(&str) -> f64) -> Result<PartMesh, GenError> {
             let ar = (w.min(h) * 0.1).min(a - 0.5).min(h - fin - a - 2.5).max(0.5);
             let y1 = l / 2.0;
             b.lathe_y(BLACK, a, &[(0.0, front), (ar + 2.0, front), (ar + 2.0, y1), (ar, y1), (ar, y1 - 0.5), (0.0, y1 - 0.5)]);
+        }
+        "cel_head" => {
+            // MOGLabs CEL-style ECDL: U-shaped body open on top, round output nose on +Y at the axis
+            let (l, w, h, a) = (p("length"), p("width"), p("height"), p("axis_height"));
+            let (y0, y1) = (-l / 2.0, l / 2.0);
+            let base = 35f64.min(h * 0.4);
+            let t = 10f64.min(l / 4.0);
+            b.prism_z(GREY, &chamfer_rect(DVec2::new(-w / 2.0, y0), DVec2::new(w / 2.0, y1), 1.0), 0.0, base);
+            // uprights with rounded top corners, as in the front view
+            let r = 15f64.min(w / 4.0).min(h - base);
+            let mut plate = vec![DVec2::new(-w / 2.0, 0.0), DVec2::new(w / 2.0, 0.0)];
+            for (cx, from) in [(w / 2.0 - r, 0.0), (-w / 2.0 + r, 90.0)] {
+                plate.extend((0..=6).map(|i| DVec2::new(cx, h - r) + DVec2::from_angle((from + 15.0 * i as f64).to_radians()) * r));
+            }
+            b.prism_y(GREY, &plate, y1 - t, y1);
+            b.prism_y(GREY, &plate, y0, y0 + t);
+            // dark aperture-window band across the front face, and the Ø10 nose protruding 4.5 mm
+            let band = 4f64.min(a).min(h - a);
+            b.cuboid(BLACK, DVec3::new(-w / 2.0 + 3.0, y1 - 0.1, a - band), DVec3::new(w / 2.0 - 3.0, y1 + 0.2, a + band));
+            b.lathe_y(BLACK, a, &[(0.0, y1), (5.0, y1), (5.0, y1 + 4.5), (1.5, y1 + 4.5), (1.5, y1 + 4.3), (0.0, y1 + 4.3)]);
+            // 4 x M6 clearance holes (Ø 6.6) on the 50.5 mm square, as dark discs on the floor top
+            for (x, y) in [(-25.25, 40.3), (25.25, 40.3), (-25.25, -10.2), (25.25, -10.2)] {
+                let (x, y) = (x * w / 70.0, y * l / 108.0);
+                b.lathe(BLACK, &[(0.0, base), (3.3, base), (3.3, base + 0.1), (0.0, base + 0.1)], SIDES, move |q| q + DVec3::new(x, y, 0.0));
+            }
+            // electrical connector on the rear face
+            let cz = 14f64.min(base - 4.0).max(4.0);
+            b.cuboid(STEEL, DVec3::new(-7.5, y0 - 5.0, cz - 4.0), DVec3::new(7.5, y0, cz + 4.0));
         }
         "modulator_box" | "photodiode" | "camera" | "spcm" | "crystal_oven" => {
             // receivers face -Y: an input aperture or lens barrel there, a connector on top
@@ -681,6 +710,15 @@ mod tests {
         near(gen_default("desk").max, DVec3::new(750.0, 375.0, 750.0));
         near(gen_default("shelf").max, DVec3::new(600.0, 200.0, 500.0));
         near(gen_default("laser_curtain").max, DVec3::new(1000.0, 1.0, 2000.0));
+    }
+
+    #[test]
+    fn cel_head_matches_the_drawing() {
+        let m = gen_with("cel_head", &[("length", 108.0), ("width", 70.0), ("height", 86.7), ("axis_height", 58.0)]);
+        assert!(m.pieces.iter().any(|(_, t)| !t.indices.is_empty()));
+        // nose tip at y = 54 + 4.5; the rear connector protrudes 5 mm behind y = -54
+        near(m.min, DVec3::new(-35.0, -59.0, 0.0));
+        near(m.max, DVec3::new(35.0, 58.5, 86.7));
     }
 
     #[test]
