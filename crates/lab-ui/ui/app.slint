@@ -464,7 +464,7 @@ export component AppWindow inherits Window {
     callback import-start();
     callback import-cancel();
     callback import-define-connectors(string /* part id */);
-    // "Thorlabs Catalog…" (POLA-173).
+    // "Catalog…" (POLA-173).
     in-out property <bool> catalog-open;
     in property <[CatalogRow]> catalog-rows;
     in property <string> catalog-count;
@@ -479,6 +479,7 @@ export component AppWindow inherits Window {
     in property <string> catalog-step-url;
     in property <bool> catalog-listed;
     in property <[CatalogRow]> catalog-list;
+    in property <bool> catalog-empty;
     callback catalog-cmd(string /* verb */, string /* arg */);
 
     // Beam-height stack builder (stack.slint); lab-app/src/stack.rs fills and handles it.
@@ -1597,6 +1598,7 @@ export component AppWindow inherits Window {
             step-url: root.catalog-step-url;
             listed: root.catalog-listed;
             list: root.catalog-list;
+            empty: root.catalog-empty;
             cmd(verb, arg) => { root.catalog-cmd(verb, arg); }
         }
 

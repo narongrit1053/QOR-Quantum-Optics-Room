@@ -1,4 +1,4 @@
-// "Thorlabs Catalog…" (POLA-173): browse the catalog book, pick parts into a list, then
+// "Catalog…" (POLA-173, POLA-193): browse the catalog book, pick parts into a list, then
 // download and import the whole list. Filtering and the list live in Rust (catalog_book.rs).
 
 import { LineEdit, ComboBox, ListView, ScrollView } from "std-widgets.slint";
@@ -115,6 +115,7 @@ export component CatalogBook inherits Rectangle {
     in property <string> step-url;
     in property <bool> listed;
     in property <[CatalogRow]> list;
+    in property <bool> empty;
     // verbs: search(text), category(index), select(part), add, remove(part), clear, link(url), import, close.
     callback cmd(string /* verb */, string /* arg */);
     // List or Grid; outside the `if root.open` so the choice lasts the session.
@@ -159,7 +160,7 @@ export component CatalogBook inherits Rectangle {
                 min-width: 0px;
                 spacing: 8px;
                 Text {
-                    text: "Thorlabs Catalog";
+                    text: "Catalog";
                     color: Theme.text;
                     font-size: Theme.font-title;
                     font-weight: 650;
@@ -190,14 +191,30 @@ export component CatalogBook inherits Rectangle {
                     PillButton { label: "List"; primary: !root.grid; clicked => { root.grid = false; } }
                     PillButton { label: "Grid"; primary: root.grid; clicked => { root.grid = true; } }
                 }
-                if !root.grid: ListView {
+                if root.empty: VerticalLayout {
+                    vertical-stretch: 1;
+                    alignment: center;
+                    spacing: 10px;
+                    Text {
+                        text: "No catalogs yet. Put a catalog .json file in the catalogs folder.";
+                        color: Theme.text-tertiary;
+                        font-size: Theme.font-body;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        PillButton { label: "Open catalogs folder"; primary: true; clicked => { root.cmd("folder", ""); } }
+                    }
+                }
+                if !root.empty && !root.grid: ListView {
                     vertical-stretch: 1;
                     for row in root.rows: RowView {
                         item: row;
                         clicked => { root.cmd("select", row.part); }
                     }
                 }
-                if root.grid: ScrollView {
+                if !root.empty && root.grid: ScrollView {
                     property <length> tile-w: 160px;
                     property <length> tile-h: 220px;
                     property <int> cols: max(1, floor(self.visible-width / self.tile-w));

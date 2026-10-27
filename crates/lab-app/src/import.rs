@@ -442,7 +442,7 @@ pub fn start_book_batch(ui: &AppWindow, items: Vec<&'static BookItem>) {
         .into_iter()
         .map(|i| {
             let named =
-                Named { vendor: "Thorlabs".into(), part_number: i.part.clone(), name: i.name.clone(), category: category_of(&i.part) };
+                Named { vendor: i.vendor.clone(), part_number: i.part.clone(), name: i.name.clone(), category: category_of(&i.part) };
             (PathBuf::new(), named, Some(i))
         })
         .collect();
@@ -896,6 +896,7 @@ mod tests {
     #[test]
     fn book_parts_take_the_book_category() {
         let mut item = BookItem {
+            vendor: "Thorlabs".into(),
             part: "SM1L05".into(),
             name: "Lens Tube".into(),
             description: String::new(),

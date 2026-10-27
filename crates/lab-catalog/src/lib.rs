@@ -229,6 +229,11 @@ pub fn user_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("LabSetup").join("library"))
 }
 
+/// `%APPDATA%\LabSetup\catalogs`: the user's catalog books (`docs/CATALOG-FORMAT.md`).
+pub fn catalogs_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("LabSetup").join("catalogs"))
+}
+
 /// The stored GLB for `blake3:<hex>`: the user library first, then the built-in one.
 pub fn mesh_path(asset: &str) -> Option<(Source, PathBuf)> {
     // The hex check keeps a hand-edited asset id from reaching outside `meshes/`.

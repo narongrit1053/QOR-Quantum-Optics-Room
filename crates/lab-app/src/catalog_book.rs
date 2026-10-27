@@ -1,4 +1,4 @@
-//! "Thorlabs Catalog…" (POLA-173): browse the embedded catalog book, keep a pick list in
+//! "Catalog…" (POLA-173, POLA-193): browse the user's catalog books, keep a pick list in
 //! `%APPDATA%\LabSetup\catalog-list.json`, and download & import the list in one batch.
 
 use std::cell::RefCell;
@@ -35,7 +35,7 @@ thread_local! {
 
 /// "All", then the distinct second-level categories, sorted.
 fn categories() -> Vec<String> {
-    let set: BTreeSet<&str> = book::thorlabs().iter().filter_map(|i| i.category.get(1)).map(String::as_str).collect();
+    let set: BTreeSet<&str> = book::books().iter().filter_map(|i| i.category.get(1)).map(String::as_str).collect();
     std::iter::once("All").chain(set).map(String::from).collect()
 }
 
@@ -66,12 +66,13 @@ fn filter_indexed<'a>(items: &'a [BookItem], haystacks: &[String], query: &str, 
 /// `filter` over the book, with its search index built once.
 fn search_book(query: &str, category: Option<&str>) -> Vec<&'static BookItem> {
     static INDEX: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    let items = book::thorlabs();
+    let items = book::books();
     filter_indexed(items, INDEX.get_or_init(|| items.iter().map(haystack).collect()), query, category)
 }
 
+// shortcut: items are keyed by part number alone, so two vendors sharing one show the first; key by (vendor, part) if that happens.
 fn find(part: &str) -> Option<&'static BookItem> {
-    book::thorlabs().iter().find(|i| i.part == part)
+    book::books().iter().find(|i| i.part == part)
 }
 
 fn list_path() -> Option<PathBuf> {
@@ -93,6 +94,18 @@ fn save_list(list: &[String]) {
     }
 }
 
+/// Creates the catalogs folder if missing and opens it in Explorer.
+fn open_catalogs_folder() {
+    let Some(dir) = lab_catalog::catalogs_dir() else { return };
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!("could not create {}: {error}", dir.display());
+        return;
+    }
+    if let Err(error) = std::process::Command::new("explorer.exe").arg(&dir).spawn() {
+        eprintln!("could not open {}: {error}", dir.display());
+    }
+}
+
 /// Opens `url` in the default browser; only http(s) links are opened.
 pub fn open_url(url: &str) {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -111,7 +124,7 @@ pub fn open_url(url: &str) {
     }
 }
 
-/// `%LOCALAPPDATA%\LabSetup\thumbs\<part, / → _>.<ext>` for an item with an image.
+/// `%LOCALAPPDATA%\LabSetup\thumbs\<vendor>_<part, / → _>.<ext>` for an item with an image.
 fn thumb_path(item: &BookItem) -> Option<PathBuf> {
     let url = item.image.as_deref()?;
     let ext = url.split('?').next()?.rsplit('.').next()?.to_lowercase();
@@ -119,7 +132,7 @@ fn thumb_path(item: &BookItem) -> Option<PathBuf> {
         return None;
     }
     let dir = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("LabSetup").join("thumbs");
-    Some(dir.join(format!("{}.{ext}", item.part.replace(['/', '\\'],"_"))))
+    Some(dir.join(format!("{}_{}.{ext}", item.vendor, item.part).replace(['/', '\\'], "_")))
 }
 
 /// The cached thumbnail, or an empty image (the placeholder shows through) while missing or failed.
@@ -213,13 +226,13 @@ fn set_thumb(ui: &AppWindow, part: &str, path: &Path) {
     }
 }
 
-/// Part numbers of the Thorlabs parts in the user library.
+/// Part numbers of the parts in the user library (ids are `<vendor>:<part>`).
 fn in_library(app: &AppState) -> BTreeSet<String> {
     let c = &app.catalog;
     c.all()
         .iter()
         .filter(|d| c.source(&d.id) == Some(lab_catalog::Source::User))
-        .filter_map(|d| d.id.strip_prefix("thorlabs:").map(String::from))
+        .filter_map(|d| d.id.split_once(':').map(|(_, p)| p.to_string()))
         .collect()
 }
 
@@ -231,7 +244,7 @@ fn row(item: &BookItem, library: &BTreeSet<String>, selected: bool) -> CatalogRo
     } else {
         ""
     };
-    CatalogRow { part: item.part.as_str().into(), name: item.name.as_str().into(), badge: badge.into(), selected, thumb: thumb(item) }
+    CatalogRow { part: item.part.as_str().into(), name: format!("{} · {}", item.vendor, item.name).into(), badge: badge.into(), selected, thumb: thumb(item) }
 }
 
 fn refresh(ui: &AppWindow, app: &AppState) {
@@ -261,7 +274,8 @@ fn detail(ui: &AppWindow, s: &State) {
     let text = |f: fn(&BookItem) -> Option<&String>| item.and_then(f).map_or_else(Default::default, |t| t.as_str().into());
     ui.set_catalog_part(text(|i| Some(&i.part)));
     ui.set_catalog_name(text(|i| Some(&i.name)));
-    ui.set_catalog_path(item.map_or_else(Default::default, |i| i.category.join(" › ").into()));
+    let path = |i: &BookItem| std::iter::once(&i.vendor).chain(&i.category).cloned().collect::<Vec<_>>().join(" › ");
+    ui.set_catalog_path(item.map_or_else(Default::default, |i| path(i).into()));
     ui.set_catalog_description(text(|i| Some(&i.description)));
     ui.set_catalog_url(text(|i| Some(&i.url)));
     ui.set_catalog_cad_pdf(text(|i| i.cad_pdf.as_ref()));
@@ -291,6 +305,7 @@ pub fn open(ui: &AppWindow, app: &AppState) {
         s.query.clear();
     });
     ui.set_catalog_categories(ModelRc::new(VecModel::from(categories().into_iter().map(Into::into).collect::<Vec<_>>())));
+    ui.set_catalog_empty(book::books().is_empty());
     ui.set_catalog_category(STATE.with(|s| s.borrow().category) as i32);
     refresh(ui, app);
     ui.set_catalog_open(true);
@@ -341,6 +356,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
         });
         match verb.as_str() {
             "link" => return open_url(&arg),
+            "folder" => return open_catalogs_folder(),
             "close" => {
                 ui.set_catalog_open(false);
                 QUEUE.lock().unwrap().clear();
@@ -389,6 +405,7 @@ mod tests {
 
     fn item(part: &str, name: &str, description: &str, category: &str) -> BookItem {
         BookItem {
+            vendor: "Example Optics".into(),
             part: part.into(),
             name: name.into(),
             description: description.into(),
