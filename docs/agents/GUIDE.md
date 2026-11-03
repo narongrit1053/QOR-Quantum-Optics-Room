@@ -57,7 +57,7 @@ Helpers are in `scripts/dev` (see its README): `shot.ps1` captures the window, `
 - Use the `multica` CLI for everything: `multica issue get <KEY>`, `multica issue comment add <KEY> --content-file <file>` (use `--content-file` for multi-line text on Windows), `multica issue update <KEY> --status <status>`.
 - Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`. Set them yourself; the server does not change them when a run starts or ends.
 - If your run was started by a comment, reply **under that comment** (`--parent <comment-id>`); a top-level comment on that issue is rejected.
-- To hand work to another agent, **@-mention it by name** in your comment (for example `@QA Reviewer Sonnet`). The mention starts a run for that agent. Say exactly which issue it should act on.
+- To hand work to another agent, **@-mention it by name** in your comment (for example `@QA Reviewer Gemini`). The mention starts a run for that agent. Say exactly which issue it should act on.
 - M1 is one parent issue with staged sub-issues. Later stages wait in `backlog`; the Lead Engineer promotes them.
 
 ## Reporting
@@ -114,7 +114,7 @@ When woken:
 - **Engineer Opus** (Opus medium): complex work: new subsystems, tricky geometry, Bevy/Slint integration, hard bugs.
 - **Engineer Opus Low** (Opus low): moderate work and review fix rounds.
 - **Engineer Sonnet** (Sonnet medium): simple and mechanical work: small fixes, merges, gates, integration fixes.
-- **QA Reviewer Sonnet** (Sonnet high): every review.
+- **QA Reviewer Gemini** (Gemini 3.8 Flash High, Antigravity): every review. No Claude model reviews Claude-built work (board decision, 2026-11-03); never assign a review to a Claude agent.
 
 **Limit Dispatcher** stays on Antigravity (Gemini 3.8 Flash High) so failures can be triaged when the Claude plan is out. **Mika** (Claude) is the workspace Chief of Staff. Gemini Engineer Flash only finishes POLA-28 and takes no new work; every other engineer and reviewer agent is archived, and work that names them goes to the agents above.
 
@@ -122,7 +122,7 @@ Quotas: all Claude agents share one Claude plan; all Antigravity agents share on
 
 **Automatic sweep** (board decision, 2026-10-20): the *Failed-run sweep* autopilot runs the Limit Dispatcher every 15 minutes on its own. It finds failed runs of Claude agents from the last 20 minutes and triages them by the steps below, skipping any issue that already has a later run or a pending wakeup. Nobody needs to register failure wakeups any more; existing ones still fire and the sweep backs them up.
 
-- Issues assigned to Antigravity agents (Gemini Engineer Flash): **Lead Engineer** triages.
+- Issues assigned to Antigravity agents (QA Reviewer Gemini, Gemini Engineer Flash): **Lead Engineer** triages.
 - Issues assigned to Claude agents (Lead Engineer, Engineer\*, QA Reviewer Sonnet) and the M1 parent: **Limit Dispatcher** (Flash) triages.
 
 When woken by a failure, the triager does only this (no code, no worktree changes, no other issues):
@@ -133,7 +133,7 @@ When woken by a failure, the triager does only this (no code, no worktree change
 3. **Any other failure:** if the previous run on this issue did not fail the same way, `multica issue rerun <KEY>`. If it did, set the issue `blocked` and @-mention the Lead Engineer (or, if the Lead is the assignee, rerun it once more after 1h; the Lead's progress check picks it up after that).
 4. Comment once on the issue: the error (one line) and what you did.
 
-Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Engineer Opus `c560211e-a30f-45de-8ed0-80e94df9c26b`, Engineer Opus Low `9bffb221-f102-43a0-a10a-f28e39ed5144`, Engineer Sonnet `1a8be1b5-3ca9-42ca-8e19-02b539b5826d`, QA Reviewer Sonnet `08ecefee-2d76-424c-a1e5-565b9427f347`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688`.
+Agent ids for `--agent-id`: Lead Engineer `a0cfce75-c036-458e-8b6a-ae1991d7c036`, Engineer Opus `c560211e-a30f-45de-8ed0-80e94df9c26b`, Engineer Opus Low `9bffb221-f102-43a0-a10a-f28e39ed5144`, Engineer Sonnet `1a8be1b5-3ca9-42ca-8e19-02b539b5826d`, QA Reviewer Gemini `3317b0a0-8592-4a24-9968-88771a58b74b`, Gemini Engineer Flash `dcc3bd63-406b-4d84-bebd-18eff80d128e`, Limit Dispatcher `2fd0382f-1a6c-420d-ba2f-36bcef45d688`.
 
 Closed (`done`/`cancelled`) issues cannot hold wakeups; the automatic sweep covers reopened issues, so no wakeup needs to be registered.
 
