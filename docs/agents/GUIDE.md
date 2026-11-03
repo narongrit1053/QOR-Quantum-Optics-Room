@@ -123,7 +123,7 @@ Quotas: all Claude agents share one Claude plan; all Antigravity agents share on
 **Automatic sweep** (board decision, 2026-10-20): the *Failed-run sweep* autopilot runs the Limit Dispatcher every 15 minutes on its own. It finds failed runs of Claude agents from the last 20 minutes and triages them by the steps below, skipping any issue that already has a later run or a pending wakeup. Nobody needs to register failure wakeups any more; existing ones still fire and the sweep backs them up.
 
 - Issues assigned to Antigravity agents (QA Reviewer Gemini, Gemini Engineer Flash): **Lead Engineer** triages.
-- Issues assigned to Claude agents (Lead Engineer, Engineer\*, QA Reviewer Sonnet) and the M1 parent: **Limit Dispatcher** (Flash) triages.
+- Issues assigned to Claude agents (Lead Engineer, Engineer\*) and the M1 parent: **Limit Dispatcher** (Flash) triages.
 
 When woken by a failure, the triager does only this (no code, no worktree changes, no other issues):
 
