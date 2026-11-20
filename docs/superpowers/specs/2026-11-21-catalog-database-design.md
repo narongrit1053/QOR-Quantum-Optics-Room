@@ -190,6 +190,20 @@ Measure where today's freeze comes from: the JSON parse and index build, or Slin
 layout is a large share, the database alone won't meet the 100 ms open target, and the plan must also cover the
 row model (e.g. fewer initial rows or lazy thumbnails).
 
+Measured 2026-11-21 (release build, 20,665-item `thorlabs.json`, Catalog opened from the start page, first open of the session):
+
+| Step | Time |
+|---|---|
+| `book::books()` (read and parse the JSON) | 116 ms |
+| First `search_book("", None)` (build the search index) | 46 ms |
+| `refresh` (500 `CatalogRow`s took 0.5 ms; whole `refresh` 8 ms) | 8 ms |
+| Next frame after `set_catalog_open(true)` (zero-delay timer) | 9.5 ms |
+
+`open()` took 184 ms in total. JSON loading and index building (162 ms) are the freeze; `refresh` plus the next frame is
+about 18 ms, under the 50 ms threshold, so Slint row drawing is not the problem and the database alone should meet the
+100 ms open target. Task 7 (row model changes) is not needed. The zero-delay timer fires when the event loop is next
+idle, so the next-frame number does not include GPU presentation; thumbnails were not cached yet (empty images).
+
 ## Left to the builder
 
 - Exact SQL, indexes, the FTS setup, and how rows map to `BookItem`.
