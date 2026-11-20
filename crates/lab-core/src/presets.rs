@@ -208,7 +208,7 @@ fn free_position(doc: &Document, p: &Platform) -> DVec2 {
 /// it at the same position and rotation; otherwise tables stand 800 mm high and everything else
 /// lies on the floor, at a free spot.
 pub fn platform_from_preset(doc: &Document, preset: &Preset, id: PlatformId, on: Option<PlatformId>) -> Platform {
-    let mut p = Platform {
+    let mut p = Platform { select_lock: false,
         id,
         name: next_platform_name(doc, preset.kind),
         kind: preset.kind,

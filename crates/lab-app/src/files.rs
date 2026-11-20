@@ -158,7 +158,7 @@ pub fn handle_sheet_button(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: 
                 Some(choice) => answer_recovery(ui, app, models, choice),
             }
         }
-        Some(SheetKind::Message) | None => {}
+        Some(SheetKind::Message | SheetKind::DeleteBundle) | None => {}
     }
     show_next_recovery(ui, app);
 }

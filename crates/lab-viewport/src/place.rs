@@ -379,7 +379,7 @@ mod tests {
         assert_eq!(request.position.z, 0.0);
 
         let id = NodeId(doc.next_free_id());
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id,
             name: "PH50/M".into(),

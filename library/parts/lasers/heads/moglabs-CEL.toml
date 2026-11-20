@@ -7,7 +7,7 @@ tags = ["laser", "source", "ecdl", "metric"]
 
 [geometry]
 kind = "parametric"
-generator = "laser_head"
+generator = "cel_head"
 params = { length = 108, width = 70, height = 86.7, axis_height = 58 }
 
 # Seat origin sits on one of the 4 x M6 holes (50.5 mm square); the snapper puts it on a table hole.
@@ -20,4 +20,4 @@ frame = { origin = [25.25, 40.3, 0], z = [0, 0, -1], x = [1, 0, 0] }
 name = "output"
 kind = "source"
 clear_aperture = 3
-frame = { origin = [0, 54, 58], z = [0, 1, 0], x = [1, 0, 0] }
+frame = { origin = [0, 58.5, 58], z = [0, 1, 0], x = [1, 0, 0] }

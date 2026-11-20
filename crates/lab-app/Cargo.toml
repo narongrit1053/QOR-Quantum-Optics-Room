@@ -14,6 +14,10 @@ path = "src/lib.rs"
 name = "labsetup"
 path = "src/main.rs"
 
+[[bin]]
+name = "labsetup-cli"
+path = "src/bin/labsetup-cli.rs"
+
 [dependencies]
 lab-core.workspace = true
 lab-catalog.workspace = true

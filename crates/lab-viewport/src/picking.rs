@@ -61,12 +61,33 @@ pub(crate) fn pick(
     mut ray_cast: MeshRayCast,
     mut selection: ResMut<Selection>,
     (index, events, full): (Res<SceneIndex>, Res<EventSender>, Res<ViewportSize>),
+    mut shift: Local<bool>,
 ) {
-    let mut target_at = |pos: Vec2| -> Option<SelectionTarget> {
+    for request in &pending.0 {
+        if let FrameRequest::Input(
+            ViewportInput::PointerDown { mods, .. } | ViewportInput::PointerUp { mods, .. } | ViewportInput::PointerMove { mods, .. },
+        ) = request
+        {
+            *shift = mods.shift;
+        }
+    }
+    let select_locked = |t: SelectionTarget| {
+        index.snapshot.as_ref().is_some_and(|doc| match t {
+            SelectionTarget::Node(id) => doc.node(id).is_some_and(|n| n.select_lock),
+            SelectionTarget::Platform(id) => doc.platform(id).is_some_and(|p| p.select_lock),
+            SelectionTarget::Room => false,
+        })
+    };
+    // `through_locked`: plain left clicks and hover ray-cast through select-locked items.
+    let mut target_at = |pos: Vec2, through_locked: bool| -> Option<SelectionTarget> {
         let ((), camera, camera_transform, p) = camera_at(cameras.iter().map(|(c, t)| ((), c, t)), &full, pos)?;
         let ray = camera.viewport_to_world(camera_transform, p).ok()?;
         // Faded walls let clicks through; hidden entities are skipped by the default visibility.
-        let filter = |entity: Entity| targets.get(entity).is_ok_and(|(_, wall)| wall.is_none_or(|w| w.alpha >= 0.5));
+        let filter = |entity: Entity| {
+            targets.get(entity).is_ok_and(|(id, wall)| {
+                wall.is_none_or(|w| w.alpha >= 0.5) && !(through_locked && select_locked(id.0))
+            })
+        };
         let settings = MeshRayCastSettings::default().with_filter(&filter);
         let (entity, _) = ray_cast.cast_ray(ray, &settings).first()?;
         targets.get(*entity).ok().map(|(id, _)| id.0)
@@ -80,11 +101,11 @@ pub(crate) fn pick(
         }
     }
     for &click in &clicks.0 {
-        selected = target_at(click);
+        selected = target_at(click, !*shift);
     }
     let mut menu = None;
     for &click in &right_clicks.0 {
-        selected = target_at(click);
+        selected = target_at(click, false);
         menu = Some(click);
     }
 
@@ -95,7 +116,7 @@ pub(crate) fn pick(
     let mut hovered = selection.hovered;
     if pointer_moved || !clicks.0.is_empty() {
         hovered = match pointer.position {
-            Some(pos) if !pointer.is_dragging() => target_at(pos).filter(|t| matches!(t, SelectionTarget::Node(_))),
+            Some(pos) if !pointer.is_dragging() => target_at(pos, !*shift).filter(|t| matches!(t, SelectionTarget::Node(_))),
             _ => None,
         };
     }

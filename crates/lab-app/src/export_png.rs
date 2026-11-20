@@ -71,8 +71,22 @@ pub fn render_to(app: &Rc<RefCell<AppState>>, path: PathBuf, width: u32, height:
         return;
     }
     a.pending_exports.push((path.clone(), done));
-    a.send(ViewportRequest::ExportImage { path, width, height });
+    a.send(ViewportRequest::ExportImage { path: path.clone(), width, height });
+    drop(a);
+    // A dead or stuck viewport never answers; without this, Save (which waits for the
+    // thumbnail) shows "Saving…" forever. `finished` ignores a reply that comes later.
+    // shortcut: keyed by path, so a second export to the same path within the timeout can be
+    // failed early by the first one's timer; give exports an id if that ever matters.
+    let weak = Rc::downgrade(app);
+    slint::Timer::single_shot(EXPORT_TIMEOUT, move || {
+        if let Some(app) = weak.upgrade() {
+            finished(&app, &path, false);
+        }
+    });
 }
+
+/// Longer than a cold first render (shader compile) takes on a slow GPU.
+const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Routes `ImageExported` to its pending `done`.
 pub fn finished(app: &Rc<RefCell<AppState>>, path: &Path, ok: bool) {

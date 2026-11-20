@@ -63,6 +63,21 @@ The project menu (click the project name) has New, Open…, Open Demo, Save, Sav
 | `LABSETUP_AUTOSAVE_DIR` | Autosave folder (default `%LOCALAPPDATA%\LabSetuputosave`) |
 | `LABSETUP_SETTINGS` | Settings file (default `%APPDATA%\LabSetup\settings.json`): display units, wall display, last folder |
 
+## Command line
+
+`labsetup-cli.exe` (built next to `labsetup.exe`) reads the same project files and part library without a window or GPU. Read-only: no editing, no PNG export.
+
+```
+labsetup-cli --help | --version
+labsetup-cli info     <project> [--json]   title, format version, counts (platforms, parts, constraints), load-report warnings
+labsetup-cli list     <project> [--json]   one line per part: id, name, vendor/part number, parent, position mm, rotation deg (Z-Y-X)
+labsetup-cli bom      <project> [-o out.csv]   same CSV the app's BOM export writes; stdout when no -o
+labsetup-cli validate <project>            load and report problems; exit 0 ok, 1 problems, 2 usage/IO error
+labsetup-cli catalog  [--search <text>]    built-in + user catalog parts (vendor, part number, name)
+```
+
+Errors go to stderr with a non-zero exit code.
+
 ## Packaging
 
 ```powershell

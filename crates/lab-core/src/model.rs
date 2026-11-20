@@ -251,6 +251,9 @@ pub struct Platform {
     pub rotation_z: f64,
     pub hole_grid: Option<HoleGrid>,
     pub support: Support,
+    /// Plain clicks pass through; Shift+click selects.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub select_lock: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -500,6 +503,9 @@ pub struct Node {
     pub pickable: bool,
     #[serde(default)]
     pub locked: bool,
+    /// Plain clicks pass through; Shift+click selects (distinct from `locked`, which grounds).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub select_lock: bool,
     /// Free-text user note (M7 D).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
@@ -558,7 +564,7 @@ mod tests {
     }
 
     fn table(outline: Outline, inset: f64) -> Platform {
-        Platform {
+        Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table A".into(),
             kind: PlatformKind::OpticalTable,

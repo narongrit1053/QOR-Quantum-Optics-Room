@@ -27,7 +27,7 @@ pub fn retrace(app: &mut AppState) {
 pub fn fill(ui: &AppWindow, app: &AppState, models: &UiModels, id: NodeId) {
     let doc = &app.session.doc;
     let ports = doc.node(id).and_then(|n| app.catalog.get(&n.part)).map(|d| &d.optical_ports);
-    let laser = ports.is_some_and(|p| p.iter().any(|p| PortKind::from_kind(&p.kind) == PortKind::Source));
+    let laser = is_laser(app, id);
     let node = doc.node(id);
     let fields = PARAMS.iter().filter(|_| laser).map(|(key, label, unit, default)| {
         let value = node.and_then(|n| n.params.get(*key)).and_then(ParamValue::as_f64).unwrap_or(*default);
@@ -41,7 +41,7 @@ pub fn fill(ui: &AppWindow, app: &AppState, models: &UiModels, id: NodeId) {
         }
     });
     ui_models::sync(&models.beam_fields, fields.map(ui_models::edit_field));
-    let on = !matches!(node.and_then(|n| n.params.get("beam_on")), Some(ParamValue::Flag(false)));
+    let on = is_on(app, id);
     ui.set_beam_laser(laser);
     ui.set_beam_on(on);
     let text = match ports {
@@ -51,6 +51,18 @@ pub fn fill(ui: &AppWindow, app: &AppState, models: &UiModels, id: NodeId) {
         _ => describe(&app.beams, id, app),
     };
     ui.set_beam_text(text.into());
+}
+
+/// Whether node `id`'s part has a source optical port.
+pub fn is_laser(app: &AppState, id: NodeId) -> bool {
+    let def = app.session.doc.node(id).and_then(|n| app.catalog.get(&n.part));
+    def.is_some_and(|d| d.optical_ports.iter().any(|p| PortKind::from_kind(&p.kind) == PortKind::Source))
+}
+
+/// Whether laser node `id` is emitting.
+pub fn is_on(app: &AppState, id: NodeId) -> bool {
+    let node = app.session.doc.node(id);
+    !matches!(node.and_then(|n| n.params.get("beam_on")), Some(ParamValue::Flag(false)))
 }
 
 fn describe(trace: &Trace, id: NodeId, app: &AppState) -> String {
@@ -111,7 +123,7 @@ pub fn toggle(app: &AppState) -> Result<EditOutcome, EditError> {
     let (id, mut params) = laser(app)?;
     let on = !matches!(params.get("beam_on"), Some(ParamValue::Flag(false)));
     params.insert("beam_on".into(), ParamValue::Flag(!on));
-    Ok(command(id, params, if on { "Turn beam off" } else { "Turn beam on" }))
+    Ok(command(id, params, if on { "Turn Laser Off" } else { "Turn Laser On" }))
 }
 
 fn command(id: NodeId, params: lab_core::part::Params, label: &str) -> EditOutcome {
@@ -211,7 +223,7 @@ mod tests {
     fn beam_through_mirror_and_lens_sets() {
         let (catalog, _) = Catalog::load_builtin();
         let mut doc = Document::new("Beams");
-        doc.platforms.push(Platform {
+        doc.platforms.push(Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table 1".into(),
             kind: PlatformKind::OpticalTable,

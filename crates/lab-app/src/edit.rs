@@ -1672,7 +1672,7 @@ mod tests {
 
     fn test_doc() -> Document {
         let mut doc = Document::new("Doc");
-        let p = Platform {
+        let p = Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table 1".into(),
             kind: PlatformKind::OpticalTable,
@@ -2133,7 +2133,7 @@ mod tests {
     #[test]
     fn node_rotation_edit() {
         let mut doc = test_doc();
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(101),
             name: "Post".into(),
@@ -2163,7 +2163,7 @@ mod tests {
     #[test]
     fn e8_delete_platform_node_and_room() {
         let mut doc = test_doc();
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
@@ -2231,7 +2231,7 @@ mod tests {
     #[test]
     fn e9_pinning_rule() {
         let mut doc = test_doc();
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
@@ -2305,7 +2305,7 @@ mod tests {
     #[test]
     fn regression_origin_x_edit_preserved() {
         let mut doc = test_doc();
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
@@ -2334,7 +2334,7 @@ mod tests {
     #[test]
     fn regression_preset_apply_pins_grid() {
         let mut doc = test_doc();
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
@@ -2375,7 +2375,7 @@ mod tests {
                 OutlineCorner::sharp(DVec2::new(-600.0, 450.0)),
             ],
         };
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),
@@ -2404,7 +2404,7 @@ mod tests {
     #[test]
     fn regression_node_selected_platform_edit_returns_stale() {
         let mut doc = test_doc();
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(101),
             name: "Laser".into(),

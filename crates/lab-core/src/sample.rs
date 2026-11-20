@@ -49,7 +49,7 @@ impl Builder<'_> {
         finish: Finish,
     ) -> NodeId {
         let id = NodeId(self.doc.allocate_id());
-        self.doc.nodes.push(Node {
+        self.doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id,
             name: name.into(),
@@ -172,7 +172,7 @@ impl Builder<'_> {
 pub fn demo_document() -> Document {
     let mut doc = Document::new("Demo — Rb-87 beam path");
     let table = PlatformId(doc.allocate_id());
-    let platform = Platform {
+    let platform = Platform { select_lock: false,
         id: table,
         name: "Table A".into(),
         kind: PlatformKind::OpticalTable,

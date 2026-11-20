@@ -40,10 +40,15 @@ pub fn compatible_pairs(child: &PartDef, parent: &PartDef) -> Vec<(usize, usize)
     out
 }
 
-/// Slide limits when `parent` is a female bore with a range (else (0, 0)).
+/// Slide limits when `parent` is a female bore with a range (else (0, 0)). The range comes from
+/// untrusted part TOML; ordered and finite here because callers pass it to `f64::clamp`.
 pub fn slide_range(parent: &ConnectorKind) -> (f64, f64) {
     match parent {
-        ConnectorKind::Bore { gender: lab_core::part::Gender::Female, range: Some([lo, hi]), .. } => (*lo, *hi),
+        ConnectorKind::Bore { gender: lab_core::part::Gender::Female, range: Some([lo, hi]), .. }
+            if lo.is_finite() && hi.is_finite() =>
+        {
+            (lo.min(*hi), lo.max(*hi))
+        }
         _ => (0.0, 0.0),
     }
 }
@@ -130,6 +135,16 @@ mod tests {
     }
 
     #[test]
+    fn slide_range_is_ordered_and_finite() {
+        let bore = |range| ConnectorKind::Bore { diameter: 12.7, gender: Gender::Female, range: Some(range) };
+        assert_eq!(slide_range(&bore([-30.0, 10.0])), (-30.0, 10.0));
+        assert_eq!(slide_range(&bore([50.0, 10.0])), (10.0, 50.0));
+        assert_eq!(slide_range(&bore([f64::NAN, 10.0])), (0.0, 0.0));
+        let (lo, hi) = slide_range(&bore([50.0, 10.0]));
+        assert_eq!(7.0f64.clamp(lo, hi), 10.0); // panicked before the fix
+    }
+
+    #[test]
     fn post_into_holder() {
         let bore = Frame { origin: DVec3::new(0.0, 0.0, 50.0), z: DVec3::Z, x: DVec3::X };
         let bottom = Frame { origin: DVec3::ZERO, z: DVec3::NEG_Z, x: DVec3::X };
@@ -177,7 +192,7 @@ mod tests {
             name: "Zone 1".into(),
             shape: ZoneShape::Circle { center: DVec2::ZERO, radius: 50.0 },
         });
-        let platform = Platform {
+        let platform = Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table A".into(),
             kind: PlatformKind::OpticalTable,

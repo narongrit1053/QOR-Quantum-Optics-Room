@@ -33,7 +33,7 @@ fn folder_at(path: &Path) -> ProjectLocation {
 }
 
 fn platform(id: u64, name: &str, kind: PlatformKind, outline: Outline, x: f64, grid: HoleGrid) -> Platform {
-    Platform {
+    Platform { select_lock: false,
         id: PlatformId(id),
         name: name.into(),
         kind,

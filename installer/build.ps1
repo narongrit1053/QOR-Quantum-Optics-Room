@@ -14,8 +14,9 @@ if ($env:LABSETUP_SKIP_BUILD -ne '1') {
 }
 
 $exe = Join-Path $target 'release/labsetup.exe'
+$cli = Join-Path $target 'release/labsetup-cli.exe'
 $sidecar = if ($env:LABSETUP_STEP2GLB_DIR) { $env:LABSETUP_STEP2GLB_DIR } else { Join-Path $repo 'tools/step2glb/build/Release' }
-foreach ($p in @($exe, (Join-Path $sidecar 'step2glb.exe'), (Join-Path $repo 'third_party/dxc/dxcompiler.dll'))) {
+foreach ($p in @($exe, $cli, (Join-Path $sidecar 'step2glb.exe'), (Join-Path $repo 'third_party/dxc/dxcompiler.dll'))) {
     if (-not (Test-Path $p)) { throw "missing: $p" }
 }
 
@@ -25,6 +26,7 @@ $stage = Join-Path $pkgRoot 'LabSetup'
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force "$stage/step2glb" | Out-Null
 Copy-Item $exe $stage
+Copy-Item $cli $stage
 Copy-Item (Join-Path $repo 'third_party/dxc/dxcompiler.dll') $stage
 Copy-Item (Join-Path $repo 'third_party/dxc/LICENSE.txt') (Join-Path $stage 'dxc-LICENSE.txt')
 Copy-Item (Join-Path $repo 'library') (Join-Path $stage 'library') -Recurse

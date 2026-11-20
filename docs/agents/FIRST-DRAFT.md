@@ -57,7 +57,7 @@ Fix it in the same run, check it once, move on.
 
 ## Hardening (end of M5)
 
-1. **Test and audit (QA Reviewer Sonnet):** run every gate once: `cargo test --workspace --offline`, clippy, `scripts/check-offline.ps1`, the §12 end-to-end walkthrough (Rb-87 MOT + SPDC table → save → reopen → top view of the isolated plate → PNG and BOM export), and the 2k/10k-part performance scenes against §1. Merge the findings with the defect log into one ranked list. Fix nothing.
+1. **Test and audit (QA Reviewer Gemini):** run every gate once: `cargo test --workspace --offline`, clippy, `scripts/check-offline.ps1`, the §12 end-to-end walkthrough (Rb-87 MOT + SPDC table → save → reopen → top view of the isolated plate → PNG and BOM export), and the 2k/10k-part performance scenes against §1. Merge the findings with the defect log into one ranked list. Fix nothing.
 2. **Plan fixes (Lead):** group the list into fix batches by area (at most about ten issues), each with its defects and engineer. Drop or postpone what does not matter for a first release.
 3. **Fix batches (engineers):** fix everything in the batch, run that area's tests once, report. Same 2-attempt cap.
 4. **Regression and measure (Engineer Sonnet):** one full gate run and the §1 measurements; record results in DESIGN.md. Anything still failing goes to the Lead, who decides to fix, postpone or accept it; not into another loop.

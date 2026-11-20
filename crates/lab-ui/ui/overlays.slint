@@ -564,6 +564,8 @@ export component PartMenu inherits PopupWindow {
     in property <bool> hidden;
     in property <[string]> targets;
     in property <string> active-library;
+    // POLA-203: opened on a bundle row: Rename / Delete only.
+    in property <bool> bundle;
     callback edit-connectors();
     callback cmd(string /* verb */, string /* arg */);
 
@@ -578,7 +580,18 @@ export component PartMenu inherits PopupWindow {
         drop-shadow-offset-y: 8px;
         drop-shadow-color: Theme.shadow;
 
-        VerticalLayout {
+        if root.bundle: VerticalLayout {
+            padding: 5px;
+            MenuRow {
+                label: "Rename…";
+                clicked => { root.cmd("bundle_rename", ""); }
+            }
+            MenuRow {
+                label: "Delete Bundle";
+                clicked => { root.cmd("bundle_delete", ""); }
+            }
+        }
+        if !root.bundle: VerticalLayout {
             padding: 5px;
             MenuRow {
                 label: root.hidden ? "Show in library" : "Hide from library";

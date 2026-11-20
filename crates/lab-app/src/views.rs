@@ -1202,7 +1202,7 @@ mod tests {
 
     fn test_doc() -> Document {
         let mut doc = Document::new("My Project");
-        doc.platforms.push(Platform {
+        doc.platforms.push(Platform { select_lock: false,
             id: PlatformId(1),
             name: "Table 1".into(),
             kind: PlatformKind::OpticalTable,
@@ -1254,7 +1254,7 @@ mod tests {
     #[test]
     fn v3_scene_rows() {
         let mut doc = test_doc();
-        doc.nodes.push(Node {
+        doc.nodes.push(Node { select_lock: false,
             note: String::new(),
             id: NodeId(10),
             name: "Laser · head".into(),

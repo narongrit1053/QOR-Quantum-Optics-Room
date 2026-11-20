@@ -16,6 +16,10 @@ use crate::controller;
 use crate::ui_models::UiModels;
 
 pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, request: PlaceRequest) {
+    let bundle = app.borrow_mut().library.bundle.take();
+    if let (Some(name), DragItem::Part(_)) = (bundle, &request.item) {
+        return place_bundle(ui, app, models, &name, &request);
+    }
     let mut toast = None;
     let (root, label, command) = {
         let a = app.borrow();
@@ -40,7 +44,7 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 }
                 lift => {
                     if let Some(l) = lift.filter(|l| *l < -0.5) {
-                        let h = a.stack.beam_height;
+                        let h = a.beam_height;
                         toast = Some(format!("Beam at {:.1} mm, above the {h:.1} mm beam height", h - l));
                     }
                     (root.id, format!("Add {}", root.name), Command::AddNode { node: root, index: None })
@@ -65,6 +69,25 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
     }
 }
 
+/// POLA-203: a library bundle dropped where its ghost (anchor) part would go: one `PlaceAssembly`.
+fn place_bundle(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, name: &str, request: &PlaceRequest) {
+    let (command, root, skipped) = {
+        let a = app.borrow();
+        let Some(bundle) = a.settings.bundles.iter().find(|b| b.name == name) else { return };
+        let keep = |n: &Node| !matches!(n.shape, Shape::Part) || a.catalog.get(&n.part).is_some();
+        let next = a.session.doc.next_free_id();
+        // shortcut: saved rotations are kept, the drop's rotation is ignored.
+        let (nodes, skipped) =
+            crate::clipboard::place_bundle(&bundle.nodes, next, request.parent, &request.attach, request.position, keep);
+        let Some(root) = nodes.first().map(|n| n.id) else { return };
+        (Command::PlaceAssembly { nodes }, root, skipped)
+    };
+    controller::execute(ui, app, models, "place", command, format!("Add bundle {name}"), Some(SelectionTarget::Node(root)), Vec::new());
+    if skipped > 0 {
+        controller::show_toast(ui, &app.borrow(), &format!("Skipped {skipped} missing parts"), false);
+    }
+}
+
 /// Beam height minus the exit height of a part with a `source` port dropped on a platform or a node on one
 /// (M4-PLAN POLA-62); `None` for anything else.
 fn laser_lift(app: &AppState, part: &str, request: &PlaceRequest) -> Option<f64> {
@@ -82,7 +105,7 @@ fn laser_lift(app: &AppState, part: &str, request: &PlaceRequest) -> Option<f64>
     let port = app.catalog.get(part)?.optical_ports.iter().find(|p| p.kind == "source")?;
     // Exit height above the seat (the seat may not be at z = 0).
     let seat = app.catalog.get(part)?.connector("seat").map_or(0.0, |c| c.frame.origin.z);
-    Some(app.stack.beam_height - base - (port.frame.origin.z - seat))
+    Some(app.beam_height - base - (port.frame.origin.z - seat))
 }
 
 /// A `generic:riser` of the head's footprint and height `lift`, at the head's drop pose.
@@ -122,7 +145,7 @@ pub(crate) fn new_node(
             .and_then(|mesh| mesh.pieces.first().map(|(f, _)| f.clone())),
         Geometry::Mesh { .. } => def.meta.get("finish").map(|f| crate::import::finish_from_meta(f)),
     };
-    Some(Node {
+    Some(Node { select_lock: false,
         note: String::new(),
         id: NodeId(id),
         name: def.name.clone(),

@@ -69,6 +69,13 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         let kind = a.borrow().sheet;
         match kind {
             Some(SheetKind::Message) | None => close_sheet(&ui, &mut a.borrow_mut()),
+            Some(SheetKind::DeleteBundle) => {
+                let mut a = a.borrow_mut();
+                close_sheet(&ui, &mut a);
+                if button == 0 {
+                    crate::library::delete_bundle(&ui, &mut a, &m);
+                }
+            }
             Some(_) => files::handle_sheet_button(&ui, &a, &m, button),
         }
     });
@@ -435,9 +442,23 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             }
         }
         "library.open" => ui.set_library_open(!ui.get_library_open()),
+        "library.save_bundle" => crate::library::save_bundle_prompt(ui, &app.borrow()),
         "library.find" => {
             ui.set_library_open(true);
             ui.invoke_find_part();
+        }
+        "selection.lock" | "selection.unlock" => {
+            let target = app.borrow().session.selection;
+            let outcome = match target {
+                Some(t @ (SelectionTarget::Node(_) | SelectionTarget::Platform(_))) => {
+                    let on = id == "selection.lock";
+                    let command = Command::SetSelectLock { target: t, on };
+                    let label = command.label(&app.borrow().session.doc);
+                    Ok(EditOutcome::Command { command, label, select: None, fixes: Vec::new() })
+                }
+                _ => Ok(EditOutcome::Nothing),
+            };
+            apply_outcome(ui, app, models, id, outcome);
         }
         "beam.toggle" => {
             let outcome = crate::beams::toggle(&app.borrow());
@@ -512,12 +533,10 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             a.send(ViewportRequest::SetWallDisplay(display));
         }
         "view.context_menu" => {
-            let (target, (w, h)) = {
-                let a = app.borrow();
-                (a.session.selection, a.viewport_size)
-            };
+            let a = app.borrow();
+            let (target, (w, h)) = (a.session.selection, a.viewport_size);
             // shortcut: opens at the viewport centre, not the node's projected origin; needs a projection query to the viewport.
-            crate::context_menu::open(ui, target, lab_viewport::Vec2::new(w as f32 / 2.0, h as f32 / 2.0));
+            crate::context_menu::open(ui, &a, target, lab_viewport::Vec2::new(w as f32 / 2.0, h as f32 / 2.0));
         }
         "view.top" | "view.3d" => {
             let top = id == "view.top";
@@ -725,7 +744,6 @@ fn apply_preference(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiMode
             PreferenceChange::Units(unit) => {
                 a.settings.display_unit = unit;
                 crate::measure::refresh(ui, unit);
-                crate::stack::fill(ui, &mut a);
                 None
             }
             PreferenceChange::Walls(display) => {
