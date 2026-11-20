@@ -2,14 +2,15 @@
 
 An offline, native Windows app for designing quantum-optics lab setups: optical tables and custom platforms, Thorlabs-style mounting hardware and lasers, shown in 3D and as a top view.
 
-Rust, with a [Slint](https://slint.dev) UI and a [Bevy](https://bevy.org) 3D viewport that share one GPU device. No web view, no network access, and no rendering while nothing changes.
+Rust, with a [Slint](https://slint.dev) UI and a [Bevy](https://bevy.org) 3D viewport that share one GPU device. No web view, no networking code linked in, and no rendering while nothing changes. The app goes online only through Windows' `curl.exe`, when you download STEP files or thumbnails or press **Update catalog**.
 
 The design, decisions and measurements are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
 Milestones M1-M3 (core, platforms, library and placement, views) are built; M4 vendor import is in progress (see [docs/DESIGN.md](docs/DESIGN.md) §11).
-LabSetup ships no vendor catalog: bring your own as a JSON file, written by hand or with an AI assistant, in the format in [docs/CATALOG-FORMAT.md](docs/CATALOG-FORMAT.md).
+LabSetup ships no vendor catalog: bring your own as a JSON file, written by hand, with an AI assistant, or for Thorlabs with [scripts/catalog/fetch-thorlabs.py](scripts/catalog/fetch-thorlabs.py), in the format in [docs/CATALOG-FORMAT.md](docs/CATALOG-FORMAT.md).
+The Catalog window's **Update catalog** button fetches the Thorlabs parts in the background (one request per 30 s, one to two hours); see [catalog/README.md](catalog/README.md).
 
 ## Build and run
 
@@ -60,7 +61,7 @@ The project menu (click the project name) has New, Open…, Open Demo, Save, Sav
 | `LABSETUP_TRACE=1` | Print frame-pacing timestamps to stderr |
 | `RUST_LOG=lab_viewport=debug` | Log every rendered viewport frame with its resolution |
 | `WGPU_POWER_PREF=low` | Use the integrated GPU (the default prefers a discrete one) |
-| `LABSETUP_AUTOSAVE_DIR` | Autosave folder (default `%LOCALAPPDATA%\LabSetuputosave`) |
+| `LABSETUP_AUTOSAVE_DIR` | Autosave folder (default `%LOCALAPPDATA%\LabSetup\autosave`) |
 | `LABSETUP_SETTINGS` | Settings file (default `%APPDATA%\LabSetup\settings.json`): display units, wall display, last folder |
 
 ## Command line

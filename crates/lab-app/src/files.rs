@@ -739,7 +739,7 @@ fn utc_parts(time: SystemTime) -> [u16; 5] {
 }
 
 #[cfg(windows)]
-fn local_parts(time: SystemTime) -> [u16; 5] {
+pub(crate) fn local_parts(time: SystemTime) -> [u16; 5] {
     #[repr(C)]
     #[derive(Default)]
     struct FileTime {
@@ -783,7 +783,7 @@ fn local_parts(time: SystemTime) -> [u16; 5] {
 }
 
 #[cfg(not(windows))]
-fn local_parts(time: SystemTime) -> [u16; 5] {
+pub(crate) fn local_parts(time: SystemTime) -> [u16; 5] {
     utc_parts(time)
 }
 

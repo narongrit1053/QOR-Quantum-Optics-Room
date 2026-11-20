@@ -6,6 +6,8 @@
 //! library grows to tens of thousands of parts.
 
 pub mod book;
+pub mod db;
+pub mod thorlabs;
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -232,6 +234,11 @@ pub fn user_dir() -> Option<PathBuf> {
 /// `%APPDATA%\LabSetup\catalogs`: the user's catalog books (`docs/CATALOG-FORMAT.md`).
 pub fn catalogs_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("LabSetup").join("catalogs"))
+}
+
+/// `%LOCALAPPDATA%\LabSetup\catalog.sqlite`: the rebuildable catalog database.
+pub fn catalog_db_path() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("LabSetup").join("catalog.sqlite"))
 }
 
 /// The stored GLB for `blake3:<hex>`: the user library first, then the built-in one.

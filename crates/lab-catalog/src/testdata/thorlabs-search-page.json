@@ -1,0 +1,23 @@
+{"data":{"products":{"totalCount":3,"items":[
+ {"code":"EX-FC1",
+  "descriptions":[
+   {"reviewType":"Breadcrumb","content":"[[\"EX Couplers\",\"/ex-couplers\"],[\"Fiber Components\",\"/fiber-components\"],[\"Fiber\",\"/fiber\"],[\"All Products\",\"/all\"],[\"EX-FC1\",\"/item/EX-FC1\"]]"},
+   {"reviewType":"FamilyPageName","content":"Example Fiber Coupler"},
+   {"reviewType":"Title","content":"Example <b>Coupler</b> &amp; Mount, 1 in"},
+   {"reviewType":"ItemUrl","content":"/item/EX-FC1"}],
+  "assets":[
+   {"name":"ex-fc1.step","url":"https://example.com/ex-fc1.step","group":"Step"},
+   {"name":"ex-fc1.pdf","url":"https://example.com/ex-fc1.pdf","group":"CAD Drawing"}],
+  "imgSrc":"https://example.com/ex-fc1.jpg?w=100",
+  "images":[{"url":"https://example.com/ex-fc1_big.jpg","name":"ex-fc1_big.jpg"},{"url":"https://example.com/ex-fc1_thumb.jpg","name":"ex-fc1_thumb.jpg"}]},
+ {"code":"EX-ENC1",
+  "descriptions":[
+   {"reviewType":"Breadcrumb","content":"[[\"EX Boxes\",\"/ex-boxes\"],[\"Enclosure Systems\",\"/enclosures\"],[\"Fiber\",\"/fiber\"],[\"All Products\",\"/all\"],[\"EX-ENC1\",\"/item/EX-ENC1\"]]"},
+   {"reviewType":"Title","content":"Example Box"}],
+  "assets":[],"imgSrc":null,"images":[]},
+ {"code":"EX-LENS1",
+  "descriptions":[
+   {"reviewType":"Breadcrumb","content":"[[\"EX Lenses\",\"/ex-lenses\"],[\"Optical Elements\",\"/optics\"],[\"All Products\",\"/all\"],[\"EX-LENS1\",\"/item/EX-LENS1\"]]"},
+   {"reviewType":"Title","content":"Example Lens"}],
+  "assets":[],"imgSrc":null,"images":[]}
+]}}}

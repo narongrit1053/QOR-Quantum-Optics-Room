@@ -116,7 +116,12 @@ export component CatalogBook inherits Rectangle {
     in property <bool> listed;
     in property <[CatalogRow]> list;
     in property <bool> empty;
-    // verbs: search(text), category(index), select(part), add, remove(part), clear, link(url), import, close.
+    in property <bool> loading;
+    in property <bool> updating;
+    in property <string> update-status;
+    in property <string> hint;
+    // verbs: search(text), category(index), select(part), add, remove(part), clear, link(url), import, close,
+    // update, cancel-update.
     callback cmd(string /* verb */, string /* arg */);
     // List or Grid; outside the `if root.open` so the choice lasts the session.
     in-out property <bool> grid;
@@ -182,7 +187,7 @@ export component CatalogBook inherits Rectangle {
                 HorizontalLayout {
                     spacing: 6px;
                     Text {
-                        text: root.count;
+                        text: root.loading ? "" : root.count;
                         horizontal-stretch: 1;
                         color: Theme.text-tertiary;
                         font-size: Theme.font-caption;
@@ -190,8 +195,35 @@ export component CatalogBook inherits Rectangle {
                     }
                     PillButton { label: "List"; primary: !root.grid; clicked => { root.grid = false; } }
                     PillButton { label: "Grid"; primary: root.grid; clicked => { root.grid = true; } }
+                    PillButton {
+                        // Fixed width: List and Grid must not shift when the label changes.
+                        width: 118px;
+                        label: root.updating ? "Cancel" : "Update catalog";
+                        enabled: !root.loading;
+                        clicked => { root.cmd(root.updating ? "cancel-update" : "update", ""); }
+                    }
                 }
-                if root.empty: VerticalLayout {
+                Text {
+                    text: root.update-status;
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+                if root.hint != "": Text {
+                    text: root.hint;
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+                if root.loading: Text {
+                    vertical-stretch: 1;
+                    text: "Loading catalog…";
+                    color: Theme.text-tertiary;
+                    font-size: Theme.font-body;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                if !root.loading && root.empty: VerticalLayout {
                     vertical-stretch: 1;
                     alignment: center;
                     spacing: 10px;
@@ -207,14 +239,14 @@ export component CatalogBook inherits Rectangle {
                         PillButton { label: "Open catalogs folder"; primary: true; clicked => { root.cmd("folder", ""); } }
                     }
                 }
-                if !root.empty && !root.grid: ListView {
+                if !root.loading && !root.empty && !root.grid: ListView {
                     vertical-stretch: 1;
                     for row in root.rows: RowView {
                         item: row;
                         clicked => { root.cmd("select", row.part); }
                     }
                 }
-                if !root.empty && root.grid: ScrollView {
+                if !root.loading && !root.empty && root.grid: ScrollView {
                     property <length> tile-w: 160px;
                     property <length> tile-h: 220px;
                     property <int> cols: max(1, floor(self.visible-width / self.tile-w));
@@ -338,7 +370,7 @@ export component CatalogBook inherits Rectangle {
                         PillButton {
                             label: "Download & import list";
                             primary: true;
-                            enabled: root.list.length > 0;
+                            enabled: root.list.length > 0 && !root.updating;
                             clicked => { root.cmd("import", ""); }
                         }
                     }

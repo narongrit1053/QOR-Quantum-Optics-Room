@@ -1,10 +1,10 @@
 # Catalog format
 
-LabSetup ships **no vendor catalog data**. The **Catalog…** window (File menu, start page, library menu) lists only the catalogs you add yourself: JSON files you write by hand or generate with an AI assistant.
+LabSetup ships **no vendor catalog data**. The **Catalog…** window (File menu, start page, library menu) lists the catalogs you add yourself (JSON files you write by hand or generate with an AI assistant) and, after **Update catalog**, the Thorlabs parts it fetched.
 
 ## Where the file goes
 
-Put each catalog in `%APPDATA%\LabSetup\catalogs\` as a `.json` file (any name). The **Open catalogs folder** button in the Catalog window creates and opens that folder. LabSetup reads every `*.json` there when the Catalog window is first opened in a session; restart LabSetup after adding a file. A file that is not valid JSON in this format is skipped (the reason is printed to the console), and the other files still load. The same `(vendor, part)` in several files is listed once.
+Put each catalog in `%APPDATA%\LabSetup\catalogs\` as a `.json` file (any name). The **Open catalogs folder** button in the Catalog window creates and opens that folder. At startup LabSetup imports every `*.json` there into a local database (`%LOCALAPPDATA%\LabSetup\catalog.sqlite`) on a background thread. Only changed files are re-imported, and the parts of removed files are dropped. Changes are picked up on the next start, so restart LabSetup after adding or changing a file. A file that is not valid JSON in this format is skipped (the reason is printed to the console), and the other files still load. The same `(vendor, part)` in several files is listed once.
 
 ## Schema
 
@@ -80,4 +80,4 @@ Check the links before you rely on them: assistants can invent URLs.
 
 You are responsible for respecting each vendor's terms of use and copyright. LabSetup ships no vendor data; a catalog you make is for your own use.
 
-- **Thorlabs:** `url` is `https://www.thorlabs.com/item/<part>`. STEP and CAD PDF files are download buttons on the product page, not links, so leave `step` and `cad_pdf` out and import the STEP files you download yourself. Site rules and a ready Thorlabs prompt are in [catalog/README.md](../catalog/README.md).
+- **Thorlabs:** `url` is `https://www.thorlabs.com/item/<part>`. [scripts/catalog/fetch-thorlabs.py](../scripts/catalog/fetch-thorlabs.py) builds a whole catalog, with `step` and `cad_pdf` links, from the store search; site rules and usage are in [catalog/README.md](../catalog/README.md).

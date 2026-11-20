@@ -7,6 +7,7 @@ mod beams;
 mod bom;
 mod bridge;
 mod catalog_book;
+mod catalog_update;
 mod clipboard;
 mod constrain;
 mod context_menu;
@@ -238,6 +239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     ui.run()?;
+    crate::catalog_book::stop_update();
     Ok(())
 }
 
