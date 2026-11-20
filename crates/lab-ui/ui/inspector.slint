@@ -9,6 +9,7 @@ import { SectionHeader, SegmentedControl, PillButton, IconButton, Field, ListRow
 import { TextField, LabeledField, CornerTable, ZoneList, DoorList } from "fields.slint";
 import { PresetMenu } from "overlays.slint";
 import { JointFields } from "joint_panel.slint";
+import { RelationsTree, RelationChip } from "relations_bar.slint";
 
 // A 268 × 150 card that draws an outline with its zones and error edges, plus corner or
 // wall numbers. Every Path fills the card, shares the square viewbox of `preview` and uses
@@ -186,6 +187,12 @@ export component NodeInspector inherits Rectangle {
     in property <bool> beam-laser;
     in property <bool> beam-on;
     in property <string> error;
+    // M9 G: the selected part's chain of joints and constraints (empty hides the section).
+    in property <[RelationChip]> relation-chips;
+    callback relation-hovered(int);
+    callback relation-clicked(int);
+    callback relation-double-clicked(int);
+    callback relation-menu(int, length, length);
     callback action(string /* id */);
     callback field-committed(string /* id */, string /* text */) -> bool;
     callback field-edited(string /* id */, string /* text */);
@@ -221,7 +228,7 @@ export component NodeInspector inherits Rectangle {
             if field.label == "Description": Note { text: field.value; }
             if field.label == "Page" || field.label == "CAD PDF" || field.label == "STEP": Rectangle {
                 height: 26px;
-                Field { width: parent.width; label: field.label; value: "Open ↗"; }
+                Field { width: parent.width; label: field.label == "Page" ? "Product page" : field.label; value: "Open ↗"; }
                 TouchArea {
                     mouse-cursor: pointer;
                     clicked => { root.action("open.url:" + field.value); }
@@ -361,6 +368,23 @@ export component NodeInspector inherits Rectangle {
                 committed(i, t) => { return root.field-committed(i, t); }
                 edited(i, t) => { root.field-edited(i, t); }
             }
+        }
+        if root.relation-chips.length > 0: Divider { }
+        if root.relation-chips.length > 0: HorizontalLayout {
+            padding-left: 9px;
+            Text {
+                text: "Relationships";
+                color: Theme.text;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+        }
+        RelationsTree {
+            chips: root.relation-chips;
+            hovered(i) => { root.relation-hovered(i); }
+            clicked(i) => { root.relation-clicked(i); }
+            double-clicked(i) => { root.relation-double-clicked(i); }
+            menu(i, x, y) => { root.relation-menu(i, x, y); }
         }
         if root.set-rows.length > 0: Divider { }
         if root.set-rows.length > 0: HorizontalLayout {

@@ -219,7 +219,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
     ui.set_show_builtin_parts(app.settings.show_builtin_parts);
     ui_models::fill_presets(models, preset_rows(app.units()));
     ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &app.scene_collapsed));
-    crate::relations::fill(ui, &session.doc);
+    crate::relations::fill(ui, &session.doc, session.selection);
 }
 
 /// The inspector for the current selection, including every choice property.

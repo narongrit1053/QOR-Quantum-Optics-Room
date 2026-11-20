@@ -1,63 +1,65 @@
-// M9 G. Relationships bar: one chip per joint (by seq), then per M8 constraint, along the viewport bottom.
-import { ScrollView } from "std-widgets.slint";
+// M9 G. Relationships tree: the selected part's chain of joints and M8 constraints, root first,
+// one row per part indented by depth. Lives in the node inspector.
 import { Theme } from "theme.slint";
 
 export struct RelationChip {
     label: string,
+    // The relation kinds to the parent row ("Concentric, Mate"); empty on the chain root.
+    detail: string,
+    depth: int,
     icon: string,
     suppressed: bool,
+    current: bool,
 }
 
-export component RelationsBar inherits Rectangle {
+export component RelationsTree inherits VerticalLayout {
     in property <[RelationChip]> chips;
     callback hovered(int /* index, -1 = none */);
     callback clicked(int);
     callback double-clicked(int);
-    callback menu(int, length /* x in this bar */, length /* y */);
+    callback menu(int, length /* window x */, length /* y */);
 
-    height: 36px;
-    border-radius: 18px;
-    background: Theme.panel-bg;
-    border-width: Theme.border-width;
-    border-color: Theme.panel-border;
-
-    ScrollView {
-        x: 6px;
-        width: parent.width - 12px;
-        row := HorizontalLayout {
+    for chip[i] in root.chips: Rectangle {
+        height: 26px;
+        border-radius: 6px;
+        background: chip.current ? Theme.accent-soft : area.has-hover ? Theme.control-hover : transparent;
+        opacity: chip.suppressed ? 0.5 : 1.0;
+        HorizontalLayout {
+            padding-left: 9px + chip.depth * 14px;
+            padding-right: 8px;
             spacing: 6px;
-            padding-top: 5px;
-            padding-bottom: 5px;
-            for chip[i] in root.chips: Rectangle {
-                border-radius: 13px;
-                background: area.has-hover ? Theme.accent-soft : Theme.control-hover;
-                opacity: chip.suppressed ? 0.5 : 1.0;
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 6px;
-                    Text {
-                        text: chip.icon == "joint" ? "⟲" : "⊥";
-                        color: Theme.text-secondary;
-                        font-size: Theme.font-caption;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: chip.label;
-                        color: Theme.text;
-                        font-size: Theme.font-caption;
-                        vertical-alignment: center;
-                    }
-                }
-                area := TouchArea {
-                    changed has-hover => { root.hovered(self.has-hover ? i : -1); }
-                    clicked => { root.clicked(i); }
-                    double-clicked => { root.double-clicked(i); }
-                    pointer-event(event) => {
-                        if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
-                            root.menu(i, parent.x + self.mouse-x, self.mouse-y);
-                        }
-                    }
+            Text {
+                width: 12px;
+                text: chip.icon == "joint" ? "⟲" : chip.icon == "constraint" ? "⊥" : "";
+                color: Theme.text-secondary;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+            }
+            Text {
+                text: chip.label;
+                color: chip.current ? Theme.accent : Theme.text;
+                font-weight: chip.current ? 650 : 400;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: chip.detail;
+                color: Theme.text-tertiary;
+                font-size: Theme.font-caption;
+                overflow: elide;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+        area := TouchArea {
+            changed has-hover => { root.hovered(self.has-hover ? i : -1); }
+            clicked => { root.clicked(i); }
+            double-clicked => { root.double-clicked(i); }
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                    root.menu(i, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                 }
             }
         }
