@@ -114,9 +114,6 @@ impl CatalogDb {
                 report.skipped.push((name.clone(), error));
             }
         }
-        if !report.imported.is_empty() || !report.removed.is_empty() {
-            self.recompute_winners();
-        }
         report
     }
 
@@ -129,6 +126,7 @@ impl CatalogDb {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM items WHERE source = ?", [format!("{JSON_PREFIX}{name}")])?;
         tx.execute("DELETE FROM imports WHERE file = ?", [name])?;
+        Self::recompute_winners_in(&tx)?;
         tx.commit()
     }
 
@@ -180,6 +178,7 @@ impl CatalogDb {
                 }
             }
             tx.execute("INSERT OR REPLACE INTO imports(file, size, mtime) VALUES(?,?,?)", params![name, size, mtime])?;
+            Self::recompute_winners_in(&tx)?;
             tx.commit()
         };
         write(&mut self.conn).map_err(|e| e.to_string())?;
@@ -189,16 +188,20 @@ impl CatalogDb {
 
     /// Sets `items.winner` to 1 for the row shown per (vendor, part): JSON beats any other source,
     /// and among JSON files the first file name wins. Other sources (the updater) tie-break by name.
-    pub(crate) fn recompute_winners(&self) {
-        self.conn
-            .execute_batch(&format!(
-                "UPDATE items SET winner = 0 WHERE winner <> 0;
-                 UPDATE items SET winner = 1 WHERE rowid IN (
-                     SELECT rowid FROM (SELECT rowid, ROW_NUMBER() OVER (
-                         PARTITION BY vendor, part ORDER BY (source NOT LIKE '{JSON_PREFIX}%'), source) AS rn FROM items)
-                     WHERE rn = 1);"
-            ))
-            .ok();
+    /// Takes a connection so callers can run it inside their own transaction (a `Transaction` derefs
+    /// to one); a failure then rolls the whole change back instead of hiding rows.
+    pub(crate) fn recompute_winners_in(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(&format!(
+            "UPDATE items SET winner = 0 WHERE winner <> 0;
+             UPDATE items SET winner = 1 WHERE rowid IN (
+                 SELECT rowid FROM (SELECT rowid, ROW_NUMBER() OVER (
+                     PARTITION BY vendor, part ORDER BY (source NOT LIKE '{JSON_PREFIX}%'), source) AS rn FROM items)
+                 WHERE rn = 1);"
+        ))
+    }
+
+    pub(crate) fn recompute_winners(&self) -> rusqlite::Result<()> {
+        Self::recompute_winners_in(&self.conn)
     }
 
     /// Rows (at most `limit`, ordered by part) and the total match count. Text of 3+ characters
@@ -210,8 +213,8 @@ impl CatalogDb {
         match q.chars().count() {
             0 => {}
             1..=2 => {
-                let esc = q.to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-                conds.push("lower(part||char(10)||name||char(10)||description) LIKE ? ESCAPE '\\'".to_owned());
+                let esc = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+                conds.push("(part||char(10)||name||char(10)||description) LIKE ? ESCAPE '\\'".to_owned());
                 args.push(format!("%{esc}%"));
             }
             _ => {
@@ -350,9 +353,27 @@ mod tests {
                 [],
             )
             .unwrap();
-        db.recompute_winners();
+        db.recompute_winners().unwrap();
         assert_eq!(db.find("EX-KM1").unwrap().name, "From JSON");
         assert_eq!(db.search("", None, 500).1, 1);
+    }
+
+    #[test]
+    fn every_part_has_a_winner_after_sync() {
+        let (dir, mut db) = synced("winners", &[("a.json", EXAMPLE), ("b.json", EXAMPLE)]);
+        let orphans = |db: &CatalogDb| -> i64 {
+            db.conn
+                .query_row(
+                    "SELECT count(*) FROM (SELECT 1 FROM items GROUP BY vendor, part HAVING max(winner) = 0)",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(orphans(&db), 0);
+        std::fs::remove_file(dir.join("a.json")).unwrap();
+        db.sync_json_dir(&dir);
+        assert_eq!((orphans(&db), db.search("", None, 500).1), (0, 3));
     }
 
     #[test]
@@ -363,6 +384,7 @@ mod tests {
         }
         assert_eq!(db.search("ø1\"", None, 500).1, 1);
         assert_eq!(db.search("TR50/M", None, 500).1, 1);
+        assert_eq!(db.search("Ø1", None, 500).1, 1);
     }
 
     #[test]
