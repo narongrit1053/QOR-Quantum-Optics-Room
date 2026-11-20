@@ -7,6 +7,7 @@ mod beams;
 mod bom;
 mod bridge;
 mod catalog_book;
+mod catalog_update;
 mod clipboard;
 mod constrain;
 mod context_menu;
