@@ -79,16 +79,22 @@ fn pick_image(item: &serde_json::Value) -> Option<String> {
     thumb.or(src).or_else(|| images.iter().find(|(u, _)| is_image(u)).map(|i| i.0)).map(str::to_string)
 }
 
-fn to_item(it: &serde_json::Value, section: &str, exclude: &[&str]) -> Option<BookItem> {
-    let code = it["code"].as_str()?;
-    let d = |k: &str| {
-        it["descriptions"].as_array()?.iter().find(|x| x["reviewType"] == k).and_then(|x| x["content"].as_str()).filter(|c| !c.is_empty())
-    };
-    // Leaf-first [name, path] pairs ending "All Products", item; drop those two, then top-down.
-    let pairs: Vec<Vec<String>> = serde_json::from_str(d("Breadcrumb")?).ok()?;
+fn description<'a>(it: &'a serde_json::Value, k: &str) -> Option<&'a str> {
+    it["descriptions"].as_array()?.iter().find(|x| x["reviewType"] == k).and_then(|x| x["content"].as_str()).filter(|c| !c.is_empty())
+}
+
+/// Top-down category names from the Breadcrumb: leaf-first [name, path] pairs ending "All Products", item.
+fn breadcrumb(it: &serde_json::Value) -> Option<Vec<String>> {
+    let pairs: Vec<Vec<String>> = serde_json::from_str(description(it, "Breadcrumb")?).ok()?;
     let mut crumbs: Vec<String> = pairs.into_iter().filter_map(|p| p.into_iter().next()).collect();
     crumbs.truncate(crumbs.len().saturating_sub(2));
     crumbs.reverse();
+    Some(crumbs)
+}
+
+fn to_item(it: &serde_json::Value, crumbs: Vec<String>, section: &str, exclude: &[&str]) -> Option<BookItem> {
+    let code = it["code"].as_str()?;
+    let d = |k: &str| description(it, k);
     let at = crumbs.iter().position(|c| c == section)?;
     if crumbs.iter().any(|c| exclude.contains(&c.as_str())) {
         return None;
@@ -130,7 +136,12 @@ pub fn parse_page(json: &str, section: &str, exclude: &[&str]) -> Result<SearchP
     let products = &v["data"]["products"];
     let total = products["totalCount"].as_u64().ok_or_else(|| FormatChanged("data.products.totalCount missing".into()))? as usize;
     let raw = products["items"].as_array().ok_or_else(|| FormatChanged("data.products.items missing".into()))?;
-    let items: Vec<BookItem> = raw.iter().filter_map(|i| to_item(i, section, exclude)).collect();
+    let crumbs: Vec<Option<Vec<String>>> = raw.iter().map(breadcrumb).collect();
+    // Skipping one odd item is fine; no parseable Breadcrumb on a whole page means the shape changed.
+    if !raw.is_empty() && crumbs.iter().all(Option::is_none) {
+        return Err(FormatChanged("no item has a usable Breadcrumb".into()));
+    }
+    let items: Vec<BookItem> = raw.iter().zip(crumbs).filter_map(|(i, c)| to_item(i, c?, section, exclude)).collect();
     let second_levels = items.iter().filter_map(|i| i.category.get(1).cloned()).collect();
     Ok(SearchPage { total, items, second_levels })
 }
@@ -232,6 +243,21 @@ mod tests {
         assert_eq!(image(page_with("https://example.com/s.jpg?w=1".into(), big.clone())).as_deref(), Some("https://example.com/s.jpg?w=1"));
         assert_eq!(image(page_with("https://example.com/s.pdf".into(), big.clone())).as_deref(), Some("https://example.com/b.png"));
         assert_eq!(image(page_with(serde_json::Value::Null, serde_json::json!([]))), None);
+    }
+
+    #[test]
+    fn unusable_breadcrumbs_are_format_changed_but_other_sections_are_not() {
+        let mut v: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        for it in v["data"]["products"]["items"].as_array_mut().unwrap() {
+            for d in it["descriptions"].as_array_mut().unwrap() {
+                if d["reviewType"] == "Breadcrumb" {
+                    d["content"] = "Fiber > Couplers".into();
+                }
+            }
+        }
+        assert_eq!(parse_page(&v.to_string(), "Fiber", &EXCLUDE).err(), Some(FormatChanged("no item has a usable Breadcrumb".into())));
+        let p = parse_page(FIXTURE, "Nothing Here", &EXCLUDE).unwrap();
+        assert_eq!((p.total, p.items.len()), (3, 0));
     }
 
     #[test]
