@@ -99,7 +99,9 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
             2 => SelectionTarget::Room,
             _ => return,
         };
-        select(&ui, &a, &m, Some(target));
+        // Clicking the selected row again clears the selection.
+        let target = (a.borrow().session.selection != Some(target)).then_some(target);
+        select(&ui, &a, &m, target);
     });
 
     // M9 E2: typed value during a drag; Enter applies it exactly and ends the drag.

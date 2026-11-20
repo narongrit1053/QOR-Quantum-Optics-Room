@@ -104,8 +104,12 @@ fn chip(app: &Rc<RefCell<AppState>>, i: i32) -> Option<Chip> {
     usize::try_from(i).ok().and_then(|i| chips(&a.session.doc, a.session.selection).into_iter().nth(i))
 }
 
-fn select(ui: &AppWindow, target: SelectionTarget) {
+/// Selects the node; a no-op when it is already selected (a row click there does not toggle it off).
+fn select(ui: &AppWindow, app: &Rc<RefCell<AppState>>, target: SelectionTarget) {
     let SelectionTarget::Node(id) = target else { return };
+    if app.borrow().session.selection == Some(target) {
+        return;
+    }
     ui.invoke_scene_row_clicked(0, id.0 as i32);
 }
 
@@ -125,14 +129,14 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
     let (w, a) = (ui.as_weak(), app.clone());
     ui.on_relation_clicked(move |i| {
         let (Some(ui), Some(c)) = (w.upgrade(), chip(&a, i)) else { return };
-        select(&ui, SelectionTarget::Node(c.node));
+        select(&ui, &a, SelectionTarget::Node(c.node));
     });
 
     // shortcut: selects only; scrolling the inspector to its Joint section waits for E's inspector section.
     let (w, a) = (ui.as_weak(), app.clone());
     ui.on_relation_double_clicked(move |i| {
         let (Some(ui), Some(c)) = (w.upgrade(), chip(&a, i)) else { return };
-        select(&ui, SelectionTarget::Node(c.node));
+        select(&ui, &a, SelectionTarget::Node(c.node));
     });
 
     let (w, a) = (ui.as_weak(), app.clone());
@@ -163,7 +167,7 @@ pub fn run(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, i
     let Some(c) = MENU.take().and_then(|i| chip(app, i as i32)) else { return };
     if id == "relation.select_bodies" {
         // shortcut: single selection only (no multi-select yet), so the parent node is not added.
-        select(ui, SelectionTarget::Node(c.node));
+        select(ui, app, SelectionTarget::Node(c.node));
         return;
     }
     let (command, label) = {
