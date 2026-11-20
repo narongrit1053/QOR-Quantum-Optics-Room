@@ -49,6 +49,7 @@ impl Plugin for GlbPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GlbLoading>()
             .add_observer(tag_instance)
+            .add_observer(tint_ghost)
             .add_systems(Update, (wake_on_asset_events, track_loading));
     }
 }
@@ -66,6 +67,63 @@ pub(crate) fn register_sources(app: &mut App) {
     app.register_asset_source("builtin", AssetSourceBuilder::platform_default(&builtin.to_string_lossy(), None));
 }
 
+/// The asset path of GLB `asset` (`user://meshes/<hex>.glb` or `builtin://…`).
+fn asset_path(asset: &str) -> Result<String, String> {
+    let (source, _) = lab_catalog::mesh_path(asset).ok_or_else(|| format!("its mesh file {asset} is missing"))?;
+    let src = match source {
+        Source::User => "user",
+        Source::BuiltIn => "builtin",
+    };
+    Ok(format!("{src}://meshes/{}.glb", &asset["blake3:".len()..]))
+}
+
+/// GLB vertices are part space (mm, +Z up); glTF coordinate conversion is off.
+fn part_space() -> Transform {
+    Transform { rotation: Quat::from_rotation_x(-FRAC_PI_2), scale: Vec3::splat(MM), ..default() }
+}
+
+/// A drag ghost's GLB scene: once spawned, every piece takes `material` and casts no shadow.
+#[derive(Component)]
+pub(crate) struct GhostGlb(pub Handle<StandardMaterial>);
+
+/// Spawns the finest LOD of GLB `asset` under the drag ghost `parent`, at `transform` (part
+/// pose relative to the ghost root, render space).
+pub(crate) fn spawn_ghost_glb(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    parent: Entity,
+    asset: &str,
+    transform: Transform,
+    material: Handle<StandardMaterial>,
+) -> Result<(), String> {
+    let path = asset_path(asset)?;
+    let piece = commands.spawn((ChildOf(parent), transform, Visibility::Inherited)).id();
+    commands.spawn((
+        ChildOf(piece),
+        GhostGlb(material),
+        WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
+        part_space(),
+    ));
+    Ok(())
+}
+
+fn tint_ghost(
+    ready: On<WorldInstanceReady>,
+    mut commands: Commands,
+    ghosts: Query<&GhostGlb>,
+    children: Query<&Children>,
+    pieces: Query<(), With<Mesh3d>>,
+    mut settle: ResMut<SettleFrames>,
+) {
+    let Ok(ghost) = ghosts.get(ready.entity) else { return };
+    for entity in children.iter_descendants(ready.entity) {
+        if pieces.contains(entity) {
+            commands.entity(entity).insert((MeshMaterial3d(ghost.0.clone()), bevy::light::NotShadowCaster));
+        }
+    }
+    settle.0 = settle.0.max(2);
+}
+
 /// Spawns the LOD children of `parent` for GLB `asset`. A missing file shows nothing.
 pub(crate) fn spawn_glb(
     commands: &mut Commands,
@@ -75,20 +133,14 @@ pub(crate) fn spawn_glb(
     node: NodeId,
     pickable: bool,
 ) -> Result<(), String> {
-    let (source, _) = lab_catalog::mesh_path(asset).ok_or_else(|| format!("its mesh file {asset} is missing"))?;
-    let hex = &asset["blake3:".len()..];
-    let src = match source {
-        Source::User => "user",
-        Source::BuiltIn => "builtin",
-    };
+    let path = asset_path(asset)?;
     for (i, (start, end)) in LOD_RANGES.into_iter().enumerate() {
-        let path = format!("{src}://meshes/{hex}.glb");
+        let path = path.clone();
         commands.spawn((
             ChildOf(parent),
             GlbLod { node, owner: SelectionTarget::Node(node), pickable, primary: i == 0, ready: false },
             WorldAssetRoot(assets.load(GltfAssetLabel::Scene(i).from_asset(path))),
-            // GLB vertices are part space (mm, +Z up); glTF coordinate conversion is off.
-            Transform { rotation: Quat::from_rotation_x(-FRAC_PI_2), scale: Vec3::splat(MM), ..default() },
+            part_space(),
             VisibilityRange { start_margin: start, end_margin: end, ..default() },
         ));
     }

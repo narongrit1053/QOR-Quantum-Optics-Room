@@ -12,7 +12,7 @@ use bevy::{
     prelude::*,
 };
 use lab_catalog::Catalog;
-use lab_core::part::PartDef;
+use lab_core::part::{Geometry, PartDef};
 use lab_core::{Attach, Document, NodeId, Parent, PlatformId, SelectionTarget, Shape, compute_holes};
 
 use crate::camera::{OrbitCamera, camera_at};
@@ -265,7 +265,7 @@ type GhostAssets<'w> = (
 fn update_ghost(
     mut commands: Commands,
     mut ghost: ResMut<Ghost>,
-    (catalog, events): (Res<CatalogRes>, Res<EventSender>),
+    (catalog, events, server): (Res<CatalogRes>, Res<EventSender>, Res<AssetServer>),
     (mut meshes, mut materials, mut part_meshes, mut settle): GhostAssets,
 ) {
     let Some(pose) = ghost.pose.take() else { return };
@@ -293,10 +293,16 @@ fn update_ghost(
             }
         }
         for (id, position, rotation) in parts {
+            let transform = Transform { translation: to_render(position), rotation: rotation_to_render(rotation), ..default() };
+            // Imported parts: the GLB, tinted once it has spawned.
+            if let Some(Geometry::Mesh { asset }) = catalog.0.get(&id).map(|d| &d.geometry) {
+                if let Err(error) = crate::glb::spawn_ghost_glb(&mut commands, &server, root, asset, transform, material.clone()) {
+                    events.send(ViewportEvent::SceneError(format!("{id} has no preview: {error}.")));
+                }
+                continue;
+            }
             match part_mesh(&catalog.0, &id, &Default::default()) {
                 Ok(part) => {
-                    let transform =
-                        Transform { translation: to_render(position), rotation: rotation_to_render(rotation), ..default() };
                     for (_, mesh) in part_meshes.pieces(&mut meshes, &part) {
                         commands.spawn((
                             ChildOf(root),

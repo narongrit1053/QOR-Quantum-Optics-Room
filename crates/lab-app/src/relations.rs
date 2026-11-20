@@ -1,10 +1,11 @@
-//! M9 G. The relationships bar: one chip per joint (by `seq`), then one per M8 constraint
-//! (node order). Hover outlines both bodies, click selects the child, right-click opens a menu.
+//! M9 G. The relationships tree in the node inspector: only the selected part's chain (the
+//! parts linked to it by joints or M8 constraints), root first, one row per part. Hover outlines
+//! both bodies, click selects, right-click opens a menu.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use lab_core::{Attach, Command, Document, NodeId, Parent, SelectionTarget};
+use lab_core::{Attach, Command, Document, Node, NodeId, Parent, SelectionTarget};
 use lab_ui::{AppWindow, PaletteItem, RelationChip};
 use lab_viewport::ViewportRequest;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
@@ -16,6 +17,10 @@ pub struct Chip {
     pub node: NodeId,
     pub parent: Parent,
     pub label: String,
+    /// The relation kinds to the parent ("Concentric, Mate"); empty on the chain root.
+    pub detail: String,
+    pub depth: i32,
+    /// "joint", "constraint", or "" for the chain root (no menu).
     pub icon: String,
     pub suppressed: bool,
     /// Joint chips can be suppressed; M8 constraint chips cannot.
@@ -30,47 +35,56 @@ fn parent_name(doc: &Document, parent: Parent) -> String {
     }
 }
 
-pub fn chips(doc: &Document) -> Vec<Chip> {
-    let mut joints: Vec<_> = doc
-        .nodes
-        .iter()
-        .filter_map(|n| match &n.attach {
-            Attach::Joint(j) => Some((j.seq, n, j)),
-            _ => None,
-        })
-        .collect();
-    joints.sort_by_key(|(seq, ..)| *seq);
-    let mut out: Vec<Chip> = joints
-        .into_iter()
-        .map(|(_, n, j)| Chip {
-            node: n.id,
-            parent: n.parent,
-            label: format!("{} → {} · {:?}", n.name, parent_name(doc, n.parent), j.kind),
-            icon: "joint".into(),
-            suppressed: j.suppressed,
-            joint: true,
-        })
-        .collect();
-    for n in &doc.nodes {
-        if let Attach::Constrained { constraints } = &n.attach {
-            out.extend(constraints.iter().map(|c| Chip {
-                node: n.id,
-                parent: n.parent,
-                label: format!("{} → {} · {:?}", n.name, parent_name(doc, n.parent), c.kind),
-                icon: "constraint".into(),
-                suppressed: false,
-                joint: false,
-            }));
-        }
+fn related(n: &Node) -> bool {
+    matches!(n.attach, Attach::Joint(_) | Attach::Constrained { .. })
+}
+
+/// The tree rows of the chain `selected` belongs to: walk up through related parents to the
+/// root, then depth-first down through related children. Empty when nothing is related.
+pub fn chips(doc: &Document, selected: Option<SelectionTarget>) -> Vec<Chip> {
+    let Some(SelectionTarget::Node(mut root)) = selected else { return Vec::new() };
+    while let Some(n) = doc.node(root).filter(|n| related(n)) {
+        let Parent::Node(p) = n.parent else { break };
+        root = p;
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![(root, 0)];
+    while let Some((id, depth)) = stack.pop() {
+        let Some(n) = doc.node(id) else { continue };
+        let (detail, icon, suppressed, joint) = match &n.attach {
+            Attach::Joint(j) => (format!("{:?}", j.kind), "joint", j.suppressed, true),
+            Attach::Constrained { constraints } => {
+                (constraints.iter().map(|c| format!("{:?}", c.kind)).collect::<Vec<_>>().join(", "), "constraint", false, false)
+            }
+            _ => (String::new(), "", false, false),
+        };
+        // A related root sits on a platform or the room: name it, the relation is to that.
+        let detail = match (depth, n.parent) {
+            (0, p) if !detail.is_empty() => format!("{detail} → {}", parent_name(doc, p)),
+            _ => detail,
+        };
+        out.push(Chip { node: n.id, parent: n.parent, label: n.name.clone(), detail, depth, icon: icon.into(), suppressed, joint });
+        let children: Vec<NodeId> = doc.children(Parent::Node(id)).filter(|c| related(c)).map(|c| c.id).collect();
+        stack.extend(children.into_iter().rev().map(|c| (c, depth + 1)));
+    }
+    if out.len() == 1 && out[0].icon.is_empty() {
+        out.clear(); // a lone part with no relations
     }
     out
 }
 
 /// Updates the bar's model in place (keeps its scroll position); call on every document change.
-pub fn fill(ui: &AppWindow, doc: &Document) {
-    let rows: Vec<RelationChip> = chips(doc)
+pub fn fill(ui: &AppWindow, doc: &Document, selected: Option<SelectionTarget>) {
+    let rows: Vec<RelationChip> = chips(doc, selected)
         .into_iter()
-        .map(|c| RelationChip { label: c.label.into(), icon: c.icon.into(), suppressed: c.suppressed })
+        .map(|c| RelationChip {
+            current: selected == Some(SelectionTarget::Node(c.node)),
+            label: c.label.into(),
+            detail: c.detail.into(),
+            depth: c.depth,
+            icon: c.icon.into(),
+            suppressed: c.suppressed,
+        })
         .collect();
     let model = ui.get_relation_chips();
     match model.as_any().downcast_ref::<VecModel<RelationChip>>() {
@@ -86,11 +100,16 @@ thread_local! {
 }
 
 fn chip(app: &Rc<RefCell<AppState>>, i: i32) -> Option<Chip> {
-    usize::try_from(i).ok().and_then(|i| chips(&app.borrow().session.doc).into_iter().nth(i))
+    let a = app.borrow();
+    usize::try_from(i).ok().and_then(|i| chips(&a.session.doc, a.session.selection).into_iter().nth(i))
 }
 
-fn select(ui: &AppWindow, target: SelectionTarget) {
+/// Selects the node; a no-op when it is already selected (a row click there does not toggle it off).
+fn select(ui: &AppWindow, app: &Rc<RefCell<AppState>>, target: SelectionTarget) {
     let SelectionTarget::Node(id) = target else { return };
+    if app.borrow().session.selection == Some(target) {
+        return;
+    }
     ui.invoke_scene_row_clicked(0, id.0 as i32);
 }
 
@@ -110,19 +129,22 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
     let (w, a) = (ui.as_weak(), app.clone());
     ui.on_relation_clicked(move |i| {
         let (Some(ui), Some(c)) = (w.upgrade(), chip(&a, i)) else { return };
-        select(&ui, SelectionTarget::Node(c.node));
+        select(&ui, &a, SelectionTarget::Node(c.node));
     });
 
     // shortcut: selects only; scrolling the inspector to its Joint section waits for E's inspector section.
     let (w, a) = (ui.as_weak(), app.clone());
     ui.on_relation_double_clicked(move |i| {
         let (Some(ui), Some(c)) = (w.upgrade(), chip(&a, i)) else { return };
-        select(&ui, SelectionTarget::Node(c.node));
+        select(&ui, &a, SelectionTarget::Node(c.node));
     });
 
     let (w, a) = (ui.as_weak(), app.clone());
     ui.on_relation_menu(move |i, x, y| {
         let (Some(ui), Some(c)) = (w.upgrade(), chip(&a, i)) else { return };
+        if c.icon.is_empty() {
+            return; // the chain root has no relation to act on
+        }
         MENU.set(usize::try_from(i).ok());
         let mut rows = Vec::new();
         if c.joint {
@@ -142,10 +164,10 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
 
 /// The `relation.*` menu actions, for the chip whose menu was opened last.
 pub fn run(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, id: &str) {
-    let Some(c) = MENU.take().and_then(|i| chips(&app.borrow().session.doc).into_iter().nth(i)) else { return };
+    let Some(c) = MENU.take().and_then(|i| chip(app, i as i32)) else { return };
     if id == "relation.select_bodies" {
         // shortcut: single selection only (no multi-select yet), so the parent node is not added.
-        select(ui, SelectionTarget::Node(c.node));
+        select(ui, app, SelectionTarget::Node(c.node));
         return;
     }
     let (command, label) = {
@@ -193,27 +215,31 @@ mod tests {
     }
 
     #[test]
-    fn joints_by_seq_then_constraints() {
+    fn chain_of_the_selection_only() {
         let mut doc = lab_core::sample::demo_document();
-        assert!(doc.nodes.len() >= 3);
+        assert!(doc.nodes.len() >= 4);
         let plane = Feature::Plane { origin: DVec3::ZERO, normal: DVec3::Z };
-        doc.nodes[0].attach = Attach::Constrained {
-            constraints: vec![Constraint {
-                kind: ConstraintKind::Mate,
-                child: plane.clone(),
-                parent: plane,
-                offset: 0.0,
-                angle: 0.0,
-                flip: false,
-                lock_rotation: false,
-            }],
+        let mate = Constraint {
+            kind: ConstraintKind::Mate,
+            child: plane.clone(),
+            parent: plane,
+            offset: 0.0,
+            angle: 0.0,
+            flip: false,
+            lock_rotation: false,
         };
-        doc.nodes[1].attach = joint(5);
-        doc.nodes[2].attach = joint(2);
-        let ids = [doc.nodes[2].id, doc.nodes[1].id, doc.nodes[0].id];
-        let got = chips(&doc);
-        assert_eq!(got.iter().map(|c| c.node).collect::<Vec<_>>(), ids);
-        assert!(got[0].label.ends_with("· Revolute"), "{}", got[0].label);
-        assert!(got[2].label.ends_with("· Mate") && !got[2].joint);
+        let ids: Vec<NodeId> = doc.nodes.iter().map(|n| n.id).collect();
+        // ids[0] ← ids[1] (constraint) ← ids[2] (joint); ids[3] stays free.
+        doc.nodes[1].parent = Parent::Node(ids[0]);
+        doc.nodes[1].attach = Attach::Constrained { constraints: vec![mate.clone(), Constraint { kind: ConstraintKind::Concentric, ..mate }] };
+        doc.nodes[2].parent = Parent::Node(ids[1]);
+        doc.nodes[2].attach = joint(5);
+        doc.nodes[3].attach = Attach::Free;
+        let got = chips(&doc, Some(SelectionTarget::Node(ids[2])));
+        assert_eq!(got.iter().map(|c| (c.node, c.depth)).collect::<Vec<_>>(), [(ids[0], 0), (ids[1], 1), (ids[2], 2)]);
+        assert_eq!(got[1].detail, "Mate, Concentric");
+        assert!(got[0].icon.is_empty() && got[2].joint);
+        assert!(chips(&doc, Some(SelectionTarget::Node(ids[3]))).is_empty());
+        assert!(chips(&doc, None).is_empty());
     }
 }

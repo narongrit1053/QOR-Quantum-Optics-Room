@@ -850,6 +850,9 @@ pub fn node_view(
                 fields.push(InspectorFieldData { label: label.into(), value: value.clone() });
             }
         }
+        if !def.meta.contains_key("url") && def.vendor.eq_ignore_ascii_case("thorlabs") && !def.part_number.is_empty() {
+            fields.push(InspectorFieldData { label: "Page".into(), value: thorlabs_page(&def.part_number) });
+        }
     }
 
     let mated = matches!(node.attach, Attach::Mate { .. });
@@ -914,6 +917,20 @@ pub fn node_view(
         edit_fields,
         set_rows: set_rows(doc, catalog, node, units),
     }
+}
+
+/// Thorlabs item page for a part imported without catalog links. The site writes '/' as '_'
+/// ("KM100CP/M" → item/KM100CP_M); folder imports spell the metric suffix "-M" and Thorlabs
+/// STEP files end in "-Step".
+fn thorlabs_page(part: &str) -> String {
+    // Older folder imports kept the file's "ThorLabs - " prefix in the part number.
+    let part = part.get(..11).filter(|p| p.eq_ignore_ascii_case("thorlabs - ")).map_or(part, |_| &part[11..]);
+    let part = part.trim_end_matches("-Step").trim_end_matches("-step");
+    let part = match part.strip_suffix("-M") {
+        Some(base) => format!("{base}_M"),
+        None => part.to_string(),
+    };
+    format!("https://www.thorlabs.com/item/{}", part.replace('/', "_"))
 }
 
 /// "base_diameter" -> "Base Diameter".
@@ -1199,6 +1216,16 @@ mod tests {
     use lab_core::glam::{DQuat, DVec3};
     use lab_core::model::{NodeId, PlatformId, Surface};
     use lab_core::outline::RectCorner;
+
+    #[test]
+    fn thorlabs_page_links() {
+        let page = |p| thorlabs_page(p).replace("https://www.thorlabs.com/item/", "");
+        assert_eq!(page("KM100CP-M"), "KM100CP_M");
+        assert_eq!(page("KM100CP/M"), "KM100CP_M");
+        assert_eq!(page("BE1-Step"), "BE1");
+        assert_eq!(page("ThorLabs - PH20-M"), "PH20_M");
+        assert_eq!(page("AC254-100-B"), "AC254-100-B");
+    }
 
     fn test_doc() -> Document {
         let mut doc = Document::new("My Project");

@@ -99,7 +99,9 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
             2 => SelectionTarget::Room,
             _ => return,
         };
-        select(&ui, &a, &m, Some(target));
+        // Clicking the selected row again clears the selection.
+        let target = (a.borrow().session.selection != Some(target)).then_some(target);
+        select(&ui, &a, &m, target);
     });
 
     // M9 E2: typed value during a drag; Enter applies it exactly and ends the drag.
@@ -219,7 +221,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
     ui.set_show_builtin_parts(app.settings.show_builtin_parts);
     ui_models::fill_presets(models, preset_rows(app.units()));
     ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &app.scene_collapsed));
-    crate::relations::fill(ui, &session.doc);
+    crate::relations::fill(ui, &session.doc, session.selection);
 }
 
 /// The inspector for the current selection, including every choice property.

@@ -101,7 +101,9 @@ pub(crate) fn pick(
         }
     }
     for &click in &clicks.0 {
-        selected = target_at(click, !*shift);
+        // Clicking the selected item again clears the selection.
+        let hit = target_at(click, !*shift);
+        selected = if hit.is_some() && hit == selected { None } else { hit };
     }
     let mut menu = None;
     for &click in &right_clicks.0 {
