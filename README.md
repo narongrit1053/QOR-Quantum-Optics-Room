@@ -61,7 +61,7 @@ The project menu (click the project name) has New, Open…, Open Demo, Save, Sav
 | `LABSETUP_TRACE=1` | Print frame-pacing timestamps to stderr |
 | `RUST_LOG=lab_viewport=debug` | Log every rendered viewport frame with its resolution |
 | `WGPU_POWER_PREF=low` | Use the integrated GPU (the default prefers a discrete one) |
-| `LABSETUP_AUTOSAVE_DIR` | Autosave folder (default `%LOCALAPPDATA%\LabSetuputosave`) |
+| `LABSETUP_AUTOSAVE_DIR` | Autosave folder (default `%LOCALAPPDATA%\LabSetup\autosave`) |
 | `LABSETUP_SETTINGS` | Settings file (default `%APPDATA%\LabSetup\settings.json`): display units, wall display, last folder |
 
 ## Command line

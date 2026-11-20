@@ -10,7 +10,7 @@ To use a catalog, copy it to `%APPDATA%\LabSetup\catalogs\` (the **Open catalogs
 
 - **Cancel** keeps the progress for up to 7 days. Press **Update catalog** again to resume. Progress is cached in `%LOCALAPPDATA%\LabSetup\catalog-update\`.
 - The update refuses a big drop: if a section comes back empty or with fewer than 70% of its last count, the old parts are kept.
-- Updated parts include thumbnail links. The window downloads thumbnails as they are shown and caches them in `%LOCALAPPDATA%\LabSetup	humbs\`. They are for your own viewing only.
+- Updated parts include thumbnail links. The window downloads thumbnails as they are shown and caches them in `%LOCALAPPDATA%\LabSetup\thumbs\`. They are for your own viewing only.
 - A JSON file's entry wins over an updated entry for the same part. A `thorlabs.json` you copied into the catalogs folder therefore overrides the update. The window then shows a hint naming the file; remove the file after your first update.
 
 At startup LabSetup imports the `*.json` files in the catalogs folder into a local database, `%LOCALAPPDATA%\LabSetup\catalog.sqlite`. The database is a cache you can delete: it costs one re-import, plus one update to get the updated Thorlabs parts back.
