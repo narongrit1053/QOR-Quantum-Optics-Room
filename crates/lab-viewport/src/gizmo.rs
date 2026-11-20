@@ -47,9 +47,10 @@ pub(crate) enum GizmoHandle {
 }
 
 /// Set while a pointer press belongs to the gizmo, so the camera neither orbits nor clicks.
-/// Set by `gizmo_input` on press, cleared by `handle_input` on release.
+/// Set by `gizmo_input` on press, cleared by `handle_input` on release. `1`: the press grabbed
+/// the selected part's body (not a handle), so a release without a drag is still a click.
 #[derive(Resource, Default)]
-pub(crate) struct GizmoCapture(pub bool);
+pub(crate) struct GizmoCapture(pub bool, pub bool);
 
 /// A drag in progress. Everything is captured at the press, so document updates sent back
 /// during the drag do not move the reference.
@@ -82,6 +83,8 @@ struct Gizmo {
     materials: Option<(Handle<StandardMaterial>, Handle<StandardMaterial>)>,
     /// Handle radius in render units, for the on-top outline.
     radius: f32,
+    /// A body drag not reported yet (`DragStarted` waits for the first move).
+    announce: bool,
 }
 
 /// Line gizmos drawn without depth test, so handles inside large parts stay visible (POLA-45).
@@ -578,8 +581,10 @@ fn gizmo_input(
                                 || (body.is_some() && picks.get(e).is_ok_and(|p| p.0 == SelectionTarget::Node(id)))
                         };
                         let settings = MeshRayCastSettings::default().with_filter(&filter);
+                        let mut via_body = false;
                         let grabbed = match ray_cast.cast_ray(ray, &settings).first() {
                             Some((entity, hit)) => {
+                                via_body = !handles_q.contains(*entity);
                                 handles_q.get(*entity).ok().copied().or(body).map(|h| (h, from_render(hit.point)))
                             }
                             None if available.contains(&GizmoHandle::Ring) => {
@@ -592,12 +597,15 @@ fn gizmo_input(
                         };
                         let Some((handle, grab)) = grabbed else { continue };
                         if let Some(drag) = Drag::new(doc, &catalog.0, node, handle, grab) {
-                            // A multi-DOF joint drag reports its unit once the DOF is picked.
-                            if !(handle == GizmoHandle::Joint && drag.dof.is_none()) {
+                            // A body press may be a plain click (deselect): it reports the drag,
+                            // and so shows the typed-value box, only once it moves. A multi-DOF
+                            // joint drag reports its unit once the DOF is picked.
+                            if !via_body && !(handle == GizmoHandle::Joint && drag.dof.is_none()) {
                                 events.send(ViewportEvent::DragStarted { id, unit: drag.unit() });
                             }
                             gizmo.drag = Some(drag);
-                            capture.0 = true;
+                            gizmo.announce = via_body;
+                            *capture = GizmoCapture(true, via_body);
                         }
                     }
                     ViewportInput::PointerMove { pos, mods } => {
@@ -623,12 +631,17 @@ fn gizmo_input(
                             let Some(drag) = gizmo.drag.as_mut() else { continue };
                             drag.dof = Some(i);
                             events.send(ViewportEvent::DragStarted { id, unit: drag.unit() });
+                            gizmo.announce = false;
                         }
+                        let announce = gizmo.announce;
                         let Some(drag) = &gizmo.drag else { continue };
                         let Some(result) = drag.update(doc, &catalog.0, render_ray(ray), mods.shift, mods.ctrl) else {
                             continue;
                         };
                         if drag.last.as_ref() != Some(&result) {
+                            if announce && !(drag.handle == GizmoHandle::Joint && drag.dof.is_none()) {
+                                events.send(ViewportEvent::DragStarted { id: drag.start.id, unit: drag.unit() });
+                            }
                             let (attach, position, rotation) = result.clone();
                             events.send(ViewportEvent::TransformRequested {
                                 id: drag.start.id,
@@ -641,6 +654,7 @@ fn gizmo_input(
                             if let Some(drag) = gizmo.drag.as_mut() {
                                 drag.last = Some(result);
                             }
+                            gizmo.announce = false;
                         }
                     }
                     ViewportInput::PointerUp { button: PointerButton::Left, .. } => {

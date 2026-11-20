@@ -368,8 +368,12 @@ pub(crate) fn handle_input(
                 ViewportInput::PointerUp { button, pos, .. } => {
                     pointer.position = Some(pos);
                     let press = pointer.press.take();
-                    if press.is_some_and(|p| p.gizmo) {
-                        capture.0 = false;
+                    if let Some(p) = press.filter(|p| p.gizmo) {
+                        // A press on the selected body without a drag is a click (it deselects).
+                        if capture.1 && p.button == button && button == PointerButton::Left && !p.dragging {
+                            clicks.0.push(pos);
+                        }
+                        *capture = GizmoCapture::default();
                     } else if let Some(press) = press
                         && press.button == button
                         && button == PointerButton::Left
