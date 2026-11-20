@@ -187,7 +187,7 @@ export component CatalogBook inherits Rectangle {
                 HorizontalLayout {
                     spacing: 6px;
                     Text {
-                        text: root.count;
+                        text: root.loading ? "" : root.count;
                         horizontal-stretch: 1;
                         color: Theme.text-tertiary;
                         font-size: Theme.font-caption;
@@ -196,6 +196,8 @@ export component CatalogBook inherits Rectangle {
                     PillButton { label: "List"; primary: !root.grid; clicked => { root.grid = false; } }
                     PillButton { label: "Grid"; primary: root.grid; clicked => { root.grid = true; } }
                     PillButton {
+                        // Fixed width: List and Grid must not shift when the label changes.
+                        width: 118px;
                         label: root.updating ? "Cancel" : "Update catalog";
                         enabled: !root.loading;
                         clicked => { root.cmd(root.updating ? "cancel-update" : "update", ""); }
