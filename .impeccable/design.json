@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-20T23:30:00Z",
+  "title": "Design System: LabSetup",
+  "extensions": {
+    "colorMeta": {
+      "ground": { "role": "neutral", "displayName": "Graphite Ground", "canonical": "#0c0d10", "tonalRamp": ["#08090b", "#0c0d10", "#121419", "#181b21", "#2b2f38", "#5c6170", "#a9aebb", "#eceef2"] },
+      "ground-2": { "role": "neutral", "displayName": "Lifted Graphite", "canonical": "#121419" },
+      "raise": { "role": "neutral", "displayName": "Raised Graphite", "canonical": "#181b21" },
+      "line": { "role": "neutral", "displayName": "Hairline", "canonical": "rgba(222, 228, 240, 0.09)" },
+      "line-strong": { "role": "neutral", "displayName": "Strong Hairline", "canonical": "rgba(222, 228, 240, 0.16)" },
+      "text": { "role": "neutral", "displayName": "Paper White", "canonical": "#eceef2" },
+      "text-2": { "role": "neutral", "displayName": "Muted Steel", "canonical": "#a9aebb" },
+      "text-3": { "role": "neutral", "displayName": "Quiet Steel", "canonical": "#8a90a0" },
+      "accent": { "role": "primary", "displayName": "Selection Blue", "canonical": "#0b66d6", "tonalRamp": ["#031a38", "#062e63", "#0a4a9c", "#0a5cc2", "#0b66d6", "#3a86e6", "#5fa8ff", "#cfe3ff"] },
+      "accent-hover": { "role": "primary", "displayName": "Pressed Selection Blue", "canonical": "#0a5cc2" },
+      "link": { "role": "primary", "displayName": "Signal Link Blue", "canonical": "#5fa8ff" },
+      "beam": { "role": "tertiary", "displayName": "Beam Pink", "canonical": "#ff4f9a", "tonalRamp": ["#3d0a20", "#6e1239", "#a31c55", "#d63677", "#ff4f9a", "#ff7ab3", "#ffa8cd", "#ffdbea"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Hero headline only." },
+      "headline": { "displayName": "Headline", "purpose": "One per section." },
+      "title": { "displayName": "Title", "purpose": "Feature-row headings." },
+      "body": { "displayName": "Body", "purpose": "Reading text, 46 to 70ch." },
+      "label": { "displayName": "Label", "purpose": "Meta lines, captions, footer, pill text." },
+      "code": { "displayName": "Code", "purpose": "Inline code chips only." }
+    },
+    "shadows": [
+      { "name": "window-float", "value": "0 0 0 1px rgba(0,0,0,0.6), 0 30px 80px -20px rgba(0,0,0,0.8), 0 10px 24px -8px rgba(0,0,0,0.6)", "purpose": "Every framed screenshot." },
+      { "name": "hero-float", "value": "0 0 0 1px rgba(0,0,0,0.6), 0 40px 100px -30px rgba(0,0,0,0.9), 0 12px 30px -10px rgba(0,0,0,0.7)", "purpose": "The hero window only." },
+      { "name": "thumb-float", "value": "0 18px 40px -16px rgba(0,0,0,0.7)", "purpose": "Secondary feature images." },
+      { "name": "button", "value": "0 1px 0 rgba(255,255,255,0.2) inset, 0 6px 16px -6px rgba(0,0,0,0.7), 0 1px 3px rgba(0,0,0,0.5)", "purpose": "Primary buttons at rest." },
+      { "name": "button-hover", "value": "0 1px 0 rgba(255,255,255,0.24) inset, 0 10px 22px -8px rgba(0,0,0,0.75), 0 1px 3px rgba(0,0,0,0.5)", "purpose": "Primary buttons on hover." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Expo-out for button lift and the hero rise." },
+      { "name": "state", "value": "0.2s", "purpose": "Color, background and shadow transitions." },
+      { "name": "hero-rise", "value": "1.1s, from opacity 0, translateY(28px) scale(0.985) blur(6px)", "purpose": "Hero window entrance; off under reduced motion." }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "860px" },
+      { "name": "phone", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The download action: hero, closing section.",
+      "html": "<a class=\"ds-btn\" href=\"#\"><svg class=\"ds-ico\" viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M10 3v10m0 0-4-4m4 4 4-4M4 16h12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>Download v0.0.5</a>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 9px; background: #0b66d6; color: #fff; font: 600 16px/1.6 Geist, 'Segoe UI', system-ui, sans-serif; text-decoration: none; padding: 13px 22px; border-radius: 11px; box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 6px 16px -6px rgba(0,0,0,0.7), 0 1px 3px rgba(0,0,0,0.5); transition: background 0.2s, transform 0.2s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s; } .ds-btn:hover { background: #0a5cc2; transform: translateY(-1px); box-shadow: 0 1px 0 rgba(255,255,255,0.24) inset, 0 10px 22px -8px rgba(0,0,0,0.75), 0 1px 3px rgba(0,0,0,0.5); } .ds-btn:active { transform: translateY(0); } .ds-btn:focus-visible { outline: 2px solid #5fa8ff; outline-offset: 3px; } .ds-ico { width: 18px; height: 18px; flex: none; }"
+    },
+    {
+      "name": "Small Button",
+      "kind": "button",
+      "refersTo": "button-small",
+      "description": "Download in the top bar.",
+      "html": "<a class=\"ds-btn-small\" href=\"#\">Download</a>",
+      "css": ".ds-btn-small { display: inline-flex; align-items: center; background: #0b66d6; color: #fff; font: 600 14px/1.6 Geist, 'Segoe UI', system-ui, sans-serif; text-decoration: none; padding: 7px 14px; border-radius: 9px; box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 1px 3px rgba(0,0,0,0.5); transition: background 0.2s; } .ds-btn-small:hover { background: #0a5cc2; } .ds-btn-small:focus-visible { outline: 2px solid #5fa8ff; outline-offset: 3px; }"
+    },
+    {
+      "name": "Top Bar",
+      "kind": "nav",
+      "refersTo": "top-bar",
+      "description": "Sticky translucent bar: wordmark, section links, Download.",
+      "html": "<header class=\"ds-bar\"><a class=\"ds-mark\" href=\"#\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"6\" width=\"19\" height=\"12\" rx=\"2.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"/><path d=\"M5 12h6.5l3-3.5H19\" fill=\"none\" stroke=\"#ff4f9a\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>LabSetup</a><nav><a href=\"#\">What’s new</a><a href=\"#\">Features</a><a href=\"#\">Samples</a></nav></header>",
+      "css": ".ds-bar { display: flex; align-items: center; gap: 28px; height: 60px; padding: 0 16px; background: rgba(12,13,16,0.78); backdrop-filter: saturate(160%) blur(14px); border-bottom: 1px solid rgba(222,228,240,0.09); font-family: Geist, 'Segoe UI', system-ui, sans-serif; } .ds-mark { display: inline-flex; align-items: center; gap: 9px; color: #eceef2; text-decoration: none; font-weight: 600; letter-spacing: -0.01em; } .ds-mark svg { width: 24px; height: 24px; color: #a9aebb; } .ds-bar nav { display: flex; gap: 24px; margin-left: auto; } .ds-bar nav a { color: #a9aebb; text-decoration: none; font-size: 15px; transition: color 0.2s; } .ds-bar nav a:hover { color: #eceef2; } .ds-bar a:focus-visible { outline: 2px solid #5fa8ff; outline-offset: 3px; border-radius: 6px; }"
+    },
+    {
+      "name": "Window Frame",
+      "kind": "card",
+      "refersTo": "window-frame",
+      "description": "A real app screenshot framed as a floating window.",
+      "html": "<figure class=\"ds-window\"><div class=\"ds-window-shot\"></div></figure>",
+      "css": ".ds-window { margin: 0; border-radius: 14px; overflow: hidden; background: #000; border: 1px solid rgba(222,228,240,0.16); box-shadow: 0 0 0 1px rgba(0,0,0,0.6), 0 30px 80px -20px rgba(0,0,0,0.8), 0 10px 24px -8px rgba(0,0,0,0.6); } .ds-window-shot { aspect-ratio: 16 / 10; background: linear-gradient(#181b21, #121419); }"
+    },
+    {
+      "name": "Change List",
+      "kind": "custom",
+      "description": "Release notes with blue dot markers and a bold lead phrase.",
+      "html": "<ul class=\"ds-changes\"><li><strong>Relationships tree.</strong> Select a part and the inspector lists only the parts it is linked to.</li><li><strong>Click again to deselect.</strong> Clicking a selected part clears the selection.</li></ul>",
+      "css": ".ds-changes { list-style: none; padding: 0; margin: 0; display: grid; gap: 18px; max-width: 70ch; font: 400 17px/1.6 Geist, 'Segoe UI', system-ui, sans-serif; } .ds-changes li { position: relative; padding-left: 22px; color: #a9aebb; } .ds-changes li::before { content: ''; position: absolute; left: 2px; top: 0.72em; width: 6px; height: 6px; border-radius: 50%; background: #0b66d6; } .ds-changes strong { color: #eceef2; font-weight: 600; }"
+    },
+    {
+      "name": "File List",
+      "kind": "custom",
+      "description": "Hairline-ruled downloadable sample files with descriptions.",
+      "html": "<ul class=\"ds-files\"><li><a href=\"#\"><svg class=\"ds-fico\" viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M6 2.8h5.5L15 6.3V17a.2.2 0 0 1-.2.2H6a.2.2 0 0 1-.2-.2V3a.2.2 0 0 1 .2-.2Zm5.2 0V6.6H15\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/></svg><span>hero-polarization-fiber.labsetup</span></a><span>Polarization and fiber-coupling table</span></li></ul>",
+      "css": ".ds-files { list-style: none; margin: 0; padding: 0; border-top: 1px solid rgba(222,228,240,0.09); font-family: Geist, 'Segoe UI', system-ui, sans-serif; } .ds-files li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 20px; padding: 16px 4px; border-bottom: 1px solid rgba(222,228,240,0.09); } .ds-files a { display: inline-flex; align-items: center; gap: 10px; color: #eceef2; text-decoration: none; font-weight: 500; } .ds-fico { width: 18px; height: 18px; color: #8a90a0; transition: color 0.2s; } .ds-files a:hover, .ds-files a:hover .ds-fico { color: #5fa8ff; } .ds-files li > span { color: #8a90a0; font-size: 15px; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "Early-preview notice with an amber status dot.",
+      "html": "<p class=\"ds-pill\"><span class=\"ds-dot\" aria-hidden=\"true\"></span>Early preview</p>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 9px; margin: 0; padding: 6px 14px; border: 1px solid rgba(222,228,240,0.16); border-radius: 999px; color: #a9aebb; font: 400 14px/1.6 Geist, 'Segoe UI', system-ui, sans-serif; } .ds-dot { width: 7px; height: 7px; border-radius: 50%; background: #f5b83d; box-shadow: 0 0 0 3px rgba(245,184,61,0.18); }"
+    },
+    {
+      "name": "Inline Code",
+      "kind": "chip",
+      "refersTo": "inline-code",
+      "description": "Commands and paths inside prose.",
+      "html": "<code class=\"ds-code\">labsetup-cli</code>",
+      "css": ".ds-code { font: 500 15px/1 'Cascadia Code', Consolas, monospace; background: #181b21; border: 1px solid rgba(222,228,240,0.09); padding: 0.12em 0.4em; border-radius: 5px; color: #d9dde6; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lit Workbench",
+    "overview": "A near-black, cool-tinted graphite room where the real app window is the only bright object, lit from behind by a soft blue falloff. The page is the category-standard dark product page, built to Raycast's level of finish: centered hero copy, a large framed screenshot, alternating feature rows, a quiet file list, and a download button reachable at every scroll depth. Nothing about the arrangement is novel; the craft is in the hairlines, the shadows under the windows, the restrained single accent, and type set tight at display sizes.\n\nDensity is calm and editorial: generous section padding, measured line lengths (46 to 76ch), and one family doing every job. Imagery is always the real application, framed as a window; the page never draws a mockup of the product.",
+    "keyCharacteristics": [
+      "One cool graphite ground with two tonal steps; depth comes from soft shadows under screenshot windows, not from cards.",
+      "One accent, the app's selection blue, deepened for white-text contrast on buttons.",
+      "Geist only, self-hosted, weight 400 to 600, negative tracking at display sizes.",
+      "Hairline dividers at 9% and 16% white separate sections and list rows.",
+      "Real app rasters in window frames carry all the visual weight."
+    ],
+    "rules": [
+      { "name": "The One Blue Rule", "body": "Selection Blue is the only filled color on the page. Every filled shape in it is a download action or a primary-list marker; nothing decorative is blue-filled.", "section": "colors" },
+      { "name": "The Beam Is Not A Brand Color Rule", "body": "Beam Pink appears only where it depicts the laser beam. Never use it for buttons, links, borders or highlights.", "section": "colors" },
+      { "name": "The One Family Rule", "body": "Geist is the only typeface for prose and headings; monospace appears only inside inline code.", "section": "typography" },
+      { "name": "The No Kicker Rule", "body": "Headings stand alone. No eyebrow labels, small-caps tags or section numbers above them.", "section": "typography" },
+      { "name": "The Only The Window Floats Rule", "body": "Shadows belong to screenshots and buttons. Text blocks, lists and sections stay flat on the ground and are separated by hairlines.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do show the real application, framed as a window with the Window float shadow.",
+      "Do keep Selection Blue for download actions and primary list markers only.",
+      "Do separate sections and rows with 1px hairlines (9% white; 16% on frames and pills).",
+      "Do keep a download button within reach: top bar, hero, and the closing section.",
+      "Do honor reduced motion: no smooth scroll, no hero rise."
+    ],
+    "donts": [
+      "Don't add cards, panels or shadows to text blocks; only screenshots and buttons float.",
+      "Don't use Beam Pink for anything but the beam.",
+      "Don't add a second typeface, eyebrow labels or section kickers.",
+      "Don't draw mockups or illustrations of the product in place of screenshots."
+    ]
+  }
+}
