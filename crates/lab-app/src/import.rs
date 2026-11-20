@@ -379,7 +379,7 @@ fn named_id(n: &Named) -> String {
 }
 
 /// One batch file; a catalog-book job has no file yet and downloads `item.step` first.
-type Job = (PathBuf, Named, Option<&'static BookItem>);
+type Job = (PathBuf, Named, Option<BookItem>);
 
 struct Batch {
     jobs: VecDeque<Job>,
@@ -437,7 +437,7 @@ fn start_batch_files(ui: &AppWindow, files: Vec<PathBuf>) {
 
 /// "Download & import list" (POLA-173): downloads and imports each catalog-book part, named
 /// from the book.
-pub fn start_book_batch(ui: &AppWindow, items: Vec<&'static BookItem>) {
+pub fn start_book_batch(ui: &AppWindow, items: Vec<BookItem>) {
     let jobs = items
         .into_iter()
         .map(|i| {
@@ -492,7 +492,7 @@ fn next_job(ui: &AppWindow) {
                 continue;
             }
             let of = format!("{} of {}: {}", batch.total - batch.jobs.len(), batch.total, named.part_number);
-            let meta = item.map_or_else(Vec::new, |i| {
+            let meta = item.as_ref().map_or_else(Vec::new, |i| {
                 [
                     ("description", Some(&i.description)),
                     ("url", Some(&i.url)),
@@ -508,7 +508,7 @@ fn next_job(ui: &AppWindow) {
                 vendor: named.vendor.clone(),
                 part_number: named.part_number.clone(),
                 name: named.name.clone(),
-                category: item.and_then(book_category).unwrap_or_else(|| named.category.to_string()),
+                category: item.as_ref().and_then(book_category).unwrap_or_else(|| named.category.to_string()),
                 finish_index: batch.finish_index,
                 opts: ImportOptions {
                     source_up: if batch.up == 0 { SourceUp::Y } else { SourceUp::Z },

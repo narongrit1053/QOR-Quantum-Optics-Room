@@ -26,7 +26,6 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
 /// Sent from the worker thread. `Notice` is shown until the next `Progress`; a cancelled update sends nothing.
-#[allow(dead_code)] // Task 6 wires the Catalog window to this module
 pub enum UpdateEvent {
     Progress { section: String, done: usize, total: usize },
     Notice(String),
@@ -35,7 +34,6 @@ pub enum UpdateEvent {
 }
 
 /// Starts the update on a background thread; false if this or another LabSetup process is already updating.
-#[allow(dead_code)]
 pub fn start(on_event: impl Fn(UpdateEvent) + Send + 'static) -> bool {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return false;
@@ -60,12 +58,10 @@ pub fn start(on_event: impl Fn(UpdateEvent) + Send + 'static) -> bool {
     true
 }
 
-#[allow(dead_code)]
 pub fn cancel() {
     CANCEL.store(true, Ordering::SeqCst);
 }
 
-#[allow(dead_code)]
 pub fn running() -> bool {
     RUNNING.load(Ordering::SeqCst)
 }

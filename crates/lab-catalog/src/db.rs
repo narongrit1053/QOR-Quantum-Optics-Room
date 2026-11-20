@@ -190,7 +190,7 @@ impl CatalogDb {
             let tx = conn.transaction()?;
             tx.execute("DELETE FROM items WHERE source = ?", [&source])?;
             {
-                // OR IGNORE: the first duplicate within a file wins, as `load_books` did.
+                // OR IGNORE: the first duplicate within a file wins.
                 let mut ins = tx.prepare(
                     "INSERT OR IGNORE INTO items(vendor, part, name, description, category_json, cat1, cat2, url, step, cad_pdf, image, source)
                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",

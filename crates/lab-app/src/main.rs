@@ -239,6 +239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     ui.run()?;
+    crate::catalog_book::stop_update();
     Ok(())
 }
 

@@ -54,6 +54,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
 
     crate::import::connect(ui, app, models);
     crate::catalog_book::connect(ui, app);
+    crate::catalog_book::startup_sync(ui);
     crate::palette::connect(ui, app, models);
     crate::settings_ui::connect(ui, app);
 

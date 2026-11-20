@@ -484,6 +484,10 @@ export component AppWindow inherits Window {
     in property <bool> catalog-listed;
     in property <[CatalogRow]> catalog-list;
     in property <bool> catalog-empty;
+    in property <bool> catalog-loading;
+    in property <bool> catalog-updating;
+    in property <string> catalog-update-status;
+    in property <string> catalog-hint;
     callback catalog-cmd(string /* verb */, string /* arg */);
 
     // Right edge of the sidebar: drags left of it are not over the viewport.
@@ -1583,6 +1587,10 @@ export component AppWindow inherits Window {
             listed: root.catalog-listed;
             list: root.catalog-list;
             empty: root.catalog-empty;
+            loading: root.catalog-loading;
+            updating: root.catalog-updating;
+            update-status: root.catalog-update-status;
+            hint: root.catalog-hint;
             cmd(verb, arg) => { root.catalog-cmd(verb, arg); }
         }
 

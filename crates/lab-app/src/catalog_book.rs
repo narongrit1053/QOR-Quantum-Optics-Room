@@ -1,20 +1,27 @@
-//! "Catalog…" (POLA-173, POLA-193): browse the user's catalog books, keep a pick list in
-//! `%APPDATA%\LabSetup\catalog-list.json`, and download & import the list in one batch.
+//! "Catalog…" (POLA-173, POLA-193): browse the catalog database (`lab_catalog::db`), keep a pick
+//! list in `%APPDATA%\LabSetup\catalog-list.json`, download & import the list in one batch, and
+//! run the in-app Thorlabs update (`catalog_update`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use lab_catalog::book::{self, BookItem};
+use lab_catalog::book::BookItem;
+use lab_catalog::db::CatalogDb;
 use lab_ui::{AppWindow, CatalogRow};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::app_state::AppState;
+use crate::catalog_update::{self, UpdateEvent, thousands};
 
 const MAX_ROWS: usize = 500;
+const DURATION_NOTE: &str = "A full update takes one to two hours.";
+const START_FAILED: &str =
+    "Update stopped: another LabSetup window is updating, or the update folder is not writable. Press Update to continue.";
 
 #[derive(Default)]
 struct State {
@@ -31,48 +38,30 @@ thread_local! {
     static THUMBS: RefCell<HashMap<String, slint::Image>> = RefCell::new(HashMap::new());
     /// Search debounce: restarted on every keystroke.
     static SEARCH_TIMER: slint::Timer = slint::Timer::default();
+    /// The UI thread's own connection; `None` until the startup sync is done (WAL lets it read
+    /// while the updater writes).
+    static DB: RefCell<Option<CatalogDb>> = const { RefCell::new(None) };
+    /// For refreshes that start outside `connect`'s callback (startup sync, update events).
+    static APP: RefCell<Option<Rc<RefCell<AppState>>>> = const { RefCell::new(None) };
+    /// Bumped on every Update and Cancel; events of an older update are ignored.
+    static UPDATE_GEN: Cell<u64> = const { Cell::new(0) };
+    /// Watches `catalog_update::running()` while an update runs (a panic sends no event).
+    static UPDATE_POLL: slint::Timer = slint::Timer::default();
+}
+
+/// `f` on the UI connection; the default (empty) result while the database is not ready.
+fn with_db<T: Default>(f: impl FnOnce(&CatalogDb) -> T) -> T {
+    DB.with(|d| d.borrow().as_ref().map(f).unwrap_or_default())
 }
 
 /// "All", then the distinct second-level categories, sorted.
 fn categories() -> Vec<String> {
-    let set: BTreeSet<&str> = book::books().iter().filter_map(|i| i.category.get(1)).map(String::as_str).collect();
-    std::iter::once("All").chain(set).map(String::from).collect()
-}
-
-/// The book items matching `query` (case-insensitive substring of part, name or description)
-/// in second-level category `category` (`None`: all).
-#[cfg_attr(not(test), allow(dead_code))] // the app searches through `search_book`
-pub fn filter<'a>(items: &'a [BookItem], query: &str, category: Option<&str>) -> Vec<&'a BookItem> {
-    filter_indexed(items, &items.iter().map(haystack).collect::<Vec<_>>(), query, category)
-}
-
-/// Part, name and description, lower-cased and joined by newlines (a trimmed query cannot span them).
-fn haystack(i: &BookItem) -> String {
-    format!("{}\n{}\n{}", i.part, i.name, i.description).to_lowercase()
-}
-
-/// `filter` with precomputed `haystacks` (one per item).
-fn filter_indexed<'a>(items: &'a [BookItem], haystacks: &[String], query: &str, category: Option<&str>) -> Vec<&'a BookItem> {
-    let query = query.trim().to_lowercase();
-    items
-        .iter()
-        .zip(haystacks)
-        .filter(|(i, _)| category.is_none_or(|c| i.category.get(1).is_some_and(|ic| ic == c)))
-        .filter(|(_, h)| query.is_empty() || h.contains(&query))
-        .map(|(i, _)| i)
-        .collect()
-}
-
-/// `filter` over the book, with its search index built once.
-fn search_book(query: &str, category: Option<&str>) -> Vec<&'static BookItem> {
-    static INDEX: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    let items = book::books();
-    filter_indexed(items, INDEX.get_or_init(|| items.iter().map(haystack).collect()), query, category)
+    std::iter::once("All".to_string()).chain(with_db(CatalogDb::categories)).collect()
 }
 
 // shortcut: items are keyed by part number alone, so two vendors sharing one show the first; key by (vendor, part) if that happens.
-fn find(part: &str) -> Option<&'static BookItem> {
-    book::books().iter().find(|i| i.part == part)
+fn find(part: &str) -> Option<BookItem> {
+    with_db(|db| db.find(part))
 }
 
 fn list_path() -> Option<PathBuf> {
@@ -173,7 +162,7 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Replaces the queue with the missing thumbnails of `items` (in order) and starts the single
 /// worker thread if it is not running; the worker exits when the queue is empty.
-fn fetch_thumbs(ui: slint::Weak<AppWindow>, items: &[&BookItem]) {
+fn fetch_thumbs(ui: slint::Weak<AppWindow>, items: &[BookItem]) {
     let failed = FAILED.lock().unwrap().clone();
     let mut jobs: Vec<_> = items
         .iter()
@@ -253,16 +242,15 @@ fn refresh(ui: &AppWindow, app: &AppState) {
         let library = in_library(app);
         let categories = categories();
         let category = categories.get(s.category).filter(|_| s.category > 0).map(String::as_str);
-        let hits = search_book(&s.query, category);
+        let (hits, total) = with_db(|db| db.search(&s.query, category, MAX_ROWS));
         let selected = |i: &BookItem| s.selected.as_deref() == Some(i.part.as_str());
-        let rows: Vec<CatalogRow> = hits.iter().take(MAX_ROWS).map(|i| row(i, &library, selected(i))).collect();
+        let rows: Vec<CatalogRow> = hits.iter().map(|i| row(i, &library, selected(i))).collect();
         ui.set_catalog_rows(ModelRc::new(VecModel::from(rows)));
-        fetch_thumbs(ui.as_weak(), &hits[..hits.len().min(MAX_ROWS)]);
+        fetch_thumbs(ui.as_weak(), &hits);
         ui.set_catalog_count(
-            if hits.len() > MAX_ROWS { format!("showing {MAX_ROWS} of {}", hits.len()) } else { format!("{} parts", hits.len()) }
-                .into(),
+            if total > MAX_ROWS { format!("showing {MAX_ROWS} of {}", thousands(total)) } else { format!("{} parts", thousands(total)) }.into(),
         );
-        let list: Vec<CatalogRow> = s.list.iter().filter_map(|p| find(p)).map(|i| row(i, &library, selected(i))).collect();
+        let list: Vec<CatalogRow> = s.list.iter().filter_map(|p| find(p)).map(|i| row(&i, &library, selected(&i))).collect();
         ui.set_catalog_list(ModelRc::new(VecModel::from(list)));
         detail(ui, &s);
     });
@@ -271,6 +259,7 @@ fn refresh(ui: &AppWindow, app: &AppState) {
 /// The detail pane for the selected part.
 fn detail(ui: &AppWindow, s: &State) {
     let item = s.selected.as_deref().and_then(find);
+    let item = item.as_ref();
     let text = |f: fn(&BookItem) -> Option<&String>| item.and_then(f).map_or_else(Default::default, |t| t.as_str().into());
     ui.set_catalog_part(text(|i| Some(&i.part)));
     ui.set_catalog_name(text(|i| Some(&i.name)));
@@ -304,11 +293,153 @@ pub fn open(ui: &AppWindow, app: &AppState) {
         // The search box opens empty, so the filter must too.
         s.query.clear();
     });
-    ui.set_catalog_categories(ModelRc::new(VecModel::from(categories().into_iter().map(Into::into).collect::<Vec<_>>())));
-    ui.set_catalog_empty(book::books().is_empty());
+    load_meta(ui);
     ui.set_catalog_category(STATE.with(|s| s.borrow().category) as i32);
     refresh(ui, app);
     ui.set_catalog_open(true);
+}
+
+/// Categories, the empty flag and the override hint, from the database.
+fn load_meta(ui: &AppWindow) {
+    ui.set_catalog_categories(ModelRc::new(VecModel::from(categories().into_iter().map(Into::into).collect::<Vec<_>>())));
+    let has_rows = with_db(|db| !db.is_empty());
+    ui.set_catalog_empty(!has_rows && !ui.get_catalog_updating());
+    let hint = with_db(CatalogDb::overrides).into_iter().next().map(|(file, n)| {
+        format!("{file} overrides {} updated Thorlabs parts. Remove it from the catalogs folder to use the update.", thousands(n))
+    });
+    ui.set_catalog_hint(hint.unwrap_or_default().into());
+}
+
+/// `Thorlabs parts updated <date> · A full update takes one to two hours.`
+fn idle_status() -> String {
+    let updated = with_db(CatalogDb::last_updated).map_or_else(
+        || "Thorlabs parts never updated".to_string(),
+        |t| {
+            let time = std::time::UNIX_EPOCH + Duration::from_secs(t.max(0) as u64);
+            let [year, month, day, ..] = crate::files::local_parts(time);
+            format!("Thorlabs parts updated {year:04}-{month:02}-{day:02}")
+        },
+    );
+    format!("{updated} · {DURATION_NOTE}")
+}
+
+/// Opens the database and imports changed catalog JSON files on a background thread, then gives
+/// the UI thread its own connection and shows the rows.
+pub fn startup_sync(ui: &AppWindow) {
+    ui.set_catalog_loading(true);
+    let w = ui.as_weak();
+    std::thread::spawn(move || {
+        let path = lab_catalog::catalog_db_path();
+        match path.as_deref().map(CatalogDb::open) {
+            Some(Ok(mut db)) => {
+                if let Some(dir) = lab_catalog::catalogs_dir() {
+                    for (file, error) in db.sync_json_dir(&dir).skipped {
+                        eprintln!("catalog {file} skipped: {error}");
+                    }
+                }
+            }
+            Some(Err(error)) => eprintln!("catalog database not opened: {error}"),
+            None => eprintln!("catalog database not opened: LOCALAPPDATA is not set"),
+        }
+        let _ = w.upgrade_in_event_loop(move |ui| {
+            let db = path.as_deref().and_then(|p| CatalogDb::open(p).inspect_err(|e| eprintln!("catalog database not opened: {e}")).ok());
+            DB.with(|d| *d.borrow_mut() = db);
+            ui.set_catalog_loading(false);
+            ui.set_catalog_update_status(idle_status().into());
+            show_db(&ui);
+        });
+    });
+}
+
+/// After the database changed: meta, and the rows if the window is open.
+fn show_db(ui: &AppWindow) {
+    load_meta(ui);
+    if ui.get_catalog_open()
+        && let Some(app) = APP.with(|a| a.borrow().clone())
+    {
+        refresh(ui, &app.borrow());
+    }
+}
+
+/// Ends the update state: the button turns back into Update and `status` is shown.
+fn update_ended(ui: &AppWindow, status: String) {
+    UPDATE_POLL.with(|t| t.stop());
+    ui.set_catalog_updating(false);
+    ui.set_catalog_update_status(status.into());
+    load_meta(ui);
+}
+
+fn stopped(reason: &str) -> String {
+    format!("Update stopped: {reason}. Press Update to continue.")
+}
+
+fn on_update_event(ui: &AppWindow, generation: u64, event: UpdateEvent) {
+    if UPDATE_GEN.with(Cell::get) != generation {
+        return; // an update the user cancelled
+    }
+    match event {
+        UpdateEvent::Progress { section, done, total } => ui
+            .set_catalog_update_status(format!("Updating Thorlabs: {section} {} / {}", thousands(done), thousands(total)).into()),
+        UpdateEvent::Notice(text) => ui.set_catalog_update_status(text.into()),
+        UpdateEvent::Finished(n) => {
+            eprintln!("catalog update: {n} Thorlabs parts stored");
+            update_ended(ui, idle_status());
+            show_db(ui);
+        }
+        UpdateEvent::Stopped(text) => update_ended(ui, text),
+    }
+}
+
+fn start_update(ui: &AppWindow) {
+    // A cancelled worker notices within a quarter second; give it that before starting a new one.
+    wait_until_stopped(Duration::from_secs(2));
+    let generation = UPDATE_GEN.with(|g| {
+        g.set(g.get() + 1);
+        g.get()
+    });
+    let w = ui.as_weak();
+    let started = catalog_update::start(move |event| {
+        let _ = w.upgrade_in_event_loop(move |ui| on_update_event(&ui, generation, event));
+    });
+    if !started {
+        return update_ended(ui, START_FAILED.into());
+    }
+    ui.set_catalog_updating(true);
+    ui.set_catalog_empty(false);
+    let w = ui.as_weak();
+    let misses = Cell::new(0);
+    UPDATE_POLL.with(|t| {
+        t.start(slint::TimerMode::Repeated, Duration::from_secs(1), move || {
+            // The worker clears `running()` just before its last event, so one miss may be that event in flight.
+            misses.set(if catalog_update::running() { 0 } else { misses.get() + 1 });
+            if misses.get() >= 2
+                && let Some(ui) = w.upgrade().filter(|_| UPDATE_GEN.with(Cell::get) == generation)
+            {
+                update_ended(&ui, stopped("the update ended unexpectedly"));
+            }
+        })
+    });
+}
+
+fn cancel_update(ui: &AppWindow) {
+    catalog_update::cancel();
+    UPDATE_GEN.with(|g| g.set(g.get() + 1));
+    update_ended(ui, stopped("cancelled"));
+}
+
+fn wait_until_stopped(limit: Duration) {
+    let end = Instant::now() + limit;
+    while catalog_update::running() && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// At quit: cancels a running update and waits up to 2 s, so its lock does not block the next launch.
+pub fn stop_update() {
+    if catalog_update::running() {
+        catalog_update::cancel();
+        wait_until_stopped(Duration::from_secs(2));
+    }
 }
 
 /// After a book batch: parts now in the library leave the list; failed ones stay.
@@ -325,6 +456,7 @@ pub fn after_import(ui: &AppWindow, app: &AppState) {
 }
 
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
+    APP.with(|a| *a.borrow_mut() = Some(app.clone()));
     let (w, a) = (ui.as_weak(), app.clone());
     ui.on_catalog_cmd(move |verb, arg| {
         let Some(ui) = w.upgrade() else { return };
@@ -357,6 +489,8 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
         match verb.as_str() {
             "link" => return open_url(&arg),
             "folder" => return open_catalogs_folder(),
+            "update" => return start_update(&ui),
+            "cancel-update" => return cancel_update(&ui),
             "close" => {
                 ui.set_catalog_open(false);
                 QUEUE.lock().unwrap().clear();
@@ -379,7 +513,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
             }
             "import" => {
                 let library = in_library(&a.borrow());
-                let items: Vec<&'static BookItem> = STATE.with(|s| {
+                let items: Vec<BookItem> = STATE.with(|s| {
                     s.borrow().list.iter().filter(|p| !library.contains(*p)).filter_map(|p| find(p)).collect()
                 });
                 if items.is_empty() {
@@ -397,39 +531,4 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
         }
         refresh(&ui, &a.borrow());
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn item(part: &str, name: &str, description: &str, category: &str) -> BookItem {
-        BookItem {
-            vendor: "Example Optics".into(),
-            part: part.into(),
-            name: name.into(),
-            description: description.into(),
-            category: vec!["Optomechanics".into(), category.into()],
-            url: format!("https://www.thorlabs.com/item/{part}"),
-            cad_pdf: None,
-            step: None,
-            image: None,
-        }
-    }
-
-    #[test]
-    fn catalog_book_filter() {
-        let items = [
-            item("KM100", "Kinematic Mirror Mount", "for Ø1\" Optics", "Mirror Mounts"),
-            item("SM1L05", "Lens Tube", "SM1 Lens Tube, 0.5\" Thread Depth", "Lens Tubes"),
-            item("TR50/M", "Post", "Ø12.7 mm Optical Post", "Posts"),
-        ];
-        let parts = |v: Vec<&BookItem>| v.iter().map(|i| i.part.clone()).collect::<Vec<_>>();
-        assert_eq!(parts(filter(&items, "km100", None)), ["KM100"]);
-        assert_eq!(parts(filter(&items, " LENS ", None)), ["SM1L05"]);
-        assert_eq!(parts(filter(&items, "optic", None)), ["KM100", "TR50/M"]);
-        assert_eq!(parts(filter(&items, "", Some("Posts"))), ["TR50/M"]);
-        assert_eq!(parts(filter(&items, "mount", Some("Posts"))), Vec::<String>::new());
-        assert_eq!(filter(&items, "", None).len(), 3);
-    }
 }
