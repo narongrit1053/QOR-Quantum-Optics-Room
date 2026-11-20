@@ -329,20 +329,26 @@ pub fn startup_sync(ui: &AppWindow) {
     ui.set_catalog_loading(true);
     let w = ui.as_weak();
     std::thread::spawn(move || {
-        let path = lab_catalog::catalog_db_path();
-        match path.as_deref().map(CatalogDb::open) {
+        // Opened here, not on the UI thread: `open` writes, and may wait on another process's swap.
+        let db = match lab_catalog::catalog_db_path().as_deref().map(CatalogDb::open) {
             Some(Ok(mut db)) => {
                 if let Some(dir) = lab_catalog::catalogs_dir() {
                     for (file, error) in db.sync_json_dir(&dir).skipped {
                         eprintln!("catalog {file} skipped: {error}");
                     }
                 }
+                Some(db)
             }
-            Some(Err(error)) => eprintln!("catalog database not opened: {error}"),
-            None => eprintln!("catalog database not opened: LOCALAPPDATA is not set"),
-        }
+            Some(Err(error)) => {
+                eprintln!("catalog database not opened: {error}");
+                None
+            }
+            None => {
+                eprintln!("catalog database not opened: LOCALAPPDATA is not set");
+                None
+            }
+        };
         let _ = w.upgrade_in_event_loop(move |ui| {
-            let db = path.as_deref().and_then(|p| CatalogDb::open(p).inspect_err(|e| eprintln!("catalog database not opened: {e}")).ok());
             DB.with(|d| *d.borrow_mut() = db);
             ui.set_catalog_loading(false);
             ui.set_catalog_update_status(idle_status().into());
@@ -375,6 +381,13 @@ fn stopped(reason: &str) -> String {
 
 fn on_update_event(ui: &AppWindow, generation: u64, event: UpdateEvent) {
     if UPDATE_GEN.with(Cell::get) != generation {
+        // A cancel that came too late: the swap is done, so show its rows (unless a new update owns the status).
+        if let UpdateEvent::Finished(_) = event {
+            if !ui.get_catalog_updating() {
+                ui.set_catalog_update_status(idle_status().into());
+            }
+            show_db(ui);
+        }
         return; // an update the user cancelled
     }
     match event {
@@ -512,6 +525,11 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
                 return;
             }
             "import" => {
+                // Its Thorlabs requests would break the updater's one-request-per-30-s gap.
+                if catalog_update::running() {
+                    ui.set_catalog_update_status("Download & import is paused while the catalog updates.".into());
+                    return;
+                }
                 let library = in_library(&a.borrow());
                 let items: Vec<BookItem> = STATE.with(|s| {
                     s.borrow().list.iter().filter(|p| !library.contains(*p)).filter_map(|p| find(p)).collect()

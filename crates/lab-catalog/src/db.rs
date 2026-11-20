@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS items(
     step TEXT, cad_pdf TEXT, image TEXT, source TEXT NOT NULL, winner INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(vendor, part, source));
 CREATE INDEX IF NOT EXISTS items_winner_cat2 ON items(winner, cat2);
+CREATE INDEX IF NOT EXISTS items_part ON items(part, winner);
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
     part, name, description, content='items', content_rowid='rowid', tokenize='trigram');
 CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
@@ -497,6 +498,18 @@ mod tests {
         db.recompute_winners().unwrap();
         assert_eq!(db.find("EX-KM1").unwrap().name, "From JSON");
         assert_eq!(db.search("", None, 500).1, 1);
+    }
+
+    #[test]
+    fn find_uses_the_part_index_and_returns_the_winner() {
+        let (_d, db) = synced("find-index", &[("b.json", &book(&[("EX-KM1", "From B")])), ("a.json", &book(&[("EX-KM1", "From A")]))]);
+        let plan: String = db
+            .conn
+            .query_row("EXPLAIN QUERY PLAN SELECT part FROM items WHERE winner = 1 AND part = 'EX-KM1'", [], |r| r.get(3))
+            .unwrap();
+        assert!(plan.contains("items_part"), "{plan}");
+        assert_eq!(db.find("EX-KM1").unwrap().name, "From A");
+        assert!(db.find("EX-NONE").is_none());
     }
 
     #[test]

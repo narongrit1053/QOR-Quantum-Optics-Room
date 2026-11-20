@@ -370,7 +370,7 @@ export component CatalogBook inherits Rectangle {
                         PillButton {
                             label: "Download & import list";
                             primary: true;
-                            enabled: root.list.length > 0;
+                            enabled: root.list.length > 0 && !root.updating;
                             clicked => { root.cmd("import", ""); }
                         }
                     }

@@ -1,6 +1,6 @@
 # Catalog format
 
-LabSetup ships **no vendor catalog data**. The **Catalog…** window (File menu, start page, library menu) lists only the catalogs you add yourself: JSON files you write by hand or generate with an AI assistant.
+LabSetup ships **no vendor catalog data**. The **Catalog…** window (File menu, start page, library menu) lists the catalogs you add yourself (JSON files you write by hand or generate with an AI assistant) and, after **Update catalog**, the Thorlabs parts it fetched.
 
 ## Where the file goes
 
