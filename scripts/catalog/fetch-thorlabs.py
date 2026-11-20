@@ -3,7 +3,7 @@
     python scripts/catalog/fetch-thorlabs.py                      # the default sections below
     python scripts/catalog/fetch-thorlabs.py --section "Fiber"    # one or more sections of your own
 
-Each request returns 200 items with breadcrumb, title and CAD links, one request every 30 s
+Each request returns 200 items with breadcrumb, title, CAD links and a thumbnail link, one request every 30 s
 (thorlabs.com robots.txt Crawl-delay). Raw pages are cached in catalog/.cache, so an interrupted run
 resumes where it stopped. The search caps at 10,000 hits; for a bigger section every second-level
 category is searched too. Writes catalog/thorlabs.json. For your own use only: see catalog/README.md.
@@ -15,7 +15,9 @@ SECTIONS = ["Optomechanical Components", "Fiber", "Optical Elements"]
 EXCLUDE = ["Enclosure Systems", "Instrumentation Shelves", "Optomechanics Kits", "Optomechanics Capabilities"]
 PAGE, CAP, DELAY = 200, 10000, 30
 QUERY = """query($q:String,$n:Int,$a:String){ products(storeId:"Thorlabs-Website", cultureName:"en-US",
- query:$q, first:$n, after:$a){ totalCount items { code descriptions { content reviewType } assets { name url group } } } }"""
+ query:$q, first:$n, after:$a){ totalCount items { code descriptions { content reviewType } assets { name url group }
+ imgSrc images { url name } } } }"""
+IMAGE_EXT = re.compile(r"\.(jpe?g|png|webp)$", re.I)
 _last = [0.0]
 
 
@@ -48,6 +50,28 @@ def strip(s):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", s or ""))).strip()
 
 
+def is_image(url):
+    return bool(IMAGE_EXT.search(re.split(r"[?#]", url or "")[0]))
+
+
+def pick_image(it):
+    """A thumb/small named image, else imgSrc, else the first image file (same rule as the app).
+
+    >>> pick_image({"images": [{"url": "a.png", "name": "big.png"}, {"url": "b.jpg", "name": "x_Thumb.jpg"}]})
+    'b.jpg'
+    >>> pick_image({"imgSrc": "s.webp?v=1", "images": [{"url": "a.png", "name": "big.png"}]})
+    's.webp?v=1'
+    >>> pick_image({"imgSrc": "s.svg", "images": [{"url": "doc.pdf", "name": "d"}, {"url": "a.png", "name": "big"}]})
+    'a.png'
+    >>> pick_image({}) is None
+    True
+    """
+    images = [(i["url"], (i.get("name") or "").lower()) for i in it.get("images") or [] if i.get("url")]
+    thumb = next((u for u, n in images if ("thumb" in n or "small" in n) and is_image(n)), None)
+    src = it.get("imgSrc") if is_image(it.get("imgSrc")) else None
+    return thumb or src or next((u for u, _ in images if is_image(u)), None)
+
+
 def to_item(it, section, exclude):
     """Catalog entry for one search hit, or None when it is outside `section` or in an excluded category."""
     d = {x["reviewType"]: x["content"] for x in it.get("descriptions") or [] if x.get("content")}
@@ -70,6 +94,9 @@ def to_item(it, section, exclude):
         e["step"] = step
     if pdf:
         e["cad_pdf"] = pdf
+    image = pick_image(it)
+    if image:
+        e["image"] = image
     return e
 
 
@@ -102,7 +129,7 @@ def main():
     ap.add_argument("--exclude", action="append", help=f"category to leave out (default: {', '.join(EXCLUDE)})")
     ap.add_argument("--out", default=str(ROOT / "thorlabs.json"))
     a = ap.parse_args()
-    cache = ROOT / ".cache"
+    cache = ROOT / ".cache" / "v2"  # v2: pages carry image fields; older cached pages don't
     cache.mkdir(parents=True, exist_ok=True)
     items = {}
     for s in a.section or SECTIONS:
