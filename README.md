@@ -2,7 +2,7 @@
 
 An offline, native Windows app for designing quantum-optics lab setups: optical tables and custom platforms, Thorlabs-style mounting hardware and lasers, shown in 3D and as a top view.
 
-Rust, with a [Slint](https://slint.dev) UI and a [Bevy](https://bevy.org) 3D viewport that share one GPU device. No web view, no network access, and no rendering while nothing changes.
+Rust, with a [Slint](https://slint.dev) UI and a [Bevy](https://bevy.org) 3D viewport that share one GPU device. No web view, no networking code linked in, and no rendering while nothing changes. The app goes online only through Windows' `curl.exe`, when you download STEP files or thumbnails or press **Update catalog**.
 
 The design, decisions and measurements are in [docs/DESIGN.md](docs/DESIGN.md).
 
