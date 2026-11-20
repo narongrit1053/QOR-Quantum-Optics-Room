@@ -7,6 +7,7 @@
 
 pub mod book;
 pub mod db;
+pub mod thorlabs;
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
