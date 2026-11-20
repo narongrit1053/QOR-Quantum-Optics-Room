@@ -1,2 +1,3 @@
 # Vendor catalog data is for personal use only; never commit it.
 *.json
+.cache/

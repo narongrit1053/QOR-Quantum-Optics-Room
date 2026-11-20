@@ -80,4 +80,4 @@ Check the links before you rely on them: assistants can invent URLs.
 
 You are responsible for respecting each vendor's terms of use and copyright. LabSetup ships no vendor data; a catalog you make is for your own use.
 
-- **Thorlabs:** `url` is `https://www.thorlabs.com/item/<part>`. STEP and CAD PDF files are download buttons on the product page, not links, so leave `step` and `cad_pdf` out and import the STEP files you download yourself. Site rules and a ready Thorlabs prompt are in [catalog/README.md](../catalog/README.md).
+- **Thorlabs:** `url` is `https://www.thorlabs.com/item/<part>`. [scripts/catalog/fetch-thorlabs.py](../scripts/catalog/fetch-thorlabs.py) builds a whole catalog, with `step` and `cad_pdf` links, from the store search; site rules and usage are in [catalog/README.md](../catalog/README.md).
