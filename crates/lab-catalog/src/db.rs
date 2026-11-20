@@ -45,6 +45,27 @@ pub struct DropRefused {
     pub last: usize,
 }
 
+#[derive(Debug)]
+pub enum UpdateError {
+    Drop(DropRefused),
+    Db(rusqlite::Error),
+}
+
+impl From<rusqlite::Error> for UpdateError {
+    fn from(e: rusqlite::Error) -> Self {
+        UpdateError::Db(e)
+    }
+}
+
+impl std::fmt::Display for UpdateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpdateError::Drop(d) => write!(f, "{} returned {} parts, last time {}", d.section, d.got, d.last),
+            UpdateError::Db(e) => e.fmt(f),
+        }
+    }
+}
+
 const COLUMNS: &str = "vendor, part, name, description, category_json, url, step, cad_pdf, image";
 
 pub struct CatalogDb {
@@ -277,20 +298,18 @@ impl CatalogDb {
         self.meta_get("updated")?.parse().ok()
     }
 
-    pub fn stage_begin(&mut self) {
-        self.conn.execute("DELETE FROM staging", []).ok();
+    pub fn stage_begin(&mut self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM staging", []).map(|_| ())
     }
 
     /// Stages items of `section`; the first item per (vendor, part) wins.
-    pub fn stage_insert(&mut self, section: &str, items: &[BookItem]) {
-        let Ok(tx) = self.conn.transaction() else { return };
+    pub fn stage_insert(&mut self, section: &str, items: &[BookItem]) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
         {
-            let Ok(mut ins) = tx.prepare(
+            let mut ins = tx.prepare(
                 "INSERT OR IGNORE INTO staging(vendor, part, section, name, description, category_json, cat1, cat2, url, step, cad_pdf, image)
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            ) else {
-                return;
-            };
+            )?;
             for i in items {
                 let cat = |n: usize| i.category.get(n).map_or("", String::as_str);
                 ins.execute(params![
@@ -306,55 +325,52 @@ impl CatalogDb {
                     i.step,
                     i.cad_pdf,
                     i.image
-                ])
-                .ok();
+                ])?;
             }
         }
-        tx.commit().ok();
+        tx.commit()
     }
 
-    /// Swaps the staged items in for the `UPDATE_SOURCE` rows in one transaction and returns their
-    /// count, unless a section is empty or under 70% of its last stored count. Staging is cleared
-    /// either way. A database error also refuses the swap (section names the error) and keeps the
-    /// old rows.
-    pub fn finish_update(&mut self, sections: &[&str], now_unix: i64) -> Result<usize, DropRefused> {
+    /// Swaps the staged items of `sections` in for the `UPDATE_SOURCE` rows in one transaction and
+    /// returns their count, unless a section is empty or under 70% of its last stored count. Staging
+    /// is cleared either way; on any error the old rows are kept.
+    pub fn finish_update(&mut self, sections: &[&str], now_unix: i64) -> Result<usize, UpdateError> {
         let result = self.swap_staged(sections, now_unix);
-        self.stage_begin();
+        let _ = self.stage_begin(); // already cleared on success; a refusal or error must not leave rows behind
         result
     }
 
-    fn swap_staged(&mut self, sections: &[&str], now_unix: i64) -> Result<usize, DropRefused> {
-        let db_err = |e: rusqlite::Error| DropRefused { section: format!("database error: {e}"), got: 0, last: 0 };
+    fn swap_staged(&mut self, sections: &[&str], now_unix: i64) -> Result<usize, UpdateError> {
         let mut counts = Vec::new();
         for s in sections {
             let got = self
                 .conn
-                .query_row("SELECT count(*) FROM staging WHERE section = ?", [s], |r| r.get::<_, i64>(0))
-                .map_err(db_err)? as usize;
+                .query_row("SELECT count(*) FROM staging WHERE section = ?", [s], |r| r.get::<_, i64>(0))? as usize;
             let last = self.meta_get(&format!("count:{s}")).and_then(|v| v.parse::<usize>().ok());
             if got == 0 || last.is_some_and(|l| got * 10 < l * 7) {
-                return Err(DropRefused { section: (*s).to_owned(), got, last: last.unwrap_or(0) });
+                return Err(UpdateError::Drop(DropRefused { section: (*s).to_owned(), got, last: last.unwrap_or(0) }));
             }
             counts.push((*s, got));
         }
-        let write = |conn: &mut Connection| -> rusqlite::Result<usize> {
-            let tx = conn.transaction()?;
-            tx.execute("DELETE FROM items WHERE source = ?", [UPDATE_SOURCE])?;
-            let n = tx.execute(
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM items WHERE source = ?", [UPDATE_SOURCE])?;
+        let marks = vec!["?"; sections.len()].join(",");
+        let n = tx.execute(
+            &format!(
                 "INSERT INTO items(vendor, part, name, description, category_json, cat1, cat2, url, step, cad_pdf, image, source)
-                 SELECT vendor, part, name, description, category_json, cat1, cat2, url, step, cad_pdf, image, ? FROM staging",
-                [UPDATE_SOURCE],
-            )?;
-            for (s, got) in &counts {
-                tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)", [format!("count:{s}"), got.to_string()])?;
-            }
-            tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('updated', ?)", [now_unix.to_string()])?;
-            tx.execute("DELETE FROM staging", [])?;
-            Self::recompute_winners_in(&tx)?;
-            tx.commit()?;
-            Ok(n)
-        };
-        write(&mut self.conn).map_err(db_err)
+                 SELECT vendor, part, name, description, category_json, cat1, cat2, url, step, cad_pdf, image, ?
+                 FROM staging WHERE section IN ({marks})"
+            ),
+            params_from_iter(std::iter::once(UPDATE_SOURCE).chain(sections.iter().copied())),
+        )?;
+        for (s, got) in &counts {
+            tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)", [format!("count:{s}"), got.to_string()])?;
+        }
+        tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('updated', ?)", [now_unix.to_string()])?;
+        tx.execute("DELETE FROM staging", [])?;
+        Self::recompute_winners_in(&tx)?;
+        tx.commit()?;
+        Ok(n)
     }
 
     /// JSON files whose winning rows shadow updated Thorlabs rows, with how many.
@@ -548,15 +564,15 @@ mod tests {
                 image: None,
             })
             .collect();
-        db.stage_insert(section, &items);
+        db.stage_insert(section, &items).unwrap();
     }
 
     fn many(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("EX-{i}")).collect()
     }
 
-    fn run_update(db: &mut CatalogDb, parts: &[String], now: i64) -> Result<usize, DropRefused> {
-        db.stage_begin();
+    fn run_update(db: &mut CatalogDb, parts: &[String], now: i64) -> Result<usize, UpdateError> {
+        db.stage_begin().unwrap();
         staged(db, "Fiber", &parts.iter().map(String::as_str).collect::<Vec<_>>());
         db.finish_update(&["Fiber"], now)
     }
@@ -564,20 +580,18 @@ mod tests {
     #[test]
     fn first_update_only_refuses_empty() {
         let mut db = CatalogDb::open_in_memory().unwrap();
-        db.stage_begin();
+        db.stage_begin().unwrap();
         assert!(db.finish_update(&["Fiber"], 1).is_err());
-        assert_eq!(run_update(&mut db, &many(1), 1), Ok(1));
+        assert_eq!(run_update(&mut db, &many(1), 1).unwrap(), 1);
     }
 
     #[test]
     fn drop_below_70_percent_is_refused() {
         let mut db = CatalogDb::open_in_memory().unwrap();
         run_update(&mut db, &many(100), 1).unwrap();
-        assert_eq!(
-            run_update(&mut db, &many(69), 2),
-            Err(DropRefused { section: "Fiber".into(), got: 69, last: 100 })
-        );
-        assert_eq!(run_update(&mut db, &many(70), 3), Ok(70));
+        let err = run_update(&mut db, &many(69), 2).unwrap_err();
+        assert!(matches!(&err, UpdateError::Drop(d) if *d == DropRefused { section: "Fiber".into(), got: 69, last: 100 }));
+        assert_eq!(run_update(&mut db, &many(70), 3).unwrap(), 70);
     }
 
     #[test]
@@ -587,7 +601,7 @@ mod tests {
         assert!(run_update(&mut db, &many(2), 2).is_err());
         assert_eq!(db.search("", None, 500).1, 10);
         assert_eq!(db.last_updated(), Some(1));
-        db.stage_begin();
+        db.stage_begin().unwrap();
         assert!(db.finish_update(&["Fiber"], 3).is_err()); // staging was cleared: nothing carried over
     }
 
@@ -609,5 +623,17 @@ mod tests {
         let (rows, total) = db.search("ex-km1", None, 10);
         assert_eq!((total, rows[0].name.as_str()), (1, "From JSON"));
         assert_eq!(db.overrides(), [("catalog-example.json".to_owned(), 1)]);
+    }
+
+    #[test]
+    fn only_listed_sections_are_swapped_and_db_errors_are_not_drops() {
+        let mut db = CatalogDb::open_in_memory().unwrap();
+        db.stage_begin().unwrap();
+        staged(&mut db, "Fiber", &["EX-F"]);
+        staged(&mut db, "Enclosure Systems", &["EX-E"]);
+        assert_eq!(db.finish_update(&["Fiber"], 1).unwrap(), 1);
+        assert_eq!(db.search("", None, 10).1, 1);
+        db.conn.execute("DROP TABLE staging", []).unwrap();
+        assert!(matches!(db.finish_update(&["Fiber"], 2), Err(UpdateError::Db(_))));
     }
 }
