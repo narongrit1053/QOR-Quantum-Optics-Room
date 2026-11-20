@@ -19,7 +19,7 @@ At startup LabSetup imports the `*.json` files in the catalogs folder into a loc
 
 The command-line alternative to **Update catalog**.
 
-[scripts/catalog/fetch-thorlabs.py](../scripts/catalog/fetch-thorlabs.py) builds `catalog/thorlabs.json` from the thorlabs.com store search. Each request returns 200 items with part number, title, category path and STEP / CAD PDF links, so a few thousand items take minutes, not days.
+[scripts/catalog/fetch-thorlabs.py](../scripts/catalog/fetch-thorlabs.py) builds `catalog/thorlabs.json` from the thorlabs.com store search. Each request returns 200 items with part number, title, category path, STEP / CAD PDF links and a thumbnail link (`image`), so a few thousand items take minutes, not days.
 
 ```powershell
 python scripts/catalog/fetch-thorlabs.py
@@ -35,7 +35,7 @@ How it works:
 
 - It searches the store for the section name and keeps hits whose breadcrumb contains that section. The search stops at 10,000 hits, so for a bigger section it also searches each second-level category it found.
 - `category` runs from the section down, e.g. `["Fiber", "Optical Fiber & Fiber Patch Cables", "Polarizing Optical Fiber"]`. The second entry is what the Catalog window filters on.
-- Raw pages are cached in `catalog/.cache/`. If a run is interrupted, run it again: cached pages are not fetched again. Delete the folder to get fresh data.
+- Raw pages are cached in `catalog/.cache/v2/` (pages cached by older versions of the script, directly in `catalog/.cache/`, have no image fields and are not reused). If a run is interrupted, run it again: cached pages are not fetched again. Delete the folder to get fresh data.
 - Expect about 30 s per 200 items: roughly 25 min for Fiber (about 9,300 search hits), longer for Optical Elements.
 
 ## Thorlabs: what is allowed
