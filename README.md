@@ -10,6 +10,7 @@ The design, decisions and measurements are in [docs/DESIGN.md](docs/DESIGN.md).
 
 Milestones M1-M3 (core, platforms, library and placement, views) are built; M4 vendor import is in progress (see [docs/DESIGN.md](docs/DESIGN.md) §11).
 LabSetup ships no vendor catalog: bring your own as a JSON file, written by hand, with an AI assistant, or for Thorlabs with [scripts/catalog/fetch-thorlabs.py](scripts/catalog/fetch-thorlabs.py), in the format in [docs/CATALOG-FORMAT.md](docs/CATALOG-FORMAT.md).
+The Catalog window's **Update catalog** button fetches the Thorlabs parts in the background (one request per 30 s, one to two hours); see [catalog/README.md](catalog/README.md).
 
 ## Build and run
 

@@ -4,7 +4,7 @@ LabSetup ships **no vendor catalog data**. The **Catalog…** window (File menu,
 
 ## Where the file goes
 
-Put each catalog in `%APPDATA%\LabSetup\catalogs\` as a `.json` file (any name). The **Open catalogs folder** button in the Catalog window creates and opens that folder. LabSetup reads every `*.json` there when the Catalog window is first opened in a session; restart LabSetup after adding a file. A file that is not valid JSON in this format is skipped (the reason is printed to the console), and the other files still load. The same `(vendor, part)` in several files is listed once.
+Put each catalog in `%APPDATA%\LabSetup\catalogs\` as a `.json` file (any name). The **Open catalogs folder** button in the Catalog window creates and opens that folder. At startup LabSetup imports every `*.json` there into a local database (`%LOCALAPPDATA%\LabSetup\catalog.sqlite`) on a background thread. Only changed files are re-imported, and the parts of removed files are dropped. Changes are picked up on the next start, so restart LabSetup after adding or changing a file. A file that is not valid JSON in this format is skipped (the reason is printed to the console), and the other files still load. The same `(vendor, part)` in several files is listed once.
 
 ## Schema
 
