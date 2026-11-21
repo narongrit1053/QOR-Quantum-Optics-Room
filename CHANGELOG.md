@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.7
 
 - **Report a bug.** A bug button at the bottom right of the 3D view opens a new GitHub issue with the app version filled in.
 - **Updates from inside the app.** LabSetup checks GitHub for a newer release once a day and shows an *Update* button at the top right. Click it to read what's new and install it. Turn the daily check off in the command palette (*Automatic Update Checks*), or check now with *Check for Updates*.
