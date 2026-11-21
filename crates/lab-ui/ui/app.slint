@@ -8,7 +8,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
-import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
@@ -21,6 +21,7 @@ import { WizardPanel } from "wizard.slint";
 import { CommandPalette } from "palette.slint";
 import { LibraryMenu } from "library_menu.slint";
 import { ShortcutSheet } from "shortcuts.slint";
+import { ChangelogSheet } from "changelog.slint";
 import { StartPage, StartEntry } from "start_page.slint";
 import { ExportSheet } from "export.slint";
 import { SettingsSheet } from "settings.slint";
@@ -31,7 +32,7 @@ import { ConstrainPanel } from "constrain_panel.slint";
 import { RelationChip } from "relations_bar.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 export { RelationChip } from "relations_bar.slint";
@@ -370,6 +371,13 @@ export component AppWindow inherits Window {
     in property <string> start-error;
     in-out property <bool> shortcuts-open;
     in property <[PaletteItem]> shortcut-items;
+    // What's new / update prompt (update.rs). `update-version`: a newer release, "" if none.
+    in-out property <bool> changelog-open;
+    in property <string> changelog-title;
+    in property <[ChangelogLine]> changelog-lines;
+    in property <string> changelog-button;
+    in property <bool> changelog-busy;
+    in property <string> update-version;
     // Settings sheet (POLA-155): saved choices as indices (see settings.slint) and GPU rows.
     in-out property <bool> settings-open;
     in property <int> settings-quality;
@@ -505,7 +513,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.settings-open || root.library-open || root.import-step != 0 || root.catalog-open;
+    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.changelog-open || root.settings-open || root.library-open || root.import-step != 0 || root.catalog-open;
     changed shortcuts-open => {
         if (!root.shortcuts-open) {
             EditState.focus-viewport += 1;
@@ -1275,6 +1283,32 @@ export component AppWindow inherits Window {
             home => { root.view-cube-home(); }
         }
 
+        // Pre-release bug report: bottom-right of the viewport, opens a new GitHub issue.
+        Rectangle {
+            x: (root.wizard-open ? wizard-panel.x : inspector-panel.shown ? inspector-panel.x : root.width) - self.width - Theme.inset;
+            y: root.height - self.height - 18px;
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: bug-touch.has-hover ? Theme.control-hover : Theme.panel-bg;
+            border-width: Theme.border-width;
+            border-color: Theme.panel-border;
+            accessible-role: button;
+            accessible-label: "Report a bug";
+            accessible-action-default => { root.action("bug.report"); }
+            Icon {
+                name: "bug";
+                width: 20px;
+                height: 20px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+            bug-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.action("bug.report"); }
+            }
+        }
+
         // M9 E. The joint being placed: left of the inspector, below the view cube.
         if root.joint-editing: JointPanel {
             x: (root.wizard-open ? wizard-panel.x : inspector-panel.shown ? inspector-panel.x : root.width) - self.width - Theme.inset;
@@ -1339,6 +1373,14 @@ export component AppWindow inherits Window {
                     label: "Labels";
                     active: root.show-labels;
                     clicked => { root.show-labels = !root.show-labels; }
+                }
+            }
+            if root.update-version != "": VerticalLayout {
+                alignment: center;
+                PillButton {
+                    label: "Update to v" + root.update-version;
+                    primary: true;
+                    clicked => { root.action("update.show"); }
                 }
             }
             VerticalLayout {
@@ -1633,6 +1675,18 @@ export component AppWindow inherits Window {
             open: root.shortcuts-open;
             items: root.shortcut-items;
             close => { root.shortcuts-open = false; }
+        }
+
+        ChangelogSheet {
+            width: root.width;
+            height: root.height;
+            open: root.changelog-open;
+            title: root.changelog-title;
+            lines: root.changelog-lines;
+            button: root.changelog-button;
+            busy: root.changelog-busy;
+            close => { root.changelog-open = false; }
+            confirm => { root.action("update.install"); }
         }
 
         SettingsSheet {

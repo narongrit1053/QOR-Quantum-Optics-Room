@@ -1,0 +1,81 @@
+// What's new (CHANGELOG.md) and the update prompt (a release's notes plus an install button).
+
+import { Theme } from "theme.slint";
+import { PillButton } from "components.slint";
+import { ChangelogLine } from "types.slint";
+
+export component ChangelogSheet inherits Rectangle {
+    in property <bool> open;
+    in property <string> title;
+    in property <[ChangelogLine]> lines;
+    // Empty: no button (What's new). Otherwise the update prompt's install button.
+    in property <string> button;
+    in property <bool> busy;
+    callback close();
+    callback confirm();
+
+    visible: root.open;
+    changed open => {
+        if (root.open) {
+            focus-scope.focus();
+        }
+    }
+
+    TouchArea {
+        clicked => { root.close(); }
+        scroll-event(event) => { accept }
+    }
+
+    focus-scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.close(); return accept; }
+            accept
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 560px;
+        height: min(parent.height - 80px, 640px);
+        background: Theme.panel-bg;
+        border-radius: Theme.radius-control;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: Theme.shadow-strong;
+        clip: true;
+
+        TouchArea { }
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 10px;
+            Text { text: root.title; color: Theme.text; font-size: Theme.font-body; font-weight: 700; }
+            Flickable {
+                vertical-stretch: 1;
+                mouse-drag-pan-enabled: false;
+                content-height: list.preferred-height;
+                list := VerticalLayout {
+                    spacing: 6px;
+                    for line in root.lines: Text {
+                        text: line.text;
+                        wrap: word-wrap;
+                        color: line.heading ? Theme.text : Theme.text-secondary;
+                        font-size: Theme.font-body;
+                        font-weight: line.heading ? 700 : 400;
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                PillButton { label: root.button == "" ? "Close" : "Not now"; clicked => { root.close(); } }
+                if root.button != "": PillButton {
+                    label: root.busy ? "Downloading…" : root.button;
+                    primary: true;
+                    enabled: !root.busy;
+                    clicked => { root.confirm(); }
+                }
+            }
+        }
+    }
+}
