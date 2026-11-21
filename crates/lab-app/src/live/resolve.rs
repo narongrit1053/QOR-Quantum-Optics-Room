@@ -4,13 +4,15 @@ use std::rc::Rc;
 
 use lab_catalog::Catalog;
 use lab_core::glam::{DQuat, DVec3, EulerRot};
-use lab_core::part::{ConnectorKind, Geometry, ParamValue, PartDef};
+use lab_core::part::{ConnectorKind, Feature, Geometry, ParamValue, PartDef};
 use lab_core::{
-    Attach, Command, Document, Finish, HoleRef, HoleSet, LatticeIndex, Node, NodeId, Parent, PlatformId, SelectionTarget, Shape,
+    Attach, Command, Constraint, ConstraintKind, Document, Finish, HoleRef, HoleSet, LatticeIndex, Node, NodeId, Parent, PlatformId, SelectionTarget, Shape,
 };
 
-use super::features::FeatureLookup;
-use super::protocol::{ErrorCode, HoleArg, LiveError, ParentArg, PlaceArgs, PlaceAt, StackArgs, WriteRequest};
+use super::features::{FeatureLookup, node_features, platform_features};
+use super::protocol::{
+    ConstrainArgs, ErrorCode, HoleArg, LiveError, ParentArg, PlaceArgs, PlaceAt, StackArgs, WriteRequest,
+};
 
 pub struct Ctx<'a> {
     pub doc: &'a Document,
@@ -155,9 +157,7 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
             return Err(err(ErrorCode::BadRequest, "undo and redo are handled by the app"));
         }
         WriteRequest::Stack(args) => stack(args, ctx)?,
-        WriteRequest::Constrain(_) => {
-            return Err(err(ErrorCode::BadRequest, "this command is not resolved yet"));
-        }
+        WriteRequest::Constrain(args) => constrain(args, ctx)?,
     };
     command.clone().apply(&mut ctx.doc.clone()).map_err(|e| err(ErrorCode::Refused, e.to_string()))?;
     Ok(Resolved { command, label, select })
@@ -237,6 +237,85 @@ fn hole_pose(
     let at = at.ok_or_else(|| err(ErrorCode::NotFound, format!("no hole {text} on platform {}", p.name)))?;
     let (position, rotation) = lab_mates::seat_pose(def, at, rotate_z.unwrap_or(0.0).to_radians());
     Ok((Parent::Platform(pid), Attach::Hole { hole: index }, position, rotation))
+}
+
+fn missing_feature(owner: &str, id: &str) -> LiveError {
+    err(ErrorCode::NotFound, format!("{owner} has no feature '{id}'; use features to list them"))
+}
+
+type ParentLookup = Box<dyn Fn(&str) -> Result<Feature, LiveError>>;
+
+fn constrain(args: &ConstrainArgs, ctx: &Ctx) -> Result<(Command, String, Option<SelectionTarget>), LiveError> {
+    let child = node(ctx, args.node)?;
+    if child.locked {
+        return Err(err(ErrorCode::Refused, format!("node {} is locked", child.name)));
+    }
+    let def_of = |n: &Node| {
+        ctx.catalog
+            .get(&n.part)
+            .ok_or_else(|| err(ErrorCode::NotFound, format!("part {} of node {} is not in the catalog", n.part, n.id.0)))
+    };
+    let child_features = node_features(child, def_of(child)?, ctx.features);
+    let (parent, parent_name, parent_feature): (Parent, String, ParentLookup) = match &args.to {
+        ParentArg::Room => return Err(err(ErrorCode::BadRequest, "constrain needs a node or platform to constrain to")),
+        ParentArg::Platform(p) => {
+            let pid = PlatformId(*p);
+            let platform = ctx.doc.platform(pid).ok_or_else(|| err(ErrorCode::NotFound, format!("no platform {p}")))?;
+            let holes =
+                (ctx.holes)(pid).ok_or_else(|| err(ErrorCode::Refused, format!("platform {} has no holes", platform.name)))?;
+            let lookup = platform_features(platform, &holes);
+            let owner = format!("platform {p}");
+            (Parent::Platform(pid), platform.name.clone(), Box::new(move |id| lookup(id).ok_or_else(|| missing_feature(&owner, id))))
+        }
+        ParentArg::Node(n) => {
+            let pn = node(ctx, *n)?;
+            if pn.id == child.id || ctx.doc.descendants(child.id).contains(&pn.id) {
+                return Err(err(ErrorCode::Refused, format!("node {} is carried by {}", pn.name, child.name)));
+            }
+            let features = node_features(pn, def_of(pn)?, ctx.features);
+            let owner = format!("node {n}");
+            (
+                Parent::Node(pn.id),
+                pn.name.clone(),
+                Box::new(move |id| {
+                    features.iter().find(|f| f.id == id).map(|f| f.feature.clone()).ok_or_else(|| missing_feature(&owner, id))
+                }),
+            )
+        }
+    };
+    let mut constraints = Vec::new();
+    for c in &args.constraints {
+        let cf = child_features
+            .iter()
+            .find(|f| f.id == c.child)
+            .map(|f| f.feature.clone())
+            .ok_or_else(|| missing_feature(&format!("node {}", args.node), &c.child))?;
+        let pf = parent_feature(&c.parent)?;
+        let default = lab_mates::constraints::default_kind(&cf, &pf)
+            .ok_or_else(|| err(ErrorCode::Refused, "these features can't be constrained to each other"))?;
+        let kind = c.kind.unwrap_or(default);
+        // As the panel: Concentric takes axes, Mate and Flush take faces, Angle either.
+        let wrong = match (kind, &cf) {
+            (ConstraintKind::Concentric, Feature::Plane { .. }) => Some("two axes"),
+            (ConstraintKind::Mate | ConstraintKind::Flush, Feature::Axis { .. }) => Some("two faces"),
+            _ => None,
+        };
+        if let Some(need) = wrong {
+            return Err(err(ErrorCode::Refused, format!("{kind:?} needs {need}")));
+        }
+        constraints.push(Constraint {
+            kind,
+            child: cf,
+            parent: pf,
+            offset: c.offset.unwrap_or(0.0),
+            angle: c.angle.unwrap_or(0.0).to_radians(),
+            flip: c.flip.unwrap_or(false),
+            lock_rotation: c.lock_rotation.unwrap_or(false),
+        });
+    }
+    let command = lab_mates::constraints::constrain(ctx.doc, child.id, parent, constraints)
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("no node {}", args.node)))?;
+    Ok((command, format!("Agent: constrain {} to {parent_name}", child.name), Some(SelectionTarget::Node(child.id))))
 }
 
 fn spec_of(args: &StackArgs, slide: f64) -> lab_viewport::StackSpec {
@@ -692,6 +771,115 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
             let e = w.run(WriteRequest::Stack(args)).err().unwrap();
             assert_eq!(e.code, ErrorCode::BadRequest, "{}", e.message);
         }
+    }
+
+    /// A holder and a free post, both free on the table.
+    fn holder_and_post() -> (World, u64, u64) {
+        let (mut w, holder) = World::new().with_holder();
+        let post = w.free_id();
+        let n = new_part_node(
+            &w.catalog,
+            "test:post",
+            post,
+            Parent::Platform(w.table),
+            Attach::Free,
+            DVec3::new(50.0, 10.0, 0.0),
+            DQuat::IDENTITY,
+        )
+        .unwrap();
+        Command::AddNode { node: n, index: None }.apply(&mut w.doc).unwrap();
+        (w, holder, post)
+    }
+
+    fn constrain_req(node: u64, to: ParentArg, child: &str, parent: &str, kind: Option<ConstraintKind>) -> WriteRequest {
+        WriteRequest::Constrain(ConstrainArgs {
+            node,
+            to,
+            constraints: vec![crate::live::protocol::ConstraintArg {
+                child: child.into(),
+                parent: parent.into(),
+                kind,
+                offset: None,
+                angle: None,
+                flip: None,
+                lock_rotation: None,
+            }],
+        })
+    }
+
+    fn concentric(w: &World, child: (&str, &str), parent: Feature) -> Constraint {
+        let cf = lab_core::part::Feature::clone(&crate::live::features::connector_feature(
+            w.catalog.get(child.0).unwrap().connector(child.1).unwrap(),
+        ));
+        Constraint { kind: ConstraintKind::Concentric, child: cf, parent, offset: 0.0, angle: 0.0, flip: false, lock_rotation: false }
+    }
+
+    #[test]
+    fn constrain_with_connector_ids() {
+        let (w, holder, post) = holder_and_post();
+        let r = w.run(constrain_req(post, ParentArg::Node(holder), "bottom", "bore", Some(ConstraintKind::Concentric))).unwrap();
+        let bore = crate::live::features::connector_feature(w.catalog.get("test:holder").unwrap().connector("bore").unwrap());
+        let want = lab_mates::constraints::constrain(
+            &w.doc,
+            NodeId(post),
+            Parent::Node(NodeId(holder)),
+            vec![concentric(&w, ("test:post", "bottom"), bore)],
+        )
+        .unwrap();
+        assert_eq!(r.command, want);
+        let Command::SetAttach { attach: Attach::Constrained { constraints }, .. } = &r.command else { panic!("{:?}", r.command) };
+        assert_eq!(constraints.len(), 1);
+        assert_eq!(constraints[0].kind, ConstraintKind::Concentric);
+        assert_eq!(r.label, "Agent: constrain Test post to Test holder");
+        assert_eq!(r.select, Some(SelectionTarget::Node(NodeId(post))));
+    }
+
+    #[test]
+    fn constrain_default_kind() {
+        let (w, holder, post) = holder_and_post();
+        let explicit = w.run(constrain_req(post, ParentArg::Node(holder), "bottom", "bore", Some(ConstraintKind::Concentric))).unwrap();
+        let defaulted = w.run(constrain_req(post, ParentArg::Node(holder), "bottom", "bore", None)).unwrap();
+        assert_eq!(defaulted.command, explicit.command);
+    }
+
+    #[test]
+    fn constrain_to_platform_hole() {
+        let (w, _, post) = holder_and_post();
+        let r = w.run(constrain_req(post, ParentArg::Platform(w.table.0), "bottom", "hole:C14", None)).unwrap();
+        let at = w.holes.hole_at("C14".parse().unwrap()).unwrap();
+        let Command::SetAttach { parent, attach: Attach::Constrained { constraints }, .. } = &r.command else { panic!() };
+        assert_eq!(*parent, Parent::Platform(w.table));
+        assert_eq!(
+            constraints[0].parent,
+            Feature::Axis { origin: at.extend(0.0), dir: DVec3::Z, radius: w.holes.thread_radius, hole: true }
+        );
+    }
+
+    #[test]
+    fn constrain_unknown_feature_is_not_found() {
+        let (w, holder, post) = holder_and_post();
+        let e = w.run(constrain_req(post, ParentArg::Node(holder), "bottom", "f9", None)).err().unwrap();
+        assert_eq!(e.code, ErrorCode::NotFound);
+        assert_eq!(e.message, format!("node {holder} has no feature 'f9'; use features to list them"));
+        let e = w.run(constrain_req(post, ParentArg::Node(holder), "zzz", "bore", None)).err().unwrap();
+        assert_eq!(e.message, format!("node {post} has no feature 'zzz'; use features to list them"));
+    }
+
+    #[test]
+    fn constrain_mismatched_features_are_refused() {
+        let (w, _, post) = holder_and_post();
+        let e = w.run(constrain_req(post, ParentArg::Platform(w.table.0), "bottom", "top", None)).err().unwrap();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert_eq!(e.message, "these features can't be constrained to each other");
+    }
+
+    #[test]
+    fn constrain_locked_node_is_refused() {
+        let (mut w, holder, post) = holder_and_post();
+        Command::SetLocked { id: NodeId(post), locked: true }.apply(&mut w.doc).unwrap();
+        let e = w.run(constrain_req(post, ParentArg::Node(holder), "bottom", "bore", None)).err().unwrap();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert_eq!(e.message, "node Test post is locked");
     }
 
     #[test]
