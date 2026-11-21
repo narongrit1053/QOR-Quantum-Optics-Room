@@ -27,7 +27,8 @@ const LIVE_HELP: &str = r#"labsetup-cli live <command> [--pid N] [--doc TOKEN] [
 Read `status` first and pass its doc token with --doc on writes. Use `features <node>` before `constrain`. Units are mm and degrees.
 
 Flags become args one-to-one, with - turned into _ (--axis-height 75 sends axis_height: 75). A value that is
-a JSON number or array (--position "[10,0,0]") is sent as one, anything else as a string. --json merges a
+a JSON number or array (--position "[10,0,0]") is sent as one, anything else as a string. String-valued
+options (part, id, name, text, search, hole, ...) are always sent as text; use --json for nested values. --json merges a
 JSON object of args over the flags. Prints the reply line; exit 0 if ok, 1 on an error reply, 2 on usage or
 connection failure. --pid picks the app when several run.
 
@@ -78,10 +79,19 @@ enum Live {
     Call { pid: Option<u32>, line: String },
 }
 
-/// `1`, `-2.5` and `[..]` go out as JSON, anything else as a string.
-fn live_value(s: &str) -> serde_json::Value {
-    match serde_json::from_str::<serde_json::Value>(s) {
-        Ok(v) if v.is_number() || v.is_array() => v,
+/// Keys whose protocol type is a string: never turned into numbers (`--name 5` is "5").
+const STRING_KEYS: &[&str] =
+    &["part", "id", "name", "text", "search", "hole", "holder", "post", "mount", "base", "optic", "conn", "parent_conn", "child", "parent", "path"];
+
+/// String keys stay text (a `hole` may still be a `[col,row]` array), `flip`/`lock_rotation` take
+/// true/false, anything else goes out as JSON if it is a number or array, else as a string.
+fn live_value(key: &str, s: &str) -> serde_json::Value {
+    let json = serde_json::from_str::<serde_json::Value>(s).ok();
+    match json {
+        Some(v) if key == "hole" && v.is_array() => v,
+        _ if STRING_KEYS.contains(&key) => serde_json::Value::String(s.to_owned()),
+        Some(v @ serde_json::Value::Bool(_)) if matches!(key, "flip" | "lock_rotation") => v,
+        Some(v) if v.is_number() || v.is_array() => v,
         _ => serde_json::Value::String(s.to_owned()),
     }
 }
@@ -107,7 +117,9 @@ fn parse_live(rest: &[String]) -> Result<Live, String> {
                 _ => return Err("--json needs a JSON object".into()),
             },
             _ => {
-                args.insert(name.replace('-', "_"), live_value(val));
+                let key = name.replace('-', "_");
+                let v = live_value(&key, val);
+                args.insert(key, v);
             }
         }
     }
@@ -378,6 +390,20 @@ mod tests {
         assert_eq!(live_line("live move --node 5 --position [10,0,0]")["args"], json!({"node":5,"position":[10,0,0]}));
         assert_eq!(live_line("live set-params --node 2 --json {\"params\":{}}")["cmd"], "set_params");
         assert!(matches!(parse(&args("live status --pid 7")), Ok(Cmd::Live(Live::Call { pid: Some(7), .. }))));
+    }
+
+    #[test]
+    fn string_keys_stay_strings() {
+        assert_eq!(live_line("live catalog --search 100")["args"], json!({"search":"100"}));
+        assert_eq!(live_line("live rename --node 5 --name 5")["args"], json!({"node":5,"name":"5"}));
+        assert_eq!(live_line("live place --part x --hole 3")["args"]["hole"], "3");
+        assert_eq!(live_line("live place --part x --hole [3,4]")["args"]["hole"], json!([3, 4]));
+    }
+
+    #[test]
+    fn bool_keys_parse() {
+        assert_eq!(live_line("live constrain --flip true")["args"], json!({"flip":true}));
+        assert_eq!(live_line("live constrain --flip yes")["args"], json!({"flip":"yes"}));
     }
 
     #[test]
