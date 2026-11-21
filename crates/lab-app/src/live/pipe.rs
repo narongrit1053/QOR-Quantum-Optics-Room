@@ -6,7 +6,7 @@ use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -16,10 +16,12 @@ use windows_sys::Win32::Foundation::{
     HANDLE, INVALID_HANDLE_VALUE, LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
+    SDDL_REVISION_1, SE_KERNEL_OBJECT,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    EqualSid, GetTokenInformation, OWNER_SECURITY_INFORMATION, PSID, SECURITY_ATTRIBUTES,
+    TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FindClose, FindFirstFileW, FindNextFileW,
@@ -31,13 +33,17 @@ use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, WaitNamedPipeW,
 };
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentThreadId, OpenProcessToken, OpenThread, THREAD_TERMINATE,
+};
 use windows_sys::Win32::System::WindowsProgramming::GetUserNameW;
 
 use super::protocol::{ErrorCode, LiveError, MAX_LINE, err_line};
 
 const INSTANCES: u32 = 4;
 const BUF: u32 = 64 * 1024;
+/// How long `call` waits to write its request and read the reply once connected.
+pub(crate) const REPLY_DEADLINE: Duration = Duration::from_secs(30);
 
 type Handler = dyn Fn(String) -> Receiver<String> + Send + Sync;
 
@@ -104,7 +110,7 @@ fn sid_of(token_user: &[u64]) -> PSID {
     unsafe { (*token_user.as_ptr().cast::<TOKEN_USER>()).User.Sid }
 }
 
-/// `D:P(A;;GA;;;<user sid>)`: a protected DACL granting only the current user.
+/// `O:<user sid>D:P(A;;GA;;;<user sid>)`: owned by, and a protected DACL granting only, the current user.
 fn owner_only_sd() -> io::Result<Local> {
     let user = token_user()?;
     let mut s = null_mut();
@@ -119,7 +125,7 @@ fn owner_only_sd() -> io::Result<Local> {
         let n = (0..).take_while(|&i| *p.add(i) != 0).count();
         String::from_utf16_lossy(std::slice::from_raw_parts(p, n))
     };
-    let sddl = wide(&format!("D:P(A;;GA;;;{sid})"));
+    let sddl = wide(&format!("O:{sid}D:P(A;;GA;;;{sid})"));
     let mut sd = null_mut();
     // SAFETY: sddl is NUL-terminated; sd receives a LocalAlloc'd descriptor.
     if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut()) } == 0 {
@@ -337,7 +343,12 @@ fn connect(name: &str, timeout: Duration) -> io::Result<Owned> {
             )
         };
         if h != INVALID_HANDLE_VALUE {
-            return Ok(Owned(h));
+            let pipe = Owned(h);
+            // Pipe names are machine-wide: another user could have created ours first.
+            if !owned_by_user(pipe.0)? {
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "pipe is not owned by the current user"));
+            }
+            return Ok(pipe);
         }
         let e = io::Error::last_os_error();
         let left = deadline.saturating_duration_since(Instant::now());
@@ -350,28 +361,99 @@ fn connect(name: &str, timeout: Duration) -> io::Result<Owned> {
     }
 }
 
+/// Whether the pipe behind `h` (a client handle with READ_CONTROL) is owned by the token user.
+fn owned_by_user(h: HANDLE) -> io::Result<bool> {
+    let user = token_user()?;
+    let (mut owner, mut sd) = (null_mut(), null_mut());
+    // SAFETY: h is an open pipe handle; out-pointers are valid; sd is LocalAlloc'd.
+    let rc = unsafe {
+        GetSecurityInfo(h, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION, &mut owner, null_mut(), null_mut(), null_mut(), &mut sd)
+    };
+    if rc != 0 {
+        return Err(io::Error::from_raw_os_error(rc as i32));
+    }
+    let _sd = Local(sd);
+    // SAFETY: owner points into sd, alive until _sd drops; the user SID lives in `user`.
+    Ok(unsafe { EqualSid(owner, sid_of(&user)) } != 0)
+}
+
+/// Runs `f` on this thread; if it is still running after `deadline`, its blocking pipe I/O is
+/// cancelled and the result is `TimedOut`. The watchdog never cancels after `f` has returned.
+fn with_deadline<T>(deadline: Duration, f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    // SAFETY: opens a real handle to this thread with the right CancelSynchronousIo needs.
+    let me = unsafe { OpenThread(THREAD_TERMINATE, 0, GetCurrentThreadId()) };
+    if me.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let me = Owned(me);
+    let done = Arc::new(Mutex::new(false));
+    let fired = Arc::new(AtomicBool::new(false));
+    let (wake, woken) = mpsc::channel::<()>();
+    let (d, fi) = (done.clone(), fired.clone());
+    let dog = std::thread::spawn(move || {
+        let me = me; // move the whole Owned (Send), not just its raw field
+        if woken.recv_timeout(deadline) != Err(RecvTimeoutError::Timeout) {
+            return;
+        }
+        fi.store(true, Ordering::SeqCst);
+        // Repeat: a cancel that lands between two calls is lost.
+        loop {
+            let g = d.lock().unwrap_or_else(|e| e.into_inner());
+            if *g {
+                return;
+            }
+            // SAFETY: me is open, and done is false under the lock, so the caller is still inside f.
+            unsafe { CancelSynchronousIo(me.0) };
+            drop(g);
+            if woken.recv_timeout(Duration::from_millis(10)) != Err(RecvTimeoutError::Timeout) {
+                return;
+            }
+        }
+    });
+    let r = f();
+    *done.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    drop(wake);
+    let _ = dog.join();
+    match r {
+        Err(_) if fired.load(Ordering::SeqCst) => {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "no reply from LabSetup in time"))
+        }
+        r => r,
+    }
+}
+
 /// Sends one line and returns the one-line reply without its newline.
 pub fn call(name: &str, line: &str, timeout: Duration) -> io::Result<String> {
+    call_within(name, line, timeout, REPLY_DEADLINE)
+}
+
+fn call_within(name: &str, line: &str, timeout: Duration, reply_deadline: Duration) -> io::Result<String> {
     let pipe = connect(name, timeout)?;
     let mut msg = line.to_owned();
     if !msg.ends_with('\n') {
         msg.push('\n');
     }
-    if !write_all(pipe.0, msg.as_bytes()) {
-        return Err(io::Error::last_os_error());
-    }
-    let (mut out, mut chunk) = (Vec::new(), vec![0u8; BUF as usize]);
-    loop {
-        let start = out.len();
-        let more = read_some(pipe.0, &mut out, &mut chunk);
-        if let Some(i) = out[start..].iter().position(|&b| b == b'\n') {
-            out.truncate(start + i);
-            return String::from_utf8(out).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+    with_deadline(reply_deadline, || {
+        if !write_all(pipe.0, msg.as_bytes()) {
+            return Err(io::Error::last_os_error());
         }
-        if !more {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "pipe closed before a reply"));
+        let (mut out, mut chunk) = (Vec::new(), vec![0u8; BUF as usize]);
+        loop {
+            let start = out.len();
+            let more = read_some(pipe.0, &mut out, &mut chunk);
+            let nl = out[start..].iter().position(|&b| b == b'\n').map(|i| start + i);
+            if nl.unwrap_or(out.len()) > MAX_LINE {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "reply too long"));
+            }
+            if let Some(i) = nl {
+                out.truncate(i);
+                return String::from_utf8(out).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+            }
+            if !more {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "pipe closed before a reply"));
+            }
         }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -483,6 +565,44 @@ mod tests {
             assert_ne!(EqualSid(sid, sid_of(&user)), 0, "ACE is for the current user");
             LocalFree(sd);
         }
+    }
+
+    #[test]
+    fn call_times_out_when_server_never_replies() {
+        let n = name("silent");
+        // Keep every sender alive so the server waits instead of seeing a dropped channel.
+        let held = std::sync::Mutex::new(Vec::new());
+        let _s = Server::start(&n, move |_| {
+            let (tx, rx) = mpsc::channel::<String>();
+            held.lock().unwrap().push(tx);
+            rx
+        })
+        .unwrap();
+        let t0 = Instant::now();
+        let e = call_within(&n, "hello", T, Duration::from_secs(1)).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut, "{e}");
+        assert!(t0.elapsed() < Duration::from_secs(3), "{:?}", t0.elapsed());
+    }
+
+    #[test]
+    fn call_rejects_oversized_reply() {
+        let n = name("bigreply");
+        let _s = Server::start(&n, |_| {
+            let (tx, rx) = mpsc::channel();
+            tx.send(format!("{}\n", "a".repeat(MAX_LINE + 10))).unwrap();
+            rx
+        })
+        .unwrap();
+        let e = call(&n, "hello", T).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
+    }
+
+    #[test]
+    fn server_owner_is_current_user() {
+        let n = name("owner");
+        let _s = Server::start(&n, echo).unwrap();
+        let c = connect(&n, T).unwrap();
+        assert!(owned_by_user(c.0).unwrap(), "owner SID equals the token user");
     }
 
     #[test]
