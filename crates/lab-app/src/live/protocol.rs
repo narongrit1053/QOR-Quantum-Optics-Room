@@ -213,6 +213,17 @@ pub fn parse_line(line: &str) -> Result<Envelope, LiveError> {
             }
         },
     };
+    // Untagged PlaceAt falls through to Free when hole/mate keys are incomplete, silently
+    // dropping them; refuse instead of placing the part somewhere the agent did not ask.
+    if let Request::Write(WriteRequest::Place(PlaceArgs { at: PlaceAt::Free { .. }, .. })) = &request {
+        let has = |k: &str| args.and_then(|a| a.get(k)).is_some();
+        if has("platform") || has("hole") {
+            return Err(LiveError::bad("place in a hole needs both 'platform' and 'hole'"));
+        }
+        if has("on") || has("conn") || has("parent_conn") {
+            return Err(LiveError::bad("place on a part needs 'on', 'conn' and 'parent_conn'"));
+        }
+    }
     Ok(Envelope { v: 1, doc, request })
 }
 
@@ -374,6 +385,26 @@ mod tests {
             assert_eq!(e.code, ErrorCode::BadRequest, "{line}");
             assert!(e.message.contains(needle), "{line}: {}", e.message);
         }
+    }
+
+    #[test]
+    fn place_partial_hole_args_is_bad_request() {
+        for line in [
+            r#"{"v":1,"cmd":"place","args":{"part":"x","platform":1,"position":[0,0,0]}}"#,
+            r#"{"v":1,"cmd":"place","args":{"part":"x","hole":"C14","position":[0,0,0]}}"#,
+        ] {
+            let e = parse_line(line).unwrap_err();
+            assert_eq!(e.code, ErrorCode::BadRequest, "{line}");
+            assert!(e.message.contains("'platform' and 'hole'"), "{}", e.message);
+        }
+    }
+
+    #[test]
+    fn place_partial_mate_args_is_bad_request() {
+        let line = r#"{"v":1,"cmd":"place","args":{"part":"x","on":4,"conn":"a","position":[0,0,0]}}"#;
+        let e = parse_line(line).unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert!(e.message.contains("'on', 'conn' and 'parent_conn'"), "{}", e.message);
     }
 
     #[test]
