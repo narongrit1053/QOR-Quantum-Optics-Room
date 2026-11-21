@@ -149,11 +149,11 @@ mod tests {
         let (p, r) = lab_mates::seat_pose(catalog.get(&root).unwrap(), at, yaw);
         let next = doc.nodes.iter().map(|n| n.id.0).max().unwrap_or(0) + 1;
         let platform = Parent::Platform(PlatformId(1));
-        let mut nodes = vec![crate::place::new_node(catalog, &root, next, platform, Attach::Free, p, r).unwrap()];
+        let mut nodes = vec![lab_app::live::resolve::new_part_node(catalog, &root, next, platform, Attach::Free, p, r).unwrap()];
         for (part, attach, position, rotation) in lab_viewport::stack_chain(catalog, &spec).unwrap() {
             let below = Parent::Node(nodes.last().unwrap().id);
             let id = next + nodes.len() as u64;
-            nodes.push(crate::place::new_node(catalog, &part, id, below, attach, position, rotation).unwrap());
+            nodes.push(lab_app::live::resolve::new_part_node(catalog, &part, id, below, attach, position, rotation).unwrap());
         }
         let optic = nodes.last().unwrap().id;
         History::default().execute(doc, Command::PlaceAssembly { nodes }).unwrap();
@@ -236,7 +236,7 @@ mod tests {
             hole_grid: Some(HoleGrid::metric()),
             support: Support::Legs { size: 120.0, inset: 150.0 },
         });
-        let laser = crate::place::new_node(
+        let laser = lab_app::live::resolve::new_part_node(
             &catalog,
             "generic:laser-head",
             100,
