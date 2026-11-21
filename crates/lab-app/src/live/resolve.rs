@@ -99,6 +99,10 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
             if position.is_none() && rotation.is_none() {
                 return Err(err(ErrorCode::BadRequest, "move needs position and/or rotation"));
             }
+            // The gizmo and nudge refuse locked (grounded) nodes; so does the agent.
+            if n.locked {
+                return Err(err(ErrorCode::Refused, format!("node {} is locked", n.name)));
+            }
             if n.attach != Attach::Free {
                 return Err(err(ErrorCode::Refused, format!("node {} is attached; detach it first", n.name)));
             }
@@ -397,6 +401,18 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         let e = w.run(WriteRequest::Move { node: id, position: Some([0.0; 3]), rotation: None }).err().unwrap();
         assert_eq!(e.code, ErrorCode::Refused);
         assert_eq!(e.message, "node Riser block is attached; detach it first");
+    }
+
+    #[test]
+    fn move_locked_node_is_refused() {
+        let (mut w, holder) = World::new().with_holder();
+        Command::SetLocked { id: lab_core::NodeId(holder), locked: true }.apply(&mut w.doc).unwrap();
+        let e = w.run(WriteRequest::Move { node: holder, position: Some([0.0; 3]), rotation: None }).err().unwrap();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert_eq!(e.message, "node Test holder is locked");
+        // The UI does not refuse these on a locked node, so neither does the agent.
+        assert!(w.run(WriteRequest::Rename { node: holder, name: "H".into() }).is_ok());
+        assert!(w.run(WriteRequest::Remove { nodes: vec![holder] }).is_ok());
     }
 
     #[test]
