@@ -55,6 +55,15 @@ pub struct Settings {
     /// POLA-203: saved sets of placed parts, placeable in any project.
     #[serde(default)]
     pub bundles: Vec<Bundle>,
+    /// Check GitHub for a newer release once a day (`app.auto_updates`).
+    #[serde(default = "yes")]
+    pub check_updates: bool,
+    /// Unix seconds of the last update check.
+    #[serde(default)]
+    pub last_update_check: i64,
+    /// The version whose What's new was last shown ("" before the first run).
+    #[serde(default)]
+    pub last_seen_version: String,
 }
 
 /// A saved set: roots first (the first is the anchor, at hole (0,0) or the origin), then
@@ -139,6 +148,9 @@ impl Default for Settings {
             active_library: String::new(),
             library_view: "grid".into(),
             bundles: Vec::new(),
+            check_updates: true,
+            last_update_check: 0,
+            last_seen_version: String::new(),
         }
     }
 }

@@ -151,6 +151,12 @@ export struct OverlayItem {
 }
 
 // A command palette row (POLA-65).
+// One line of the What's new / update sheet: a heading, or a text paragraph.
+export struct ChangelogLine {
+    text: string,
+    heading: bool,
+}
+
 export struct PaletteItem {
     id: string,
     title: string,

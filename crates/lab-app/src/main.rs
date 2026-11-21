@@ -29,6 +29,7 @@ mod part_box;
 mod place;
 mod relations;
 mod transform;
+mod update;
 mod thumbs;
 mod scene;
 mod settings_ui;
@@ -231,6 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             );
                         }
                         files::startup(&ui, &a, &m);
+                        update::startup(&ui, &a);
                     });
                 }
             }
