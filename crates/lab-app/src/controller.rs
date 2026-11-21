@@ -589,6 +589,10 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         "import.url" => crate::import::choose_url(ui),
         "catalog.open" => crate::catalog_book::open(ui, &app.borrow()),
         id if id.starts_with("open.url:") => crate::catalog_book::open_url(&id["open.url:".len()..]),
+        "bug.report" => crate::catalog_book::open_url(&format!(
+            "https://github.com/narongrit1053/QOR-Quantum-Optics-Room/issues/new?body=LabSetup%20{}%0A%0AWhat%20happened%3A%0A",
+            env!("CARGO_PKG_VERSION")
+        )),
         "library.import_folder" => crate::import::choose_folder(ui),
         "import.step_insert" => crate::import::insert_dialog(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),

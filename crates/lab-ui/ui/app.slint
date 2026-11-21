@@ -1275,6 +1275,32 @@ export component AppWindow inherits Window {
             home => { root.view-cube-home(); }
         }
 
+        // Pre-release bug report: bottom-right of the viewport, opens a new GitHub issue.
+        Rectangle {
+            x: (root.wizard-open ? wizard-panel.x : inspector-panel.shown ? inspector-panel.x : root.width) - self.width - Theme.inset;
+            y: root.height - self.height - 18px;
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: bug-touch.has-hover ? Theme.control-hover : Theme.panel-bg;
+            border-width: Theme.border-width;
+            border-color: Theme.panel-border;
+            accessible-role: button;
+            accessible-label: "Report a bug";
+            accessible-action-default => { root.action("bug.report"); }
+            Icon {
+                name: "bug";
+                width: 20px;
+                height: 20px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+            bug-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.action("bug.report"); }
+            }
+        }
+
         // M9 E. The joint being placed: left of the inspector, below the view cube.
         if root.joint-editing: JointPanel {
             x: (root.wizard-open ? wizard-panel.x : inspector-panel.shown ? inspector-panel.x : root.width) - self.width - Theme.inset;
