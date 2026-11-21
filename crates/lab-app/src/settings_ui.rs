@@ -1,5 +1,6 @@
-//! Settings window (POLA-155): render quality, GPU, anti-aliasing, shadows. Every choice is
-//! saved to the settings file and applied at the next start; the wgpu device is never rebuilt live.
+//! Settings window (POLA-155): render quality, GPU, anti-aliasing, shadows, AI agent control.
+//! Every choice is saved to the settings file. Graphics choices apply at the next start (the wgpu
+//! device is never rebuilt live); agent control switches at once.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,6 +10,7 @@ use lab_ui::AppWindow;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::app_state::AppState;
+use crate::ui_models::UiModels;
 
 const QUALITIES: [RenderQuality; 4] = [RenderQuality::Auto, RenderQuality::High, RenderQuality::Balanced, RenderQuality::Low];
 const MSAA: [MsaaChoice; 5] = [MsaaChoice::Auto, MsaaChoice::Off, MsaaChoice::X2, MsaaChoice::X4, MsaaChoice::X8];
@@ -53,15 +55,16 @@ pub fn open(ui: &AppWindow, app: &AppState) {
     ui.set_settings_msaa(MSAA.iter().position(|m| *m == s.msaa).unwrap_or(0) as i32);
     ui.set_settings_shadows(SHADOWS.iter().position(|v| *v == s.shadows).unwrap_or(0) as i32);
     ui.set_settings_gpu(gpu);
+    ui.set_settings_allow_agents(s.allow_agents);
     ui.set_settings_open(true);
 }
 
-pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
-    let (w, a) = (ui.as_weak(), app.clone());
-    ui.on_settings_apply(move |quality, msaa, shadows, gpu| {
+pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
+    let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
+    ui.on_settings_apply(move |quality, msaa, shadows, gpu, allow_agents| {
         let Some(ui) = w.upgrade() else { return };
         ui.set_settings_open(false);
-        let (settings, changed, before_restart) = {
+        let (settings, changed, agents_changed, before_restart) = {
             let mut app = a.borrow_mut();
             let names = adapter_names(&app);
             let s = &mut app.settings;
@@ -77,14 +80,22 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
                 _ => GpuChoice::Auto,
             };
             let changed = before != (s.render_quality, s.msaa, s.shadows, s.gpu.clone());
-            (s.clone(), changed, before_restart)
+            let agents_changed = s.allow_agents != allow_agents;
+            s.allow_agents = allow_agents;
+            (s.clone(), changed, agents_changed, before_restart)
         };
-        if !changed {
+        if agents_changed {
+            crate::agent::set_enabled(&ui, &a, &m, allow_agents);
+        }
+        if !changed && !agents_changed {
             return;
         }
         if let Err(error) = lab_file::save_settings(&settings) {
             eprintln!("settings not saved: {error}");
             crate::controller::show_toast(&ui, &a.borrow(), "Settings could not be saved; see the log.", false);
+            return;
+        }
+        if !changed {
             return;
         }
         // Shadows apply live; quality, anti-aliasing and GPU are fixed when the viewport starts.

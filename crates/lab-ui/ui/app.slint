@@ -385,7 +385,8 @@ export component AppWindow inherits Window {
     in property <int> settings-shadows;
     in property <int> settings-gpu;
     in property <[string]> settings-gpus;
-    callback settings-apply(int, int, int, int);
+    in property <bool> settings-allow-agents;
+    callback settings-apply(int, int, int, int, bool);
     // "" ok, else error text (the sheet stays open).
     callback paste-corners(string /* target */, string /* text */) -> string;
     callback sheet-button(int);
@@ -1698,8 +1699,9 @@ export component AppWindow inherits Window {
             shadows: root.settings-shadows;
             gpu: root.settings-gpu;
             gpus: root.settings-gpus;
+            allow-agents: root.settings-allow-agents;
             in-use: root.gpu;
-            apply(q, m, s, g) => { root.settings-apply(q, m, s, g); }
+            apply(q, m, s, g, ag) => { root.settings-apply(q, m, s, g, ag); }
             cancel => { root.settings-open = false; }
         }
 

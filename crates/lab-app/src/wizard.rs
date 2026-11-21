@@ -47,6 +47,11 @@ thread_local! {
     static WIZARD: RefCell<Option<Wizard>> = const { RefCell::new(None) };
 }
 
+/// The connector wizard is open.
+pub fn is_open() -> bool {
+    WIZARD.with(|w| w.borrow().is_some())
+}
+
 fn with<R>(f: impl FnOnce(&mut Wizard) -> R) -> Option<R> {
     WIZARD.with(|w| w.borrow_mut().as_mut().map(f))
 }

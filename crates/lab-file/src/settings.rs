@@ -64,6 +64,9 @@ pub struct Settings {
     /// The version whose What's new was last shown ("" before the first run).
     #[serde(default)]
     pub last_seen_version: String,
+    /// Live control: AI agents on this PC may drive the app through a named pipe. Off by default.
+    #[serde(default)]
+    pub allow_agents: bool,
 }
 
 /// A saved set: roots first (the first is the anchor, at hole (0,0) or the origin), then
@@ -151,6 +154,7 @@ impl Default for Settings {
             check_updates: true,
             last_update_check: 0,
             last_seen_version: String::new(),
+            allow_agents: false,
         }
     }
 }

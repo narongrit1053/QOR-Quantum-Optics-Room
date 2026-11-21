@@ -1,5 +1,5 @@
-// Settings sheet (POLA-155, Ctrl+,): render quality, anti-aliasing, shadows and GPU.
-// Choices are saved on Apply and take effect at the next start.
+// Settings sheet (POLA-155, Ctrl+,): render quality, anti-aliasing, shadows and GPU, and live
+// control by AI agents. Choices are saved on Apply; graphics ones take effect at the next start.
 
 import { Theme } from "theme.slint";
 import { PillButton, SegmentedControl, ListRow } from "components.slint";
@@ -17,15 +17,17 @@ export component SettingsSheet inherits Rectangle {
     in property <int> shadows;   // 0 Auto, 1 On, 2 Off
     in property <int> gpu;       // 0 Auto, 1 High performance, 2 Power saving, 3+ adapters
     in property <[string]> gpus;
+    in property <bool> allow-agents;
     // "<adapter> · <backend> · …" from the viewport's Ready event.
     in property <string> in-use;
-    callback apply(int, int, int, int);
+    callback apply(int, int, int, int, bool);
     callback cancel();
 
     property <int> q;
     property <int> m;
     property <int> s;
     property <int> g;
+    property <bool> ag;
     property <bool> changed-any: q != quality || m != msaa || s != shadows || g != gpu;
 
     background: root.open ? Theme.scrim : transparent;
@@ -37,6 +39,7 @@ export component SettingsSheet inherits Rectangle {
             m = msaa;
             s = shadows;
             g = gpu;
+            ag = allow-agents;
             keys.focus();
         }
     }
@@ -57,7 +60,7 @@ export component SettingsSheet inherits Rectangle {
                 return accept;
             }
             if (event.text == Key.Return) {
-                root.apply(q, m, s, g);
+                root.apply(q, m, s, g, ag);
                 return accept;
             }
             reject
@@ -120,6 +123,16 @@ export component SettingsSheet inherits Rectangle {
                     color: Theme.warning;
                     font-size: Theme.font-caption;
                 }
+                Text { text: "AI agents"; color: Theme.text; font-size: Theme.font-body; font-weight: 700; }
+                Label { text: "Allow AI agents to control LabSetup"; }
+                SegmentedControl {
+                    items: ["Off", "On"];
+                    current: ag ? 1 : 0;
+                    floating: false;
+                    enabled: root.open;
+                    selected(i) => { ag = i == 1; }
+                }
+                Label { text: "Agents on this PC can read and edit the open project through labsetup-cli."; wrap: word-wrap; }
                 HorizontalLayout {
                     padding-top: 4px;
                     spacing: 8px;
@@ -133,7 +146,7 @@ export component SettingsSheet inherits Rectangle {
                         label: "Apply";
                         primary: true;
                         enabled: root.open;
-                        clicked => { root.apply(q, m, s, g); }
+                        clicked => { root.apply(q, m, s, g, ag); }
                     }
                 }
             }

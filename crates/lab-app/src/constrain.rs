@@ -48,6 +48,11 @@ thread_local! {
     static PANEL: RefCell<Panel> = RefCell::new(Panel::default());
 }
 
+/// The Constrain Components panel is open.
+pub fn is_open() -> bool {
+    PANEL.with(|p| p.borrow().open)
+}
+
 /// The tool was switched: Constrain opens the panel (Component 1 = the selected node), any other
 /// tool closes it keeping what was applied (as OK).
 pub fn reset(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, active: bool) {

@@ -75,6 +75,11 @@ pub fn reset(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
     }
 }
 
+/// A new joint's panel is open.
+pub fn panel_open() -> bool {
+    STATE.with(|s| s.borrow().gesture.is_some())
+}
+
 pub fn is_active() -> bool {
     STATE.with(|s| s.borrow().active)
 }

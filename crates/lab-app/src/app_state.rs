@@ -114,6 +114,12 @@ pub struct AppState {
     pub walls_hidden: bool,
     /// POLA-155: `(name, type)` of the DX12 adapters, for the Settings GPU list.
     pub adapters: Vec<(String, lab_viewport::wgpu::DeviceType)>,
+    /// Live control: identifies the open document; bumped whenever `session` is replaced.
+    pub doc_token: u64,
+    /// Live control while switched on.
+    pub agent: Option<crate::agent::Agent>,
+    /// A gizmo drag is between its first move and its end (agent writes are refused).
+    pub dragging: bool,
 }
 
 impl AppState {
@@ -148,6 +154,9 @@ impl AppState {
             isolated_nodes: false,
             walls_hidden: false,
             adapters: Vec::new(),
+            doc_token: 1,
+            agent: None,
+            dragging: false,
         }
     }
 
