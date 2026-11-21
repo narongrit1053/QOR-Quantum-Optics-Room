@@ -4,13 +4,13 @@ use std::rc::Rc;
 
 use lab_catalog::Catalog;
 use lab_core::glam::{DQuat, DVec3, EulerRot};
-use lab_core::part::{Geometry, ParamValue};
+use lab_core::part::{ConnectorKind, Geometry, ParamValue, PartDef};
 use lab_core::{
     Attach, Command, Document, Finish, HoleRef, HoleSet, LatticeIndex, Node, NodeId, Parent, PlatformId, SelectionTarget, Shape,
 };
 
 use super::features::FeatureLookup;
-use super::protocol::{ErrorCode, HoleArg, LiveError, ParentArg, PlaceArgs, PlaceAt, WriteRequest};
+use super::protocol::{ErrorCode, HoleArg, LiveError, ParentArg, PlaceArgs, PlaceAt, StackArgs, WriteRequest};
 
 pub struct Ctx<'a> {
     pub doc: &'a Document,
@@ -154,7 +154,8 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
         WriteRequest::Undo | WriteRequest::Redo => {
             return Err(err(ErrorCode::BadRequest, "undo and redo are handled by the app"));
         }
-        WriteRequest::Stack(_) | WriteRequest::Constrain(_) => {
+        WriteRequest::Stack(args) => stack(args, ctx)?,
+        WriteRequest::Constrain(_) => {
             return Err(err(ErrorCode::BadRequest, "this command is not resolved yet"));
         }
     };
@@ -169,27 +170,7 @@ fn place(args: &PlaceArgs, ctx: &Ctx) -> Result<(Command, String, Option<Selecti
         .ok_or_else(|| err(ErrorCode::NotFound, format!("no part {} in the catalog", args.part)))?;
     let id = ctx.doc.next_free_id();
     let (parent, attach, position, rotation) = match &args.at {
-        PlaceAt::Hole { platform, hole } => {
-            let pid = PlatformId(*platform);
-            let p = ctx.doc.platform(pid).ok_or_else(|| err(ErrorCode::NotFound, format!("no platform {platform}")))?;
-            let holes = (ctx.holes)(pid)
-                .ok_or_else(|| err(ErrorCode::Refused, format!("platform {} has no holes", p.name)))?;
-            let (index, at, text) = match hole {
-                HoleArg::Label(s) => {
-                    let r: HoleRef = s.parse().map_err(|e| err(ErrorCode::BadRequest, e))?;
-                    (holes.index_of(r), holes.hole_at(r), r.to_string())
-                }
-                HoleArg::Index([i, j]) => {
-                    let idx = LatticeIndex { i: *i, j: *j };
-                    let at = holes.contains(idx).then(|| holes.position(idx));
-                    (idx, at, holes.label(idx).map_or_else(|| format!("[{i},{j}]"), |l| l.to_string()))
-                }
-            };
-            let at = at.ok_or_else(|| err(ErrorCode::NotFound, format!("no hole {text} on platform {}", p.name)))?;
-            // Same pose a hand drop gets: the part's seat bolted to the hole, turned about +Z.
-            let (position, rotation) = lab_mates::seat_pose(def, at, args.rotate_z.unwrap_or(0.0).to_radians());
-            (Parent::Platform(pid), Attach::Hole { hole: index }, position, rotation)
-        }
+        PlaceAt::Hole { platform, hole } => hole_pose(ctx, def, *platform, hole, args.rotate_z)?,
         PlaceAt::Mate { on, conn, parent_conn, slide, twist } => {
             let parent = node(ctx, *on)?;
             let pdef = ctx.catalog.get(&parent.part).ok_or_else(|| {
@@ -231,6 +212,130 @@ fn place(args: &PlaceArgs, ctx: &Ctx) -> Result<(Command, String, Option<Selecti
     Ok((Command::AddNode { node: new, index: None }, label, Some(SelectionTarget::Node(NodeId(id)))))
 }
 
+/// Where `def` sits when bolted into a hole, as a hand drop would: its seat on the hole, turned about +Z.
+fn hole_pose(
+    ctx: &Ctx,
+    def: &PartDef,
+    platform: u64,
+    hole: &HoleArg,
+    rotate_z: Option<f64>,
+) -> Result<(Parent, Attach, DVec3, DQuat), LiveError> {
+    let pid = PlatformId(platform);
+    let p = ctx.doc.platform(pid).ok_or_else(|| err(ErrorCode::NotFound, format!("no platform {platform}")))?;
+    let holes = (ctx.holes)(pid).ok_or_else(|| err(ErrorCode::Refused, format!("platform {} has no holes", p.name)))?;
+    let (index, at, text) = match hole {
+        HoleArg::Label(s) => {
+            let r: HoleRef = s.parse().map_err(|e| err(ErrorCode::BadRequest, e))?;
+            (holes.index_of(r), holes.hole_at(r), r.to_string())
+        }
+        HoleArg::Index([i, j]) => {
+            let idx = LatticeIndex { i: *i, j: *j };
+            let at = holes.contains(idx).then(|| holes.position(idx));
+            (idx, at, holes.label(idx).map_or_else(|| format!("[{i},{j}]"), |l| l.to_string()))
+        }
+    };
+    let at = at.ok_or_else(|| err(ErrorCode::NotFound, format!("no hole {text} on platform {}", p.name)))?;
+    let (position, rotation) = lab_mates::seat_pose(def, at, rotate_z.unwrap_or(0.0).to_radians());
+    Ok((Parent::Platform(pid), Attach::Hole { hole: index }, position, rotation))
+}
+
+fn spec_of(args: &StackArgs, slide: f64) -> lab_viewport::StackSpec {
+    lab_viewport::StackSpec {
+        optic: args.optic.clone(),
+        mount: args.mount.clone(),
+        base: args.base.clone(),
+        holder: args.holder.clone(),
+        post: args.post.clone(),
+        slide,
+    }
+}
+
+fn no_chain() -> LiveError {
+    err(ErrorCode::NotFound, "a stack part or connector is not in the catalog")
+}
+
+/// Height of the top optic axis above the root part's origin, with the post slid by `spec.slide`.
+fn axis_height_of(catalog: &Catalog, spec: &lab_viewport::StackSpec) -> Result<f64, LiveError> {
+    let chain = lab_viewport::stack_chain(catalog, spec).ok_or_else(no_chain)?;
+    // Compose the parent-relative poses upward from the root's own frame.
+    let (mut p, mut q) = (DVec3::ZERO, DQuat::IDENTITY);
+    for (_, _, pos, rot) in &chain {
+        p += q * *pos;
+        q *= *rot;
+    }
+    let (top, conn) = match &spec.optic {
+        Some(o) => (o, "edge"),
+        None => (&spec.mount, "optic_seat"),
+    };
+    let frame = catalog.get(top).and_then(|d| d.connector(conn)).ok_or_else(no_chain)?.frame;
+    Ok((p + q * frame.origin).z)
+}
+
+fn bore_range(catalog: &Catalog, holder: &str) -> Result<Option<[f64; 2]>, LiveError> {
+    let c = catalog
+        .get(holder)
+        .and_then(|d| d.connector("bore"))
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("holder {holder} has no bore connector")))?;
+    Ok(match &c.kind {
+        ConnectorKind::Bore { range, .. } => *range,
+        _ => None,
+    })
+}
+
+/// The slide that puts the top optic axis `axis_height` mm above the root part's origin (the platform top for a
+/// part bolted flat in a hole). `spec_without_slide.slide` is ignored.
+pub fn slide_for_axis_height(
+    catalog: &Catalog,
+    spec_without_slide: &lab_viewport::StackSpec,
+    axis_height: f64,
+) -> Result<f64, LiveError> {
+    let at_zero = axis_height_of(catalog, &lab_viewport::StackSpec { slide: 0.0, ..spec_without_slide.clone() })?;
+    let slide = axis_height - at_zero;
+    match bore_range(catalog, &spec_without_slide.holder)? {
+        Some([lo, hi]) if slide < lo - 1e-9 || slide > hi + 1e-9 => Err(err(
+            ErrorCode::Refused,
+            format!("beam height {axis_height} mm is out of reach for this post ({:.1}\u{2013}{:.1} mm)", at_zero + lo, at_zero + hi),
+        )),
+        _ => Ok(slide),
+    }
+}
+
+fn stack(args: &StackArgs, ctx: &Ctx) -> Result<(Command, String, Option<SelectionTarget>), LiveError> {
+    let root_part = args.base.as_deref().unwrap_or(&args.holder);
+    let root_def = ctx
+        .catalog
+        .get(root_part)
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("no part {root_part} in the catalog")))?;
+    let (parent, attach, position, rotation) = hole_pose(ctx, root_def, args.platform, &args.hole, args.rotate_z)?;
+    let slide = match (args.axis_height, args.slide) {
+        // shortcut: assumes the root's seat keeps +Z up (true for hole seats, which only turn about Z).
+        (Some(h), None) => slide_for_axis_height(ctx.catalog, &spec_of(args, 0.0), h - position.z)?,
+        (None, Some(s)) => {
+            if let Some([lo, hi]) = bore_range(ctx.catalog, &args.holder)? {
+                if s < lo - 1e-9 || s > hi + 1e-9 {
+                    return Err(err(ErrorCode::Refused, format!("slide {s} mm is outside the bore range ({lo}\u{2013}{hi} mm)")));
+                }
+            }
+            s
+        }
+        _ => return Err(err(ErrorCode::BadRequest, "stack needs exactly one of axis_height and slide")),
+    };
+    let chain = lab_viewport::stack_chain(ctx.catalog, &spec_of(args, slide)).ok_or_else(no_chain)?;
+    let first = ctx.doc.next_free_id();
+    let mut nodes = vec![new_part_node(ctx.catalog, root_part, first, parent, attach, position, rotation).ok_or_else(no_chain)?];
+    for (part, attach, position, rotation) in chain {
+        let below = Parent::Node(nodes.last().unwrap().id);
+        let id = first + nodes.len() as u64;
+        nodes.push(new_part_node(ctx.catalog, &part, id, below, attach, position, rotation).ok_or_else(no_chain)?);
+    }
+    let mount = ctx.catalog.get(&args.mount).map_or(args.mount.as_str(), |d| d.name.as_str());
+    let at = match &args.hole {
+        HoleArg::Label(s) => s.clone(),
+        HoleArg::Index([i, j]) => format!("[{i},{j}]"),
+    };
+    Ok((Command::PlaceAssembly { nodes }, format!("Agent: stack {mount} at {at}"), Some(SelectionTarget::Node(NodeId(first)))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,7 +363,44 @@ name = "bore"
 kind = "bore"
 diameter = 12.7
 gender = "female"
+range = [-30, 30]
 frame = { origin = [0, 0, 20], z = [0, 0, 1], x = [1, 0, 0] }
+"#;
+    const MOUNT: &str = r#"
+id = "test:mount"
+name = "Test mount"
+category = "mounts"
+[geometry]
+kind = "parametric"
+generator = "riser"
+params = { length = 30, width = 30, height = 25 }
+[[connectors]]
+name = "base_tap"
+kind = "thread"
+spec = "M6"
+gender = "female"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+[[connectors]]
+name = "optic_seat"
+kind = "optic_bore"
+diameter = 25.4
+gender = "female"
+frame = { origin = [0, 0, 25], z = [0, 0, 1], x = [1, 0, 0] }
+"#;
+    const OPTIC: &str = r#"
+id = "test:optic"
+name = "Test optic"
+category = "optics"
+[geometry]
+kind = "parametric"
+generator = "riser"
+params = { length = 25, width = 25, height = 6 }
+[[connectors]]
+name = "edge"
+kind = "optic_bore"
+diameter = 25.4
+gender = "male"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
 "#;
     const POST: &str = r#"
 id = "test:post"
@@ -280,6 +422,12 @@ kind = "thread"
 spec = "M6"
 gender = "male"
 frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
+[[connectors]]
+name = "top"
+kind = "thread"
+spec = "M6"
+gender = "male"
+frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
 "#;
 
     fn catalog() -> Catalog {
@@ -287,6 +435,8 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         let mut defs: Vec<PartDef> = builtin.all().into_iter().cloned().collect();
         defs.push(toml::from_str(HOLDER).unwrap());
         defs.push(toml::from_str(POST).unwrap());
+        defs.push(toml::from_str(MOUNT).unwrap());
+        defs.push(toml::from_str(OPTIC).unwrap());
         Catalog::from_defs(defs)
     }
 
@@ -452,6 +602,96 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         let Command::SetParams { params, .. } = r.command else { panic!() };
         assert_eq!(params.len(), 2);
         assert_eq!(params["height"].as_f64(), Some(30.0));
+    }
+
+    fn stack_args(axis_height: Option<f64>, slide: Option<f64>) -> StackArgs {
+        StackArgs {
+            platform: 0,
+            hole: HoleArg::Label("C14".into()),
+            holder: "test:holder".into(),
+            post: "test:post".into(),
+            mount: "test:mount".into(),
+            base: None,
+            optic: Some("test:optic".into()),
+            axis_height,
+            slide,
+            rotate_z: None,
+        }
+    }
+
+    fn stack_world() -> World {
+        World::new()
+    }
+
+    #[test]
+    fn stack_matches_library_chain() {
+        let w = stack_world();
+        let mut args = stack_args(None, Some(5.0));
+        args.platform = w.table.0;
+        let r = w.run(WriteRequest::Stack(args)).unwrap();
+        let Command::PlaceAssembly { nodes } = &r.command else { panic!("{:?}", r.command) };
+        let spec = lab_viewport::StackSpec {
+            optic: Some("test:optic".into()),
+            mount: "test:mount".into(),
+            base: None,
+            holder: "test:holder".into(),
+            post: "test:post".into(),
+            slide: 5.0,
+        };
+        let chain = lab_viewport::stack_chain(&w.catalog, &spec).unwrap();
+        assert_eq!(nodes.len(), chain.len() + 1);
+        let first = w.free_id();
+        for (k, (part, attach, position, rotation)) in chain.iter().enumerate() {
+            let n = &nodes[k + 1];
+            assert_eq!(n.id.0, first + k as u64 + 1);
+            assert_eq!(&n.part, part);
+            assert_eq!(&n.attach, attach);
+            assert!((n.position - *position).length() < 1e-9);
+            assert!(n.rotation.angle_between(*rotation) < 1e-9);
+            assert_eq!(n.parent, Parent::Node(nodes[k].id));
+        }
+        assert_eq!(nodes[0].part, "test:holder");
+        assert!(matches!(nodes[0].attach, Attach::Hole { .. }));
+        assert_eq!(r.label, "Agent: stack Test mount at C14");
+        assert_eq!(r.select, Some(SelectionTarget::Node(NodeId(first))));
+    }
+
+    #[test]
+    fn stack_axis_height_lands_at_height() {
+        let w = stack_world();
+        let mut args = stack_args(Some(75.0), None);
+        args.platform = w.table.0;
+        let r = w.run(WriteRequest::Stack(args)).unwrap();
+        let mut doc = w.doc.clone();
+        r.command.clone().apply(&mut doc).unwrap();
+        let Command::PlaceAssembly { nodes } = &r.command else { panic!() };
+        let top = nodes.last().unwrap();
+        let edge = w.catalog.get("test:optic").unwrap().connector("edge").unwrap().frame.origin;
+        let (p, q) = lab_mates::constraints::world_pose(&doc, Parent::Node(top.id)).unwrap();
+        let (pp, _) = lab_mates::constraints::world_pose(&doc, Parent::Platform(w.table)).unwrap();
+        let z = (p + q * edge).z - pp.z;
+        assert!((z - 75.0).abs() < 1e-6, "axis at {z}");
+    }
+
+    #[test]
+    fn stack_height_out_of_range_is_refused() {
+        let w = stack_world();
+        let mut args = stack_args(Some(1000.0), None);
+        args.platform = w.table.0;
+        let e = w.run(WriteRequest::Stack(args)).err().unwrap();
+        assert_eq!(e.code, ErrorCode::Refused, "{}", e.message);
+        assert!(e.message.starts_with("beam height 1000 mm is out of reach for this post (65.0"), "{}", e.message);
+    }
+
+    #[test]
+    fn stack_needs_one_of_height_or_slide() {
+        let w = stack_world();
+        for (h, s) in [(None, None), (Some(75.0), Some(0.0))] {
+            let mut args = stack_args(h, s);
+            args.platform = w.table.0;
+            let e = w.run(WriteRequest::Stack(args)).err().unwrap();
+            assert_eq!(e.code, ErrorCode::BadRequest, "{}", e.message);
+        }
     }
 
     #[test]
