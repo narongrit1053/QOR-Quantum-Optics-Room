@@ -9,6 +9,8 @@ use lab_core::{
     Attach, Command, Constraint, ConstraintKind, Document, Finish, HoleRef, HoleSet, LatticeIndex, Node, NodeId, Parent, PlatformId, SelectionTarget, Shape,
 };
 
+use lab_optics::PortKind;
+
 use super::features::{FeatureLookup, node_features, platform_features};
 use super::protocol::{
     ConstrainArgs, ErrorCode, HoleArg, LiveError, ParentArg, PlaceArgs, PlaceAt, StackArgs, WriteRequest,
@@ -27,6 +29,9 @@ pub struct Resolved {
     pub label: String,
     pub select: Option<SelectionTarget>,
 }
+
+/// Node params of a laser that the inspector's Beam section edits (`beams.rs` PARAMS + on/off).
+pub const LASER_PARAMS: &[&str] = &["beam_wavelength_nm", "beam_waist_mm", "beam_m2", "beam_on"];
 
 const PAINT: [u8; 3] = [210, 210, 205];
 
@@ -127,8 +132,20 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
         }
         WriteRequest::SetParams { node: id, params } => {
             let n = node(ctx, *id)?;
+            let def = ctx.catalog.get(&n.part);
+            // As the inspector: the generator's declared params, plus the beam params of a laser.
+            let declared = |k: &str| {
+                def.is_some_and(|d| {
+                    matches!(&d.geometry, Geometry::Parametric { params, .. } if params.contains_key(k))
+                        || (LASER_PARAMS.contains(&k)
+                            && d.optical_ports.iter().any(|p| PortKind::from_kind(&p.kind) == PortKind::Source))
+                })
+            };
             let mut merged = n.params.clone();
             for (k, v) in params {
+                if !declared(k) {
+                    return Err(err(ErrorCode::BadRequest, format!("part {} has no parameter '{k}'", n.part)));
+                }
                 let value = match v {
                     serde_json::Value::Number(x) => x.as_f64().map(ParamValue::Number),
                     serde_json::Value::String(s) => Some(ParamValue::Text(s.clone())),
@@ -261,8 +278,8 @@ fn constrain(args: &ConstrainArgs, ctx: &Ctx) -> Result<(Command, String, Option
         ParentArg::Platform(p) => {
             let pid = PlatformId(*p);
             let platform = ctx.doc.platform(pid).ok_or_else(|| err(ErrorCode::NotFound, format!("no platform {p}")))?;
-            let holes =
-                (ctx.holes)(pid).ok_or_else(|| err(ErrorCode::Refused, format!("platform {} has no holes", platform.name)))?;
+            // `top` needs no grid; with none, `hole:` labels are simply not found.
+            let holes = (ctx.holes)(pid).unwrap_or_else(|| Rc::new(HoleSet::empty()));
             let lookup = platform_features(platform, &holes);
             let owner = format!("platform {p}");
             (Parent::Platform(pid), platform.name.clone(), Box::new(move |id| lookup(id).ok_or_else(|| missing_feature(&owner, id))))
@@ -694,11 +711,30 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         let r = w.run(WriteRequest::SetParams { node: holder, params: first }).unwrap();
         r.command.apply(&mut w.doc).unwrap();
         let mut second = serde_json::Map::new();
-        second.insert("label".into(), serde_json::json!("x"));
+        second.insert("width".into(), serde_json::json!(25.0));
         let r = w.run(WriteRequest::SetParams { node: holder, params: second }).unwrap();
         let Command::SetParams { params, .. } = r.command else { panic!() };
         assert_eq!(params.len(), 2);
         assert_eq!(params["height"].as_f64(), Some(30.0));
+    }
+
+    #[test]
+    fn set_params_refuses_undeclared_keys() {
+        let (w, holder) = World::new().with_holder();
+        let params = |k: &str| serde_json::Map::from_iter([(k.to_string(), serde_json::json!(1.0))]);
+        let e = w.run(WriteRequest::SetParams { node: holder, params: params("label") }).err().unwrap();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert_eq!(e.message, "part test:holder has no parameter 'label'");
+        // Beam params belong to lasers only.
+        assert!(w.run(WriteRequest::SetParams { node: holder, params: params("beam_wavelength_nm") }).is_err());
+
+        let mut w = w;
+        let id = w.free_id();
+        let laser = new_part_node(&w.catalog, "generic:starter-laser", id, Parent::Platform(w.table), Attach::Free, DVec3::ZERO, DQuat::IDENTITY)
+            .unwrap();
+        Command::AddNode { node: laser, index: None }.apply(&mut w.doc).unwrap();
+        assert!(w.run(WriteRequest::SetParams { node: id, params: params("beam_wavelength_nm") }).is_ok());
+        assert!(w.run(WriteRequest::SetParams { node: id, params: params("length") }).is_ok());
     }
 
     fn stack_args(axis_height: Option<f64>, slide: Option<f64>) -> StackArgs {
@@ -911,6 +947,18 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
             constraints[0].parent,
             Feature::Axis { origin: at.extend(0.0), dir: DVec3::Z, radius: w.holes.thread_radius, hole: true }
         );
+    }
+
+    #[test]
+    fn constrain_to_platform_top_needs_no_hole_grid() {
+        let (w, _, post) = holder_and_post();
+        let no_grid = |_: PlatformId| None;
+        let trace = lab_optics::Trace::default();
+        let ctx = Ctx { doc: &w.doc, catalog: &w.catalog, holes: &no_grid, features: &Plane, trace: &trace };
+        let to = || ParentArg::Platform(w.table.0);
+        assert!(resolve(&constrain_req(post, to(), "f1", "top", Some(ConstraintKind::Flush)), &ctx).is_ok());
+        let e = resolve(&constrain_req(post, to(), "f1", "hole:C14", None), &ctx).err().unwrap();
+        assert_eq!(e.code, ErrorCode::NotFound, "{}", e.message);
     }
 
     #[test]

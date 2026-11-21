@@ -132,6 +132,13 @@ fn command(id: NodeId, params: lab_core::part::Params, label: &str) -> EditOutco
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn live_set_params_knows_every_beam_param() {
+        for (key, ..) in super::PARAMS {
+            assert!(lab_app::live::resolve::LASER_PARAMS.contains(&key), "{key}");
+        }
+    }
+
     use lab_catalog::Catalog;
     use lab_core::glam::{DQuat, DVec2, DVec3};
     use lab_core::holes::HoleGrid;
