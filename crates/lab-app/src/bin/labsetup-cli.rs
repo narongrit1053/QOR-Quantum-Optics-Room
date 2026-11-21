@@ -18,7 +18,47 @@ usage:
   labsetup-cli list     <project> [--json]
   labsetup-cli bom      <project> [-o out.csv]
   labsetup-cli validate <project>
-  labsetup-cli catalog  [--search <text>]";
+  labsetup-cli catalog  [--search <text>]
+  labsetup-cli live     <command> [--pid N] [--doc TOKEN] [--json ARGS] [--arg value ...]
+                        (drives the running app; see 'labsetup-cli live --help')";
+
+const LIVE_HELP: &str = r#"labsetup-cli live <command> [--pid N] [--doc TOKEN] [--json ARGS] [--arg-name value ...]
+
+Read `status` first and pass its doc token with --doc on writes. Use `features <node>` before `constrain`. Units are mm and degrees.
+
+Flags become args one-to-one, with - turned into _ (--axis-height 75 sends axis_height: 75). A value that is
+a JSON number or array (--position "[10,0,0]") is sent as one, anything else as a string. --json merges a
+JSON object of args over the flags. Prints the reply line; exit 0 if ok, 1 on an error reply, 2 on usage or
+connection failure. --pid picks the app when several run.
+
+Reads:
+  status                                              live status
+  list       [--platform ID]                          live list --platform 1
+  platforms                                           live platforms
+  holes      --platform ID                            live holes --platform 1
+  part       --id CATALOG_ID                          live part --id thorlabs:KM100
+  catalog    --search TEXT [--limit N]                live catalog --search "post holder" --limit 10
+  features   --node ID                                live features --node 5
+  beams                                               live beams
+  snapshot   [--path FILE] [--width N] [--height N]   live snapshot --path view.png
+
+Writes (each is one undo step, labelled "Agent: ..."):
+  place      --part ID, then one of --platform ID --hole C14 | --on NODE --conn NAME --parent-conn NAME [--slide MM] [--twist DEG]
+             | --position "[x,y,z]" [--rotation "[z,y,x]"]; optional --name TEXT --rotate-z DEG
+             live place --part thorlabs:KM100 --platform 1 --hole C14 --rotate-z 90 --doc TOKEN
+  stack      --platform ID --hole C14 --holder ID --post ID --mount ID [--base ID] [--optic ID] (--axis-height MM | --slide MM) [--rotate-z DEG]
+             live stack --platform 1 --hole C14 --holder H --post P --mount M --axis-height 75 --doc TOKEN
+  constrain  --node ID, --to room | {"platform":ID} | {"node":ID}, --constraints [{child,parent,kind?,offset?,angle?,flip?,lock_rotation?}]
+             live constrain --node 5 --json '{"to":{"node":4},"constraints":[{"child":"bottom","parent":"top","kind":"mate"}]}' --doc TOKEN
+  move       --node ID [--position "[x,y,z]"] [--rotation "[z,y,x]"]
+             live move --node 5 --position "[10,0,0]" --doc TOKEN
+  set-params --node ID --params {...}
+             live set-params --node 2 --json '{"params":{"wavelength_nm":532}}' --doc TOKEN
+  rename     --node ID --name TEXT                    live rename --node 5 --name "Fold mirror" --doc TOKEN
+  note       --node ID --text TEXT                    live note --node 5 --text "Check angle" --doc TOKEN
+  remove     --nodes "[ID,...]"                       live remove --nodes "[5,6]" --doc TOKEN
+  undo                                                live undo
+  redo                                                live redo"#;
 
 #[derive(Debug, PartialEq)]
 enum Cmd {
@@ -29,10 +69,64 @@ enum Cmd {
     Bom { path: PathBuf, out: Option<PathBuf> },
     Validate { path: PathBuf },
     Catalog { search: Option<String> },
+    Live(Live),
+}
+
+#[derive(Debug, PartialEq)]
+enum Live {
+    Help,
+    Call { pid: Option<u32>, line: String },
+}
+
+/// `1`, `-2.5` and `[..]` go out as JSON, anything else as a string.
+fn live_value(s: &str) -> serde_json::Value {
+    match serde_json::from_str::<serde_json::Value>(s) {
+        Ok(v) if v.is_number() || v.is_array() => v,
+        _ => serde_json::Value::String(s.to_owned()),
+    }
+}
+
+fn parse_live(rest: &[String]) -> Result<Live, String> {
+    let (cmd, rest) = rest.split_first().ok_or("'live' needs a command (try 'labsetup-cli live --help')")?;
+    if matches!(cmd.as_str(), "--help" | "-h" | "help") {
+        return Ok(Live::Help);
+    }
+    let (mut pid, mut doc, mut args, mut over) = (None, None, serde_json::Map::new(), None);
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        if a == "--help" || a == "-h" {
+            return Ok(Live::Help);
+        }
+        let name = a.strip_prefix("--").filter(|n| !n.is_empty()).ok_or_else(|| format!("unexpected argument '{a}'"))?;
+        let val = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+        match name {
+            "pid" => pid = Some(val.parse().map_err(|_| format!("--pid needs a number, got '{val}'"))?),
+            "doc" => doc = Some(val.clone()),
+            "json" => match serde_json::from_str(val) {
+                Ok(serde_json::Value::Object(m)) => over = Some(m),
+                _ => return Err("--json needs a JSON object".into()),
+            },
+            _ => {
+                args.insert(name.replace('-', "_"), live_value(val));
+            }
+        }
+    }
+    args.extend(over.unwrap_or_default());
+    let mut env = serde_json::Map::new();
+    env.insert("v".into(), 1.into());
+    env.insert("cmd".into(), cmd.replace('-', "_").into());
+    env.insert("args".into(), args.into());
+    if let Some(d) = doc {
+        env.insert("doc".into(), d.into());
+    }
+    Ok(Live::Call { pid, line: serde_json::Value::Object(env).to_string() })
 }
 
 fn parse(args: &[String]) -> Result<Cmd, String> {
     let (cmd, rest) = args.split_first().ok_or("no command given")?;
+    if cmd == "live" {
+        return parse_live(rest).map(Cmd::Live);
+    }
     let mut path = None;
     let mut json = false;
     let mut out = None;
@@ -110,8 +204,34 @@ fn parent_text(doc: &Document, parent: &Parent) -> String {
     }
 }
 
+#[cfg(windows)]
+fn run_live(pid: Option<u32>, line: &str) -> Result<u8, String> {
+    use lab_app::live::pipe;
+    let pipes = pipe::find_pipes();
+    let name = match (pid, pipes.as_slice()) {
+        (Some(p), _) => pipe::pipe_name(p),
+        (None, [(_, n)]) => n.clone(),
+        (None, []) => return Err("LabSetup isn't running, or 'Allow AI agents' is off in Settings.".into()),
+        (None, many) => {
+            let list: Vec<String> = many.iter().map(|(p, _)| format!("pid {p}")).collect();
+            return Err(format!("several LabSetup windows are running, pick one with --pid:\n{}", list.join("\n")));
+        }
+    };
+    let reply = pipe::call(&name, line, std::time::Duration::from_secs(2)).map_err(|e| format!("live: {e}"))?;
+    println!("{reply}");
+    let ok = serde_json::from_str::<serde_json::Value>(&reply).is_ok_and(|v| v["ok"] == true);
+    Ok(if ok { 0 } else { 1 })
+}
+
+#[cfg(not(windows))]
+fn run_live(_: Option<u32>, _: &str) -> Result<u8, String> {
+    Err("live control needs Windows".into())
+}
+
 fn run(cmd: Cmd) -> Result<u8, String> {
     match cmd {
+        Cmd::Live(Live::Help) => println!("{LIVE_HELP}"),
+        Cmd::Live(Live::Call { pid, line }) => return run_live(pid, &line),
         Cmd::Help => println!("{USAGE}"),
         Cmd::Version => println!("labsetup-cli {}", env!("CARGO_PKG_VERSION")),
         Cmd::Info { path, json } => {
@@ -237,6 +357,42 @@ mod tests {
         assert!(parse(&args("bom x -o")).is_err());
         assert!(parse(&args("validate x --json")).is_err());
         assert!(parse(&[]).is_err());
+    }
+
+    fn live_line(s: &str) -> serde_json::Value {
+        match parse(&args(s)) {
+            Ok(Cmd::Live(Live::Call { line, .. })) => serde_json::from_str(&line).unwrap(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_live_flags() {
+        let line = "live place --part thorlabs:KM100 --platform 1 --hole C14 --rotate-z 90 --doc T1";
+        assert_eq!(
+            live_line(line),
+            json!({"v":1,"cmd":"place","doc":"T1","args":{"part":"thorlabs:KM100","platform":1,"hole":"C14","rotate_z":90}})
+        );
+        let Ok(Cmd::Live(Live::Call { line, .. })) = parse(&args(line)) else { panic!() };
+        assert!(lab_app::live::protocol::parse_line(&line).is_ok(), "{line}");
+        assert_eq!(live_line("live move --node 5 --position [10,0,0]")["args"], json!({"node":5,"position":[10,0,0]}));
+        assert_eq!(live_line("live set-params --node 2 --json {\"params\":{}}")["cmd"], "set_params");
+        assert!(matches!(parse(&args("live status --pid 7")), Ok(Cmd::Live(Live::Call { pid: Some(7), .. }))));
+    }
+
+    #[test]
+    fn json_overrides_flags() {
+        let v = live_line("live stack --axis-height 75 --json {\"axis_height\":80,\"holder\":\"h\"}");
+        assert_eq!(v["args"], json!({"axis_height":80,"holder":"h"}));
+    }
+
+    #[test]
+    fn live_usage_errors() {
+        assert!(parse(&args("live")).is_err());
+        assert!(parse(&args("live status stray")).is_err());
+        assert!(parse(&args("live status --doc")).is_err());
+        assert!(parse(&args("live status --json [1]")).is_err());
+        assert_eq!(parse(&args("live --help")), Ok(Cmd::Live(Live::Help)));
     }
 
     /// Writes the demo project to `%TEMP%/labsetup-cli-demo.labsetup` (a sample for manual runs) and
