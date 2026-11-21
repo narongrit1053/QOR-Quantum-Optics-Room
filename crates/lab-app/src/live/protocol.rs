@@ -188,6 +188,44 @@ fn decode<T: for<'a> Deserialize<'a>>(cmd: &Value, args: Option<&Value>) -> Resu
     }
 }
 
+/// `args` keys each command accepts (spec: an unknown argument is `bad_request`). serde
+/// ignores unknown keys, and `deny_unknown_fields` does not work with flatten/untagged.
+const ARGS: &[(&str, &[&str])] = &[
+    ("status", &[]),
+    ("list", &["platform"]),
+    ("platforms", &[]),
+    ("holes", &["platform"]),
+    ("part", &["id"]),
+    ("catalog", &["search", "limit"]),
+    ("features", &["node"]),
+    ("beams", &[]),
+    ("snapshot", &["path", "width", "height"]),
+    (
+        "place",
+        &[
+            "part", "name", "rotate_z", "platform", "hole", "on", "conn", "parent_conn", "slide", "twist", "parent",
+            "position", "rotation",
+        ],
+    ),
+    ("stack", &["platform", "hole", "holder", "post", "mount", "base", "optic", "axis_height", "slide", "rotate_z"]),
+    ("constrain", &["node", "to", "constraints"]),
+    ("move", &["node", "position", "rotation"]),
+    ("set_params", &["node", "params"]),
+    ("rename", &["node", "name"]),
+    ("note", &["node", "text"]),
+    ("remove", &["nodes"]),
+    ("undo", &[]),
+    ("redo", &[]),
+];
+const CONSTRAINT_ARGS: &[&str] = &["child", "parent", "kind", "offset", "angle", "flip", "lock_rotation"];
+
+fn check_keys(obj: Option<&Map<String, Value>>, allowed: &[&str], what: &str) -> Result<(), LiveError> {
+    match obj.into_iter().flat_map(|o| o.keys()).find(|k| !allowed.contains(&k.as_str())) {
+        Some(k) => Err(LiveError::bad(format!("unknown argument '{k}' for {what}"))),
+        None => Ok(()),
+    }
+}
+
 pub fn parse_line(line: &str) -> Result<Envelope, LiveError> {
     let val: Value = serde_json::from_str(line).map_err(|e| LiveError::bad(format!("invalid JSON: {e}")))?;
     let obj = val.as_object().ok_or_else(|| LiveError::bad("request must be a JSON object"))?;
@@ -213,6 +251,15 @@ pub fn parse_line(line: &str) -> Result<Envelope, LiveError> {
             }
         },
     };
+    let name = cmd.as_str().unwrap_or_default();
+    if let Some((_, allowed)) = ARGS.iter().find(|(c, _)| *c == name) {
+        check_keys(args.and_then(Value::as_object), allowed, name)?;
+    }
+    if let Request::Write(WriteRequest::Constrain(_)) = &request {
+        for c in args.and_then(|a| a.get("constraints")).and_then(Value::as_array).into_iter().flatten() {
+            check_keys(c.as_object(), CONSTRAINT_ARGS, "a constraint")?;
+        }
+    }
     // Untagged PlaceAt falls through to Free when hole/mate keys are incomplete, silently
     // dropping them; refuse instead of placing the part somewhere the agent did not ask.
     if let Request::Write(WriteRequest::Place(PlaceArgs { at: PlaceAt::Free { .. }, .. })) = &request {
@@ -405,6 +452,22 @@ mod tests {
         let e = parse_line(line).unwrap_err();
         assert_eq!(e.code, ErrorCode::BadRequest);
         assert!(e.message.contains("'on', 'conn' and 'parent_conn'"), "{}", e.message);
+    }
+
+    #[test]
+    fn unknown_argument_is_bad_request() {
+        for (line, needle) in [
+            (r#"{"v":1,"cmd":"place","args":{"part":"x","position":[0,0,0],"rotatez":90}}"#, "'rotatez' for place"),
+            (r#"{"v":1,"cmd":"move","args":{"node":1,"pos":[1,2,3]}}"#, "'pos' for move"),
+            (
+                r#"{"v":1,"cmd":"constrain","args":{"node":1,"to":"room","constraints":[{"child":"a","parent":"b","offest":1}]}}"#,
+                "'offest' for a constraint",
+            ),
+        ] {
+            let e = parse_line(line).unwrap_err();
+            assert_eq!(e.code, ErrorCode::BadRequest, "{line}");
+            assert!(e.message.contains(needle), "{line}: {}", e.message);
+        }
     }
 
     #[test]
