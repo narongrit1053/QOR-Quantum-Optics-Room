@@ -167,6 +167,9 @@ export component AppWindow inherits Window {
     in property <bool> dirty;
     // "", "Recovered — not saved yet", "Converted from an older format", "Saving…", "Opening…"
     in property <string> document-note;
+    // Live control badge text; empty hides it.
+    in property <string> agent-status;
+    callback agent-badge-clicked();
     in property <[LibraryRow]> library;
     in property <[SceneRow]> scene;
     in property <bool> can-undo;
@@ -1036,6 +1039,25 @@ export component AppWindow inherits Window {
                             color: Theme.warning;
                             font-size: Theme.font-caption;
                             overflow: elide;
+                        }
+                        // Live control: an AI agent is connected. Click opens Settings.
+                        if root.agent-status != "": Rectangle {
+                            height: 18px;
+                            width: min(agent-text.preferred-width + 14px, parent.width);
+                            border-radius: 9px;
+                            background: Theme.control-thumb;
+                            accessible-role: button;
+                            accessible-label: root.agent-status;
+                            agent-text := Text {
+                                text: root.agent-status;
+                                color: Theme.text-secondary;
+                                font-size: 10px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            TouchArea { clicked => { root.agent-badge-clicked(); } }
                         }
                     }
 

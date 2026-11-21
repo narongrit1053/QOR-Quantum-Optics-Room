@@ -26,6 +26,8 @@ use crate::ui_models::UiModels;
 
 /// Writes are applied no faster than one per `PACE`.
 const PACE: Duration = Duration::from_millis(300);
+/// The badge shows while a client was seen this recently.
+const BADGE_WINDOW: Duration = Duration::from_secs(10);
 
 /// Live control while it is switched on (`AppState::agent`).
 pub struct Agent {
@@ -37,13 +39,13 @@ pub struct Agent {
     timer: slint::Timer,
     snapshots: u32,
     /// Label of the agent's last applied write (for the badge).
-    #[allow(dead_code)] // Read by the badge (Task 9).
     pub last_label: Option<String>,
+    /// Repeating 1 s check that hides the badge; runs only while the badge is shown.
+    badge_timer: slint::Timer,
 }
 
 impl Agent {
-    #[allow(dead_code)] // Read by the badge (Task 9).
-    pub fn last_seen(&self) -> Option<Instant> {
+    fn last_seen(&self) -> Option<Instant> {
         #[cfg(windows)]
         return self.server.last_seen();
         #[cfg(not(windows))]
@@ -75,6 +77,14 @@ fn context() -> Option<(AppWindow, Rc<RefCell<AppState>>, Rc<UiModels>)> {
 
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     CONTEXT.with(|c| *c.borrow_mut() = Some((ui.as_weak(), app.clone(), models.clone())));
+    ui.on_agent_badge_clicked({
+        let ui = ui.as_weak();
+        move || {
+            if let Some(ui) = ui.upgrade() {
+                ui.set_settings_open(true);
+            }
+        }
+    });
     if app.borrow().settings.allow_agents {
         set_enabled(ui, app, models, true);
     }
@@ -90,6 +100,7 @@ pub fn set_enabled(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<UiM
         }
         #[cfg(windows)]
         agent.server.stop();
+        ui.set_agent_status("".into());
         return;
     }
     if app.borrow().agent.is_some() {
@@ -105,6 +116,7 @@ pub fn set_enabled(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<UiM
                 timer: slint::Timer::default(),
                 snapshots: 0,
                 last_label: None,
+                badge_timer: slint::Timer::default(),
             });
         }
         Err(error) => {
@@ -198,6 +210,7 @@ fn on_line(line: String, reply: Sender<String>) {
         Ok(env) => env,
         Err(e) => return fail(e),
     };
+    refresh_badge(&ui, &app, true);
     if let Err(e) = admit(&env, token, is_busy(&app.borrow())) {
         return fail(e);
     }
@@ -276,6 +289,38 @@ fn snapshot(app: &Rc<RefCell<AppState>>, path: Option<PathBuf>, width: Option<u3
     crate::export_png::render_to(app, path, width.unwrap_or(1280), height.unwrap_or(800), Box::new(done));
 }
 
+/// "Agent connected" until a write, then "Agent: <step>" (labels already carry the prefix).
+fn badge_text(label: Option<&str>) -> String {
+    match label {
+        Some(l) => format!("Agent: {}", l.strip_prefix("Agent: ").unwrap_or(l)),
+        None => "Agent connected".into(),
+    }
+}
+
+fn badge_visible(last_seen: Option<Instant>, now: Instant) -> bool {
+    last_seen.is_some_and(|t| now.saturating_duration_since(t) < BADGE_WINDOW)
+}
+
+/// Shows or hides the badge. `seen` marks a request just arrived. The 1 s timer runs only
+/// while the badge is up, so an idle app has no wakeups.
+fn refresh_badge(ui: &AppWindow, app: &Rc<RefCell<AppState>>, seen: bool) {
+    let mut a = app.borrow_mut();
+    let Some(agent) = a.agent.as_mut() else { return };
+    if seen || badge_visible(agent.last_seen(), Instant::now()) {
+        ui.set_agent_status(badge_text(agent.last_label.as_deref()).into());
+        if !agent.badge_timer.running() {
+            agent.badge_timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
+                if let Some((ui, app, _)) = context() {
+                    refresh_badge(&ui, &app, false);
+                }
+            });
+        }
+    } else {
+        ui.set_agent_status("".into());
+        agent.badge_timer.stop();
+    }
+}
+
 /// Applies the next queued write if the pacer allows, then arms the timer for the rest.
 fn drain(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     let job = {
@@ -351,10 +396,11 @@ fn apply(
             label
         }
     };
-    let mut a = app.borrow_mut();
-    if let Some(agent) = a.agent.as_mut() {
+    if let Some(agent) = app.borrow_mut().agent.as_mut() {
         agent.last_label = Some(label);
     }
+    refresh_badge(ui, app, true);
+    let a = app.borrow();
     let changed: Vec<&Node> = a.session.doc.nodes.iter().filter(|n| !before.contains(n)).collect();
     let result = json!({
         "changed": changed.iter().map(|n| n.id.0).collect::<Vec<_>>(),
@@ -400,6 +446,21 @@ mod tests {
     fn write_without_token_is_admitted() {
         let e = env(r#"{"v":1,"cmd":"rename","args":{"node":1,"name":"M1"}}"#);
         assert!(admit(&e, 7, false).is_ok());
+    }
+
+    #[test]
+    fn badge_text_strips_prefix() {
+        assert_eq!(badge_text(None), "Agent connected");
+        assert_eq!(badge_text(Some("Agent: place KM100")), "Agent: place KM100");
+        assert_eq!(badge_text(Some("place KM100")), "Agent: place KM100");
+    }
+
+    #[test]
+    fn badge_hides_after_ten_seconds() {
+        let t = Instant::now();
+        assert!(badge_visible(Some(t), t + Duration::from_secs(9)));
+        assert!(!badge_visible(Some(t), t + Duration::from_secs(10)));
+        assert!(!badge_visible(None, t));
     }
 
     #[test]
