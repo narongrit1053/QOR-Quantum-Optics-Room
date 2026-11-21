@@ -87,6 +87,11 @@ pub fn free_motion(pose: (DVec3, DQuat), cons: &[Constraint]) -> FreeMotion {
     FreeMotion { slides, turn }
 }
 
+/// Flip when the child axis now points against the parent axis, so solving turns it least.
+pub fn least_motion_flip(child_rotation: DQuat, child_dir: DVec3, parent_rotation: DQuat, parent_dir: DVec3) -> bool {
+    (child_rotation * child_dir).dot(parent_rotation * parent_dir) < 0.0
+}
+
 /// Default kind for a picked pair; None for plane+axis.
 pub fn default_kind(child: &Feature, parent: &Feature) -> Option<ConstraintKind> {
     match (child, parent) {

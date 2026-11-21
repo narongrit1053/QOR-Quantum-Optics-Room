@@ -12,7 +12,7 @@ use lab_core::part::{Feature, Frame, Geometry, PartDef};
 use lab_core::units::{LengthUnit, format_angle_deg, format_length, parse_angle_deg, parse_length};
 use lab_core::{Attach, Command, Constraint, ConstraintKind, Node, Parent, SelectionTarget, compute_holes};
 use lab_geom::TriMesh;
-use lab_mates::constraints::{constrain, default_kind, solve};
+use lab_mates::constraints::{constrain, default_kind, least_motion_flip, solve};
 use lab_ui::{AppWindow, ConstraintRow, EditField};
 use lab_viewport::{SnapGlyph, ViewportRequest};
 
@@ -300,11 +300,6 @@ fn apply_new(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>,
         p.base = Some(base);
     });
     live(ui, app, models, command, "Constrain".into());
-}
-
-/// Flip when the child axis now points against the parent axis, so solving turns it least.
-fn least_motion_flip(child_rotation: DQuat, child_dir: DVec3, parent_rotation: DQuat, parent_dir: DVec3) -> bool {
-    (child_rotation * child_dir).dot(parent_rotation * parent_dir) < 0.0
 }
 
 /// Runs `command` inside the open constrain gesture (one undo step until OK / `+`).

@@ -283,7 +283,11 @@ fn constrain(args: &ConstrainArgs, ctx: &Ctx) -> Result<(Command, String, Option
             )
         }
     };
-    let mut constraints = Vec::new();
+    // As the panel: the node's existing constraints to the same parent are kept.
+    let mut constraints = match &child.attach {
+        Attach::Constrained { constraints } if child.parent == parent => constraints.clone(),
+        _ => Vec::new(),
+    };
     for c in &args.constraints {
         let cf = child_features
             .iter()
@@ -303,13 +307,24 @@ fn constrain(args: &ConstrainArgs, ctx: &Ctx) -> Result<(Command, String, Option
         if let Some(need) = wrong {
             return Err(err(ErrorCode::Refused, format!("{kind:?} needs {need}")));
         }
+        // Omitted flip: the panel's least-motion choice for axis pairs.
+        let flip = c.flip.unwrap_or_else(|| match (&cf, &pf) {
+            (Feature::Axis { dir: cd, .. }, Feature::Axis { dir: pd, .. }) => {
+                let world = |at| lab_mates::constraints::world_pose(ctx.doc, at).map(|(_, q)| q);
+                match (world(Parent::Node(child.id)), world(parent)) {
+                    (Some(cq), Some(pq)) => lab_mates::constraints::least_motion_flip(cq, *cd, pq, *pd),
+                    _ => false,
+                }
+            }
+            _ => false,
+        });
         constraints.push(Constraint {
             kind,
             child: cf,
             parent: pf,
             offset: c.offset.unwrap_or(0.0),
             angle: c.angle.unwrap_or(0.0).to_radians(),
-            flip: c.flip.unwrap_or(false),
+            flip,
             lock_rotation: c.lock_rotation.unwrap_or(false),
         });
     }
@@ -534,9 +549,12 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
             World { doc, catalog: catalog(), table, holes }
         }
         fn run(&self, req: WriteRequest) -> Result<Resolved, LiveError> {
+            self.run_with(req, &NoFeatures)
+        }
+        fn run_with(&self, req: WriteRequest, features: &dyn FeatureLookup) -> Result<Resolved, LiveError> {
             let holes = |_: PlatformId| Some(self.holes.clone());
             let trace = lab_optics::Trace::default();
-            resolve(&req, &Ctx { doc: &self.doc, catalog: &self.catalog, holes: &holes, features: &NoFeatures, trace: &trace })
+            resolve(&req, &Ctx { doc: &self.doc, catalog: &self.catalog, holes: &holes, features, trace: &trace })
         }
         fn free_id(&self) -> u64 {
             self.doc.next_free_id()
@@ -807,11 +825,51 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         })
     }
 
-    fn concentric(w: &World, child: (&str, &str), parent: Feature) -> Constraint {
-        let cf = lab_core::part::Feature::clone(&crate::live::features::connector_feature(
-            w.catalog.get(child.0).unwrap().connector(child.1).unwrap(),
-        ));
-        Constraint { kind: ConstraintKind::Concentric, child: cf, parent, offset: 0.0, angle: 0.0, flip: false, lock_rotation: false }
+    fn concentric(w: &World, child: (&str, &str), parent: Feature, flip: bool) -> Constraint {
+        let cf = crate::live::features::connector_feature(w.catalog.get(child.0).unwrap().connector(child.1).unwrap());
+        Constraint { kind: ConstraintKind::Concentric, child: cf, parent, offset: 0.0, angle: 0.0, flip, lock_rotation: false }
+    }
+
+    /// The post's `bottom` (-Z) into the upright holder bore (+Z): least motion flips.
+    #[test]
+    fn constrain_omitted_flip_is_least_motion() {
+        let (w, holder, post) = holder_and_post();
+        let bore = crate::live::features::connector_feature(w.catalog.get("test:holder").unwrap().connector("bore").unwrap());
+        let Feature::Axis { dir, .. } = &bore else { panic!() };
+        let bottom = w.catalog.get("test:post").unwrap().connector("bottom").unwrap().frame.z;
+        let want = lab_mates::constraints::least_motion_flip(DQuat::IDENTITY, bottom, DQuat::IDENTITY, *dir);
+        assert!(want);
+        let r = w.run(constrain_req(post, ParentArg::Node(holder), "bottom", "bore", None)).unwrap();
+        let Command::SetAttach { attach: Attach::Constrained { constraints }, .. } = &r.command else { panic!() };
+        assert_eq!(constraints[0].flip, want);
+        // An explicit flip wins.
+        let mut req = constrain_req(post, ParentArg::Node(holder), "bottom", "bore", None);
+        let WriteRequest::Constrain(a) = &mut req else { panic!() };
+        a.constraints[0].flip = Some(false);
+        let r = w.run(req).unwrap();
+        let Command::SetAttach { attach: Attach::Constrained { constraints }, .. } = &r.command else { panic!() };
+        assert!(!constraints[0].flip);
+    }
+
+    struct Plane;
+    impl FeatureLookup for Plane {
+        fn detected(&self, _: &Node, _: &PartDef) -> Vec<Feature> {
+            vec![Feature::Plane { origin: DVec3::ZERO, normal: DVec3::Z }]
+        }
+    }
+
+    #[test]
+    fn constrain_twice_appends() {
+        let (mut w, holder, post) = holder_and_post();
+        let first = w.run(constrain_req(post, ParentArg::Node(holder), "bottom", "bore", Some(ConstraintKind::Concentric))).unwrap();
+        first.command.apply(&mut w.doc).unwrap();
+        let second = w
+            .run_with(constrain_req(post, ParentArg::Node(holder), "f1", "f1", Some(ConstraintKind::Flush)), &Plane)
+            .unwrap();
+        let Command::SetAttach { attach: Attach::Constrained { constraints }, .. } = &second.command else { panic!() };
+        assert_eq!(constraints.len(), 2);
+        assert_eq!(constraints[0].kind, ConstraintKind::Concentric);
+        assert_eq!(constraints[1].kind, ConstraintKind::Flush);
     }
 
     #[test]
@@ -823,7 +881,7 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
             &w.doc,
             NodeId(post),
             Parent::Node(NodeId(holder)),
-            vec![concentric(&w, ("test:post", "bottom"), bore)],
+            vec![concentric(&w, ("test:post", "bottom"), bore, true)],
         )
         .unwrap();
         assert_eq!(r.command, want);
