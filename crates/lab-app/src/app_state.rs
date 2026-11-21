@@ -120,6 +120,18 @@ pub struct AppState {
     pub agent: Option<crate::agent::Agent>,
     /// A gizmo drag is between its first move and its end (agent writes are refused).
     pub dragging: bool,
+    /// Default agent snapshot names count up per process, across agent restarts.
+    pub agent_snapshots: u32,
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())
+}
+
+/// First doc token of this process: unique across restarts and instances, so an agent's stale
+/// token never matches another run's project.
+pub fn token_seed(pid: u32, nanos: u128) -> u64 {
+    (pid as u64) << 32 | (nanos as u64 & 0xffff_ffff)
 }
 
 impl AppState {
@@ -154,9 +166,10 @@ impl AppState {
             isolated_nodes: false,
             walls_hidden: false,
             adapters: Vec::new(),
-            doc_token: 1,
+            doc_token: token_seed(std::process::id(), now_nanos()),
             agent: None,
             dragging: false,
+            agent_snapshots: 0,
         }
     }
 
@@ -205,5 +218,18 @@ impl AppState {
         }
         let holes = Rc::new(compute_holes(platform).unwrap_or_else(|_| HoleSet::empty()));
         self.hole_cache.insert(platform.id, (platform.clone(), holes));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_seed_differs_per_process() {
+        let n = now_nanos();
+        assert_ne!(token_seed(std::process::id(), n), 1);
+        assert_ne!(token_seed(100, n), token_seed(101, n));
+        assert_ne!(token_seed(100, 5), token_seed(100, 6));
     }
 }

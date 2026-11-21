@@ -37,7 +37,6 @@ pub struct Agent {
     pacer: Pacer,
     /// Single-shot: armed only while writes wait, so an idle app has no wakeups.
     timer: slint::Timer,
-    snapshots: u32,
     /// Label of the agent's last applied write (for the badge).
     pub last_label: Option<String>,
     /// Repeating 1 s check that hides the badge; runs only while the badge is shown.
@@ -79,9 +78,11 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     CONTEXT.with(|c| *c.borrow_mut() = Some((ui.as_weak(), app.clone(), models.clone())));
     ui.on_agent_badge_clicked({
         let ui = ui.as_weak();
+        let app = app.clone();
         move || {
             if let Some(ui) = ui.upgrade() {
-                ui.set_settings_open(true);
+                // Same path as the menu, so the sheet shows the current values.
+                crate::settings_ui::open(&ui, &app.borrow());
             }
         }
     });
@@ -93,14 +94,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
 /// Starts or stops the pipe server (the Settings toggle).
 pub fn set_enabled(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<UiModels>, on: bool) {
     if !on {
-        let Some(agent) = app.borrow_mut().agent.take() else { return };
-        let token = app.borrow().doc_token.to_string();
-        for q in agent.queue {
-            let _ = q.reply.send(err_line(&token, &disabled()));
-        }
-        #[cfg(windows)]
-        agent.server.stop();
-        ui.set_agent_status("".into());
+        stop(ui, app, disabled());
         return;
     }
     if app.borrow().agent.is_some() {
@@ -114,7 +108,6 @@ pub fn set_enabled(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<UiM
                 queue: VecDeque::new(),
                 pacer: Pacer::default(),
                 timer: slint::Timer::default(),
-                snapshots: 0,
                 last_label: None,
                 badge_timer: slint::Timer::default(),
             });
@@ -127,6 +120,27 @@ pub fn set_enabled(ui: &AppWindow, app: &Rc<RefCell<AppState>>, _models: &Rc<UiM
     }
 }
 
+/// Stops the server on app exit; queued writes are told the app is closing.
+pub fn shut_down(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
+    stop(ui, app, closing());
+}
+
+/// Stops the server, answering every queued write with `why`.
+fn stop(ui: &AppWindow, app: &Rc<RefCell<AppState>>, why: LiveError) {
+    let Some(agent) = app.borrow_mut().agent.take() else { return };
+    let token = app.borrow().doc_token.to_string();
+    for q in agent.queue {
+        let _ = q.reply.send(err_line(&token, &why));
+    }
+    #[cfg(windows)]
+    agent.server.stop();
+    ui.set_agent_status("".into());
+}
+
+fn closing() -> LiveError {
+    LiveError::new(ErrorCode::Disabled, "LabSetup is closing")
+}
+
 #[cfg(windows)]
 fn start_server() -> std::io::Result<lab_app::live::pipe::Server> {
     use lab_app::live::pipe::{Server, pipe_name};
@@ -134,7 +148,7 @@ fn start_server() -> std::io::Result<lab_app::live::pipe::Server> {
         let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
         let fallback = tx.clone();
         if slint::invoke_from_event_loop(move || on_line(line, tx)).is_err() {
-            let _ = fallback.send(err_line("", &LiveError::new(ErrorCode::Disabled, "LabSetup is closing")));
+            let _ = fallback.send(err_line("", &closing()));
         }
         rx
     })
@@ -146,14 +160,20 @@ fn start_server() -> std::io::Result<()> {
 }
 
 /// A write is refused while the user is in the middle of something (spec "Concurrency").
-pub fn is_busy(a: &AppState) -> bool {
-    a.busy
+/// `ui_busy`: a Slint-side sheet or dialog is open, or the start page hides the document.
+pub fn is_busy(a: &AppState, ui_busy: bool) -> bool {
+    ui_busy
+        || a.busy
         || a.sheet.is_some()
         || a.pending_action.is_some()
         || a.dragging
         || crate::constrain::is_open()
         || crate::joint::panel_open()
         || crate::wizard::is_open()
+}
+
+fn ui_busy(ui: &AppWindow) -> bool {
+    ui.get_modal() || ui.get_start_page_visible()
 }
 
 fn disabled() -> LiveError {
@@ -211,7 +231,7 @@ fn on_line(line: String, reply: Sender<String>) {
         Err(e) => return fail(e),
     };
     refresh_badge(&ui, &app, true);
-    if let Err(e) = admit(&env, token, is_busy(&app.borrow())) {
+    if let Err(e) = admit(&env, token, is_busy(&app.borrow(), ui_busy(&ui))) {
         return fail(e);
     }
     match env.request {
@@ -269,11 +289,8 @@ fn with_ctx<R>(a: &AppState, f: impl FnOnce(&Ctx) -> R) -> R {
 fn snapshot(app: &Rc<RefCell<AppState>>, path: Option<PathBuf>, width: Option<u32>, height: Option<u32>, reply: Sender<String>) {
     let path = path.unwrap_or_else(|| {
         let mut a = app.borrow_mut();
-        let n = a.agent.as_mut().map_or(0, |agent| {
-            agent.snapshots += 1;
-            agent.snapshots
-        });
-        std::env::temp_dir().join(format!("labsetup-agent-{n}.png"))
+        a.agent_snapshots += 1;
+        std::env::temp_dir().join(format!("labsetup-agent-{}-{}.png", std::process::id(), a.agent_snapshots))
     });
     let weak = Rc::downgrade(app);
     let shown = path.clone();
@@ -358,7 +375,7 @@ fn apply(
         let a = app.borrow();
         // Any write stands in for this one: admit only looks at its kind.
         let env = Envelope { v: 1, doc, request: Request::Write(WriteRequest::Undo) };
-        admit(&env, a.doc_token, is_busy(&a))
+        admit(&env, a.doc_token, is_busy(&a, ui_busy(ui)))
     };
     if let Err(e) = admitted {
         return answer(&app.borrow(), Err(e));
@@ -434,6 +451,16 @@ mod tests {
     fn write_while_busy_is_busy() {
         let e = env(r#"{"v":1,"cmd":"undo"}"#);
         assert_eq!(admit(&e, 1, true).unwrap_err().code, ErrorCode::Busy);
+    }
+
+    #[test]
+    fn ui_side_sheet_makes_busy() {
+        let a = AppState::new(
+            lab_app::Session::new_clean(lab_core::presets::default_document(), None),
+            lab_file::Settings::default(),
+        );
+        assert!(!is_busy(&a, false));
+        assert!(is_busy(&a, true));
     }
 
     #[test]

@@ -517,7 +517,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.changelog-open || root.settings-open || root.library-open || root.import-step != 0 || root.catalog-open;
+    out property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.changelog-open || root.settings-open || root.library-open || root.import-step != 0 || root.catalog-open;
     changed shortcuts-open => {
         if (!root.shortcuts-open) {
             EditState.focus-viewport += 1;
@@ -1048,6 +1048,7 @@ export component AppWindow inherits Window {
                             background: Theme.control-thumb;
                             accessible-role: button;
                             accessible-label: root.agent-status;
+                            accessible-action-default => { root.agent-badge-clicked(); }
                             agent-text := Text {
                                 text: root.agent-status;
                                 color: Theme.text-secondary;

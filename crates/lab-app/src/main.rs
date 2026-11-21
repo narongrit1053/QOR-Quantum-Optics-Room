@@ -243,7 +243,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     ui.run()?;
-    agent::set_enabled(&ui, &app, &models, false);
+    agent::shut_down(&ui, &app);
     crate::catalog_book::stop_update();
     Ok(())
 }

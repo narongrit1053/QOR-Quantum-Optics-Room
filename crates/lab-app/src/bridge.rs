@@ -185,6 +185,10 @@ pub fn connect_input(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
             2 => ViewportInput::PointerMove { pos, mods },
             _ => ViewportInput::PointerLeave,
         };
+        if matches!(input, ViewportInput::PointerLeave) {
+            // A cancel or lost capture ends any drag; otherwise agent writes stay busy.
+            a.borrow_mut().dragging = false;
+        }
         a.borrow().send(ViewportRequest::Input(input));
     });
 
@@ -202,7 +206,10 @@ pub fn connect_input(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
     });
 
     let a = app.clone();
-    ui.on_viewport_left(move || a.borrow().send(ViewportRequest::Input(ViewportInput::PointerLeave)));
+    ui.on_viewport_left(move || {
+        a.borrow_mut().dragging = false;
+        a.borrow().send(ViewportRequest::Input(ViewportInput::PointerLeave));
+    });
 }
 
 /// Installs the UI-thread handler for I/O worker results (`files::handle_io_result`).
