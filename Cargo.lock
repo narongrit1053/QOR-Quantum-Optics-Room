@@ -3951,6 +3951,7 @@ dependencies = [
  "lab-ui",
  "lab-viewport",
  "raw-window-handle",
+ "serde",
  "serde_json",
  "slint",
  "toml",
