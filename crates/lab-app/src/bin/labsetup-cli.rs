@@ -27,8 +27,9 @@ const LIVE_HELP: &str = r#"labsetup-cli live <command> [--pid N] [--doc TOKEN] [
 Read `status` first and pass its doc token with --doc on writes. Use `features <node>` before `constrain`. Units are mm and degrees.
 
 Flags become args one-to-one, with - turned into _ (--axis-height 75 sends axis_height: 75). A value that is
-a JSON number or array (--position "[10,0,0]") is sent as one, anything else as a string. String-valued
-options (part, id, name, text, search, hole, ...) are always sent as text; use --json for nested values. --json merges a
+a JSON number, array or object (--position "[10,0,0]", --to '{"node":4}') is sent as one, anything else as a
+string (--to room). String-valued options (part, id, name, text, search, hole, ...) are always sent as text, except
+--hole "[col,row]", which goes as an array. --json merges a
 JSON object of args over the flags. Prints the reply line; exit 0 if ok, 1 on an error reply, 2 on usage or
 connection failure. --pid picks the app when several run.
 
@@ -54,7 +55,7 @@ Writes (each is one undo step, labelled "Agent: ..."):
   move       --node ID [--position "[x,y,z]"] [--rotation "[z,y,x]"]
              live move --node 5 --position "[10,0,0]" --doc TOKEN
   set-params --node ID --params {...}
-             live set-params --node 2 --json '{"params":{"wavelength_nm":532}}' --doc TOKEN
+             live set-params --node 2 --params '{"beam_wavelength_nm":532}' --doc TOKEN
   rename     --node ID --name TEXT                    live rename --node 5 --name "Fold mirror" --doc TOKEN
   note       --node ID --text TEXT                    live note --node 5 --text "Check angle" --doc TOKEN
   remove     --nodes "[ID,...]"                       live remove --nodes "[5,6]" --doc TOKEN
@@ -81,17 +82,18 @@ enum Live {
 
 /// Keys whose protocol type is a string: never turned into numbers (`--name 5` is "5").
 const STRING_KEYS: &[&str] =
-    &["part", "id", "name", "text", "search", "hole", "holder", "post", "mount", "base", "optic", "conn", "parent_conn", "child", "parent", "path"];
+    &["part", "id", "name", "text", "search", "hole", "holder", "post", "mount", "base", "optic", "conn", "parent_conn", "path"];
 
 /// String keys stay text (a `hole` may still be a `[col,row]` array), `flip`/`lock_rotation` take
-/// true/false, anything else goes out as JSON if it is a number or array, else as a string.
+/// true/false, anything else goes out as JSON if it is a number, array or object, else as a string
+/// (`--to room`, `--parent room`).
 fn live_value(key: &str, s: &str) -> serde_json::Value {
     let json = serde_json::from_str::<serde_json::Value>(s).ok();
     match json {
         Some(v) if key == "hole" && v.is_array() => v,
         _ if STRING_KEYS.contains(&key) => serde_json::Value::String(s.to_owned()),
         Some(v @ serde_json::Value::Bool(_)) if matches!(key, "flip" | "lock_rotation") => v,
-        Some(v) if v.is_number() || v.is_array() => v,
+        Some(v) if v.is_number() || v.is_array() || v.is_object() => v,
         _ => serde_json::Value::String(s.to_owned()),
     }
 }
@@ -398,6 +400,20 @@ mod tests {
         assert_eq!(live_line("live rename --node 5 --name 5")["args"], json!({"node":5,"name":"5"}));
         assert_eq!(live_line("live place --part x --hole 3")["args"]["hole"], "3");
         assert_eq!(live_line("live place --part x --hole [3,4]")["args"]["hole"], json!([3, 4]));
+    }
+
+    #[test]
+    fn object_and_parent_flags() {
+        assert_eq!(live_line("live constrain --node 5 --to {\"node\":4}")["args"]["to"], json!({"node":4}));
+        assert_eq!(live_line("live constrain --node 5 --to room")["args"]["to"], "room");
+        let v = live_line("live set-params --node 2 --params {\"wavelength_nm\":633}");
+        assert_eq!(v["args"]["params"], json!({"wavelength_nm":633}));
+        assert_eq!(live_line("live place --part x --parent room --position [0,0,0]")["args"]["parent"], "room");
+        assert_eq!(live_line("live place --part x --parent {\"node\":5} --position [0,0,0]")["args"]["parent"], json!({"node":5}));
+        for line in ["live place --part x --parent room --position [0,0,0]", "live constrain --node 5 --to {\"node\":4} --json {\"constraints\":[]}"] {
+            let Ok(Cmd::Live(Live::Call { line: wire, .. })) = parse(&args(line)) else { panic!() };
+            assert!(lab_app::live::protocol::parse_line(&wire).is_ok(), "{wire}");
+        }
     }
 
     #[test]
