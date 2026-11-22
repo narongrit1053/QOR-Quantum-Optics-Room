@@ -6,10 +6,12 @@
 
 pub mod pol;
 
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
+
 use glam::{DAffine3, DQuat, DVec3};
 use lab_core::part::{ParamValue, PartDef};
 use lab_core::{Document, NodeId, Shape};
-pub use pol::{field_from, horizontal, mirror, polarization_of, Field, Polarization};
+pub use pol::{field_from, horizontal, mirror, pbs, plate_axis, polarization_of, waveplate, Field, Polarization};
 
 /// Port radius when a part gives no clear aperture.
 pub const DEFAULT_RADIUS: f64 = 12.7;
@@ -19,6 +21,8 @@ pub const DEFAULT_FOCAL_LENGTH: f64 = 100.0;
 pub const MAX_SEGMENTS: usize = 64;
 /// Longest segment: a beam that hits nothing ends here.
 pub const MAX_SEGMENT_LENGTH: f64 = 5000.0;
+/// Rays weaker than this (fraction of source power) are dropped.
+pub const MIN_POWER: f64 = 1e-4;
 const EPS: f64 = 1e-6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,8 +30,15 @@ pub enum PortKind {
     Source,
     Mirror,
     Lens,
-    Splitter,
-    /// Waveplate, iris, anything unknown: the beam passes unchanged.
+    /// 50/50 non-polarizing beam splitter.
+    Bs,
+    /// Polarizing beam splitter: p transmits, s reflects.
+    Pbs,
+    Hwp,
+    Qwp,
+    /// Passes like `Pass` until it gets its own physics.
+    Isolator,
+    /// Iris, legacy waveplate, anything unknown: the beam passes unchanged.
     Pass,
     /// Dump, detector, fiber: the beam ends here.
     Stop,
@@ -39,7 +50,11 @@ impl PortKind {
             "source" => PortKind::Source,
             "mirror" => PortKind::Mirror,
             "lens" => PortKind::Lens,
-            "splitter" => PortKind::Splitter,
+            "splitter" | "bs" => PortKind::Bs,
+            "pbs" => PortKind::Pbs,
+            "hwp" => PortKind::Hwp,
+            "qwp" => PortKind::Qwp,
+            "isolator" => PortKind::Isolator,
             "dump" | "detector" | "fiber" => PortKind::Stop,
             _ => PortKind::Pass,
         }
@@ -56,6 +71,10 @@ pub struct Port {
     pub normal: DVec3,
     pub radius: f64,
     pub focal_length: Option<f64>,
+    /// Plate or isolator axis angle from the lab horizontal, degrees.
+    pub angle_deg: f64,
+    /// Horizontal fallback where the port normal is vertical.
+    pub frame_x: DVec3,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -201,18 +220,34 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
                 depth,
             };
             let reflected = ray.dir - 2.0 * ray.dir.dot(p.normal) * p.normal;
+            let mut push = |r: Ray| {
+                if r.field.power() >= MIN_POWER {
+                    stack.push(r);
+                }
+            };
             match p.kind {
                 PortKind::Source | PortKind::Stop => {}
-                PortKind::Pass => stack.push(next(ray.dir, out, ray.depth)),
-                PortKind::Mirror => stack.push(Ray { field: mirror(ray.field, p.normal), ..next(reflected, out, ray.depth) }),
+                PortKind::Pass | PortKind::Isolator => push(next(ray.dir, out, ray.depth)),
+                PortKind::Mirror => push(Ray { field: mirror(ray.field, p.normal), ..next(reflected, out, ray.depth) }),
                 PortKind::Lens => {
                     let f = p.focal_length.unwrap_or(DEFAULT_FOCAL_LENGTH);
-                    stack.push(next(ray.dir, out.lens(f), ray.depth));
+                    push(next(ray.dir, out.lens(f), ray.depth));
                 }
-                PortKind::Splitter => {
-                    // Pushed last = traced first: the transmitted beam before the reflected one.
-                    stack.push(next(reflected, out, ray.depth + 1));
-                    stack.push(next(ray.dir, out, ray.depth + 1));
+                PortKind::Hwp | PortKind::Qwp => {
+                    let gamma = if p.kind == PortKind::Hwp { PI } else { FRAC_PI_2 };
+                    let fast = plate_axis(p.normal, p.frame_x, p.angle_deg, ray.dir);
+                    push(Ray { field: waveplate(ray.field, ray.dir, fast, gamma), ..next(ray.dir, out, ray.depth) });
+                }
+                // Pushed last = traced first: the transmitted beam before the reflected one.
+                PortKind::Bs => {
+                    let f = ray.field.scale(FRAC_1_SQRT_2);
+                    push(Ray { field: mirror(f, p.normal), ..next(reflected, out, ray.depth + 1) });
+                    push(Ray { field: f, ..next(ray.dir, out, ray.depth + 1) });
+                }
+                PortKind::Pbs => {
+                    let (t, r) = pbs(ray.field, ray.dir, p.normal);
+                    push(Ray { field: mirror(r, p.normal), ..next(reflected, out, ray.depth + 1) });
+                    push(Ray { field: t, ..next(ray.dir, out, ray.depth + 1) });
                 }
             }
         }
@@ -298,6 +333,13 @@ pub fn scene(doc: &Document, part: &dyn Fn(&str) -> Option<PartDef>) -> (Vec<Sou
                 normal,
                 radius: op.clear_aperture.map_or(DEFAULT_RADIUS, |a| a / 2.0),
                 focal_length: (kind == PortKind::Lens).then_some(focal_length.unwrap_or(DEFAULT_FOCAL_LENGTH)),
+                angle_deg: match kind {
+                    PortKind::Hwp | PortKind::Qwp => param(node, "wp_angle_deg"),
+                    PortKind::Isolator => param(node, "iso_angle_deg"),
+                    _ => None,
+                }
+                .unwrap_or(0.0),
+                frame_x: pose.transform_vector3(op.frame.x),
             });
         }
     }
@@ -333,7 +375,21 @@ mod tests {
             normal: normal.normalize(),
             radius: 12.7,
             focal_length: (kind == PortKind::Lens).then_some(100.0),
+            angle_deg: 0.0,
+            frame_x: DVec3::X,
         }
+    }
+
+    fn plate(node: u64, kind: PortKind, y: f64, angle_deg: f64) -> Port {
+        Port { angle_deg, ..port(node, kind, DVec3::new(0.0, y, 0.0), DVec3::Y) }
+    }
+
+    fn pbs_port(node: u64, y: f64) -> Port {
+        port(node, PortKind::Pbs, DVec3::new(0.0, y, 0.0), DVec3::new(0.7071, 0.7071, 0.0))
+    }
+
+    fn src_pol(azimuth_deg: f64) -> Source {
+        Source { pol: Polarization { azimuth_deg, ellipticity_deg: 0.0 }, ..source() }
     }
 
     #[test]
@@ -377,7 +433,7 @@ mod tests {
 
     #[test]
     fn splitter_emits_two_beams_and_bounces_are_capped() {
-        let bs = port(2, PortKind::Splitter, DVec3::new(0.0, 100.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let bs = port(2, PortKind::Bs, DVec3::new(0.0, 100.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
         let t = trace(&[source()], &[bs]);
         assert_eq!(t.segments.len(), 3);
         assert_eq!(t.segments.iter().filter(|s| s.depth == 1).count(), 2);
@@ -385,6 +441,103 @@ mod tests {
         let a = port(2, PortKind::Mirror, DVec3::new(0.0, 100.0, 0.0), DVec3::Y);
         let b = port(3, PortKind::Mirror, DVec3::new(0.0, -100.0, 0.0), DVec3::Y);
         assert_eq!(trace(&[source()], &[a, b]).segments.len(), MAX_SEGMENTS);
+    }
+
+    fn powers_after(t: &Trace, from: usize) -> Vec<f64> {
+        t.segments[from..].iter().map(|s| s.power).collect()
+    }
+
+    #[test]
+    fn pbs_sorts_h_and_v() {
+        let t = trace(&[source()], &[pbs_port(2, 100.0)]);
+        assert_eq!(t.segments.len(), 2);
+        assert!((t.segments[1].power - 1.0).abs() < 1e-9);
+        assert!((t.segments[1].end - t.segments[1].start).normalize().distance(DVec3::Y) < 1e-9);
+        let t = trace(&[src_pol(90.0)], &[pbs_port(2, 100.0)]);
+        assert_eq!(t.segments.len(), 2);
+        assert!((t.segments[1].power - 1.0).abs() < 1e-9);
+        let d = (t.segments[1].end - t.segments[1].start).normalize();
+        assert!(d.distance(-DVec3::X) < 1e-3, "{d}");
+    }
+
+    #[test]
+    fn hwp_22_5_gives_50_50() {
+        let t = trace(&[source()], &[plate(2, PortKind::Hwp, 50.0, 22.5), pbs_port(3, 100.0)]);
+        assert_eq!(t.segments.len(), 4);
+        assert_eq!(powers_after(&t, 2).iter().filter(|p| (*p - 0.5).abs() < 1e-9).count(), 2);
+    }
+
+    #[test]
+    fn qwp_45_anchor_is_right_circular() {
+        let t = trace(&[source()], &[plate(2, PortKind::Qwp, 50.0, 45.0), pbs_port(3, 100.0)]);
+        let p = state(&t.segments[1]);
+        assert!((p.ellipticity_deg - 45.0).abs() < 1e-9, "{p:?}");
+        assert_eq!(p.label(), "Circular R");
+        assert_eq!(t.segments.len(), 4);
+        assert!(powers_after(&t, 2).iter().all(|p| (p - 0.5).abs() < 1e-9));
+    }
+
+    #[test]
+    fn two_qwp_make_a_hwp() {
+        let t = trace(&[source()], &[plate(2, PortKind::Qwp, 50.0, 45.0), plate(3, PortKind::Qwp, 100.0, 45.0)]);
+        let p = state(&t.segments[2]);
+        assert!((p.azimuth_deg - 90.0).abs() < 1e-6 && p.ellipticity_deg.abs() < 1e-6, "{p:?}");
+    }
+
+    #[test]
+    fn bs_splits_50_50_and_conserves_power() {
+        let bs = port(2, PortKind::Bs, DVec3::new(0.0, 100.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let t = trace(&[src_pol(30.0)], &[bs]);
+        assert_eq!(t.segments.len(), 3);
+        assert!(powers_after(&t, 1).iter().all(|p| (p - 0.5).abs() < 1e-12));
+        assert!((t.segments[1].power + t.segments[2].power - t.segments[0].power).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mirror_flips_circular_handedness() {
+        let m = port(2, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let s = Source { pol: Polarization { azimuth_deg: 0.0, ellipticity_deg: 45.0 }, ..source() };
+        let t = trace(&[s], &[m]);
+        assert!((state(&t.segments[0]).ellipticity_deg - 45.0).abs() < 1e-9);
+        assert!((state(&t.segments[1]).ellipticity_deg + 45.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn double_pass_isolates() {
+        let t = trace(
+            &[source()],
+            &[plate(2, PortKind::Qwp, 50.0, 45.0), plate(3, PortKind::Mirror, 100.0, 0.0), pbs_port(4, -50.0)],
+        );
+        assert_eq!(t.segments.len(), 5);
+        let last = t.segments.last().unwrap();
+        let d = (last.end - last.start).normalize();
+        assert!(d.distance(DVec3::X) < 1e-3, "{d}");
+        assert!((last.power - 1.0).abs() < 1e-9);
+        assert!((state(last).azimuth_deg - 90.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn legacy_kinds_trace_as_before() {
+        let bs = port(2, PortKind::from_kind("splitter"), DVec3::new(0.0, 100.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let t = trace(&[source()], &[bs]);
+        assert_eq!((t.segments.len(), t.segments.iter().filter(|s| s.depth == 1).count()), (3, 2));
+        let wp = port(2, PortKind::from_kind("waveplate"), DVec3::new(0.0, 100.0, 0.0), DVec3::Y);
+        let t = trace(&[source()], &[wp]);
+        assert_eq!(t.segments.len(), 2);
+        assert_eq!(t.segments[0].field, t.segments[1].field);
+    }
+
+    #[test]
+    fn waveplate_back_side_and_oblique_conserve_power() {
+        let s = src_pol(30.0);
+        for normal in [-DVec3::Y, DVec3::new(0.5, 0.866, 0.0)] {
+            let q = Port { angle_deg: 20.0, ..port(2, PortKind::Qwp, DVec3::new(0.0, 100.0, 0.0), normal) };
+            let t = trace(&[s.clone()], &[q]);
+            assert_eq!(t.segments.len(), 2);
+            let f = t.segments[1].field;
+            assert!(f.re.is_finite() && f.im.is_finite());
+            assert!((t.segments[1].power - 1.0).abs() < 1e-12, "{}", t.segments[1].power);
+        }
     }
 
     fn part_node(id: u64, parent: Parent, position: DVec3, rotation: DQuat) -> Node {

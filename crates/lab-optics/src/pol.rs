@@ -92,3 +92,32 @@ pub fn polarization_of(f: &Field, dir: DVec3, h: DVec3) -> Polarization {
 pub fn mirror(f: Field, n: DVec3) -> Field {
     f.map(|e| 2.0 * e.dot(n) * n - e)
 }
+
+/// Fast axis of a plate with normal `n` at `angle_deg` from the lab horizontal, projected ⊥ `d`.
+pub fn plate_axis(n: DVec3, frame_x: DVec3, angle_deg: f64, d: DVec3) -> DVec3 {
+    let hn = horizontal(n, frame_x);
+    let (s, c) = angle_deg.to_radians().sin_cos();
+    let f0 = c * hn + s * n.cross(hn);
+    (f0 - f0.dot(d) * d).normalize_or_zero()
+}
+
+/// Waveplate with unit fast axis `fast` ⊥ `d`: the slow axis `d × fast` gets phase e^{iΓ}.
+pub fn waveplate(f: Field, d: DVec3, fast: DVec3, retardance: f64) -> Field {
+    let s = d.cross(fast);
+    let ((fr, fi), (sr, si)) = (f.dot(fast), f.dot(s));
+    let (sin, cos) = retardance.sin_cos();
+    let (pr, pi) = (sr * cos - si * sin, sr * sin + si * cos);
+    Field { re: fast * fr + s * pr, im: fast * fi + s * pi }
+}
+
+/// Polarizing beam splitter with plane normal `n`: (transmitted, reflected before the mirror flip).
+/// The s component (⊥ the plane of incidence) reflects.
+pub fn pbs(f: Field, d: DVec3, n: DVec3) -> (Field, Field) {
+    let s = d.cross(n);
+    if s.length() < 1e-9 {
+        return (f, Field { re: DVec3::ZERO, im: DVec3::ZERO });
+    }
+    let s = s.normalize();
+    let r = Field { re: s * f.re.dot(s), im: s * f.im.dot(s) };
+    (Field { re: f.re - r.re, im: f.im - r.im }, r)
+}
