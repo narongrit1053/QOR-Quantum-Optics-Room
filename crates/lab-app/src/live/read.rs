@@ -313,6 +313,7 @@ mod tests {
             q_start: (0.0, 1.0),
             lm2: 1e-3,
             frame_x: DVec3::X,
+            path_start: 0.0,
         };
         w.trace.segments = vec![seg(Some((NodeId(7), "in".into()))), seg(None)];
         let v = w.read(ReadRequest::Beams).unwrap();

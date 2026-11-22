@@ -1,7 +1,7 @@
 // The connector wizard side panel (M4-PLAN POLA-60). It replaces the inspector while open; the
 // viewport shows only the part. All state lives in Rust (lab-app/src/wizard.rs).
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, ComboBox } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { SectionHeader, SegmentedControl, PillButton, IconButton } from "components.slint";
 import { TextField, LabeledField } from "fields.slint";
@@ -20,6 +20,7 @@ export component WizardPanel inherits VerticalLayout {
     in property <string> diameter;
     in property <int> optic-kind;     // index into optic-kinds
     in property <[string]> optic-kinds;
+    in property <string> optic-note;  // hint for the picked kind, or ""
     in property <string> aperture;
     in property <int> template;       // 0 generic, 1 laser head
     in property <int> direction;      // 0 face normal, 1 +X, 2 -X, 3 +Y, 4 -Y
@@ -127,12 +128,17 @@ export component WizardPanel inherits VerticalLayout {
     }
     if root.step == 3: VerticalLayout {
         spacing: 8px;
-        SegmentedControl {
-            items: root.optic-kinds;
-            current: root.optic-kind;
-            floating: false;
-            compact: true;
-            selected(i) => { root.pick("optic", i); }
+        // 11 kinds do not fit a segmented row in the panel.
+        ComboBox {
+            model: root.optic-kinds;
+            current-index: root.optic-kind;
+            selected => { root.pick("optic", self.current-index); }
+        }
+        if root.optic-note != "": Text {
+            text: root.optic-note;
+            color: Theme.text-secondary;
+            font-size: Theme.font-body;
+            wrap: word-wrap;
         }
         LabeledField {
             label: "Clear aperture (optional)";

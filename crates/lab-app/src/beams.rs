@@ -86,6 +86,12 @@ pub fn is_on(app: &AppState, id: NodeId) -> bool {
     !matches!(node.and_then(|n| n.params.get("beam_on")), Some(ParamValue::Flag(false)))
 }
 
+/// "62 % power"; a trace of light below 0.5 % reads "<1 % power", not "0 %".
+pub fn power_label(power: f64) -> String {
+    let percent = format!("{:.0}", power * 100.0);
+    if power > 0.0 && percent == "0" { "<1 % power".into() } else { format!("{percent} % power") }
+}
+
 /// One line per beam pass that ends on node `id`.
 fn describe(trace: &Trace, id: NodeId, app: &AppState) -> String {
     let doc = &app.session.doc;
@@ -99,12 +105,12 @@ fn describe(trace: &Trace, id: NodeId, app: &AppState) -> String {
         .map(|(k, (i, s))| {
             let name = if several { doc.node(s.source).map_or(String::new(), |n| format!("{}: ", n.name)) } else { String::new() };
             format!(
-                "{name}Pass {} · Beam Ø {:.2} mm · {} from source · {} · {:.0} % power",
+                "{name}Pass {} · Beam Ø {:.2} mm · {} from source · {} · {}",
                 k + 1,
                 2.0 * s.w_end,
                 format_length_with_unit(trace.path_length(i), app.units()),
                 s.polarization().label(),
-                s.power * 100.0
+                power_label(s.power)
             )
         })
         .collect();
@@ -189,12 +195,22 @@ mod tests {
     }
 
     #[test]
+    fn power_label_shows_a_trace_of_light() {
+        assert_eq!(super::power_label(0.004), "<1 % power");
+        assert_eq!(super::power_label(0.0), "0 % power");
+        assert_eq!(super::power_label(0.5), "50 % power");
+        assert_eq!(super::power_label(0.005), "<1 % power");
+        assert_eq!(super::power_label(0.006), "1 % power");
+    }
+
+    #[test]
     fn double_pass_lists_two_lines() {
         use lab_optics::{Field, Segment};
         let seg = |hit| Segment {
             source: NodeId(1), start: DVec3::ZERO, end: DVec3::X * 100.0, w_start: 0.5, w_end: 0.5, waist: None,
             hit: Some((hit, "p".into())), depth: 0, field: Field { re: DVec3::Y, im: DVec3::ZERO }, power: 1.0, q_start: (0.0, 1.0), lm2: 1e-3,
             frame_x: DVec3::X,
+            path_start: 0.0,
         };
         let mut app = new_app(Document::new("x"));
         app.beams.segments = vec![seg(NodeId(7)), seg(NodeId(8)), seg(NodeId(7))];

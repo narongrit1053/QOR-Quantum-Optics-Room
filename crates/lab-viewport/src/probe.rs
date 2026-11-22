@@ -19,6 +19,8 @@ const MAX_PROBES: usize = 4;
 #[derive(Resource, Default)]
 pub(crate) struct Probes {
     active: bool,
+    /// The connector wizard inspects a part: its clicks go to the wizard.
+    inspecting: bool,
     pub(crate) points: Vec<DVec3>,
 }
 
@@ -41,6 +43,7 @@ fn probe_input(
     for request in &pending.0 {
         match request {
             FrameRequest::SetTool(tool) => probes.active = *tool == Tool::Probe,
+            FrameRequest::InspectPart(part) => probes.inspecting = part.is_some(),
             FrameRequest::LoadDocument(_) | FrameRequest::ClearProbes(None) => probes.points.clear(),
             FrameRequest::ClearProbes(Some(i)) if *i < probes.points.len() => {
                 probes.points.remove(*i);
@@ -48,7 +51,7 @@ fn probe_input(
             _ => {}
         }
     }
-    if !probes.active {
+    if !probes.active || probes.inspecting {
         return;
     }
     // Clicks in the Top pane pin probes instead of selecting; in Split the 3D pane still selects.

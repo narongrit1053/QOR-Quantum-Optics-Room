@@ -45,7 +45,8 @@ pub struct Polarization {
 
 impl Polarization {
     pub fn label(&self) -> String {
-        let (psi, chi) = (self.azimuth_deg, self.ellipticity_deg);
+        // Rounded, then wrapped: ψ in [179.5, 180) would print as 180.
+        let (psi, chi) = (self.azimuth_deg.round().rem_euclid(180.0), self.ellipticity_deg);
         if chi.abs() > 44.5 {
             format!("Circular {}", if chi > 0.0 { "R" } else { "L" })
         } else if chi.abs() < 0.5 {

@@ -157,8 +157,8 @@ the 90° rotation of a periscope — instead of on the table with a power meter.
 - **Laser node params** (numbers, alongside `beam_wavelength_nm` etc.):
   - `beam_pol_angle_deg`: azimuth of the polarization ellipse from horizontal; default 0.
   - `beam_pol_ellipticity_deg`: 0 = linear, +45 = right circular, −45 = left circular; default 0.
-- **Waveplate node param:** `wp_angle_deg`: fast axis from the port frame `x`, about the
-  port normal; default 0.
+- **Waveplate node param:** `wp_angle_deg`: fast axis from lab horizontal relative to the port
+  normal, rotated about the port normal (see Waveplate above); default 0.
 
 ### UI
 

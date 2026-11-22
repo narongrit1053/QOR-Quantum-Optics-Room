@@ -165,6 +165,9 @@ export struct ProbeCard {
     index: int,
     x: length,
     y: length,
+    // Top-left of the card, placed by lab-app so cards do not overlap.
+    card-x: length,
+    card-y: length,
     title: string,
     passes: [ProbePass],
 }

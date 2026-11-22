@@ -575,12 +575,13 @@ export component ProbeCards inherits Rectangle {
             border-color: Theme.panel-bg;
         }
         Rectangle {
-            x: c.x + 12px;
-            y: c.y + 12px;
-            width: 176px;
+            x: c.card-x;
+            y: c.card-y;
+            width: 176px;  // CARD_W in lab-app/src/probe.rs
             height: card-col.preferred-height;
             border-radius: 8px;
-            background: Theme.panel-bg;
+            // Opaque: a card never shows another through it.
+            background: Theme.sheet-bg;
             border-width: Theme.border-width;
             border-color: Theme.panel-border;
             drop-shadow-blur: 8px;
@@ -650,11 +651,12 @@ export component ProbeCards inherits Rectangle {
                             background: Theme.accent;
                         }
                     }
+                    // One line per row (no wrap), so the card's preferred height counts every line.
                     Text {
                         text: pass.text;
                         color: Theme.text;
                         font-size: Theme.font-caption;
-                        wrap: word-wrap;
+                        overflow: elide;
                     }
                 }
             }

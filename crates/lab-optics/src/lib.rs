@@ -36,7 +36,7 @@ pub enum PortKind {
     Pbs,
     Hwp,
     Qwp,
-    /// Passes like `Pass` until it gets its own physics.
+    /// Faraday isolator: polarizer at `angle_deg`, 45° Faraday rotation, analyzer at `angle_deg + 45°`; the return pass is blocked.
     Isolator,
     /// Iris, legacy waveplate, anything unknown: the beam passes unchanged.
     Pass,
@@ -113,6 +113,8 @@ pub struct Segment {
     pub lm2: f64,
     /// Horizontal fallback for this ray, carried from the source.
     pub frame_x: DVec3,
+    /// Optical path from the source to `start`.
+    pub path_start: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -156,19 +158,10 @@ impl Segment {
 }
 
 impl Trace {
-    /// Optical path from the source to the end of segment `i`: walk back through the segments
-    /// that end where the current one starts.
-    pub fn path_length(&self, mut i: usize) -> f64 {
-        let mut total = 0.0;
-        for _ in 0..self.segments.len() {
-            let s = &self.segments[i];
-            total += s.start.distance(s.end);
-            match self.segments[..i].iter().rposition(|p| p.source == s.source && p.end.distance(s.start) < 1e-6) {
-                Some(prev) => i = prev,
-                None => break,
-            }
-        }
-        total
+    /// Optical path from the source to the end of segment `i`.
+    pub fn path_length(&self, i: usize) -> f64 {
+        let s = &self.segments[i];
+        s.path_start + s.start.distance(s.end)
     }
 
     /// Every pass of a beam within `tol` of `at`. Segments span `[0, len)`, so a joint counts once.
@@ -185,7 +178,7 @@ impl Trace {
             let dir = (s.end - s.start) / len;
             let t = (at - s.start).dot(dir);
             // A joint belongs to the outgoing segment; only a chain's first segment has a start cap.
-            let continues = self.segments[..i].iter().any(|p| p.source == s.source && p.end.distance(s.start) < 1e-6);
+            let continues = s.path_start > 0.0;
             if t >= len - EPS || (continues && t < -EPS) {
                 continue;
             }
@@ -200,7 +193,7 @@ impl Trace {
                 w: s.w_at(closest),
                 pol: s.polarization(),
                 power: s.power,
-                distance: self.path_length(i) - len + t,
+                distance: s.path_start + t,
             });
         }
         out
@@ -248,6 +241,7 @@ struct Ray {
     /// Index of the port the ray left from.
     from: Option<usize>,
     depth: u32,
+    path_start: f64,
 }
 
 /// Traces every source through `ports`.
@@ -263,7 +257,7 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
         let from = ports.iter().position(|p| p.node == s.node && p.kind == PortKind::Source);
         let field = field_from(s.pol, dir, horizontal(dir, s.frame_x));
         let beam = Beam { re: 0.0, im: zr, lm2 };
-        let mut stack = vec![Ray { origin: s.origin, dir, beam, field, frame_x: s.frame_x, from, depth: 0 }];
+        let mut stack = vec![Ray { origin: s.origin, dir, beam, field, frame_x: s.frame_x, from, depth: 0, path_start: 0.0 }];
         let mut count = 0;
         while let Some(ray) = stack.pop() {
             if count == MAX_SEGMENTS {
@@ -292,6 +286,7 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
                 q_start: (ray.beam.re, ray.beam.im),
                 lm2: ray.beam.lm2,
                 frame_x: ray.frame_x,
+                path_start: ray.path_start,
             });
             let Some((i, _)) = hit else { continue };
             let p = &ports[i];
@@ -303,6 +298,7 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
                 frame_x: ray.frame_x,
                 from: Some(i),
                 depth,
+                path_start: ray.path_start + d,
             };
             let reflected = ray.dir - 2.0 * ray.dir.dot(p.normal) * p.normal;
             let mut push = |r: Ray| {
@@ -848,6 +844,19 @@ mod tests {
     }
 
     #[test]
+    fn michelson_arm_path_counts_from_the_source() {
+        let bs = port(2, PortKind::Bs, DVec3::new(0.0, 100.0, 0.0), DVec3::new(-1.0, 1.0, 0.0));
+        let m1 = port(3, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), DVec3::Y);
+        let m2 = port(4, PortKind::Mirror, DVec3::new(50.0, 100.0, 0.0), DVec3::X);
+        let t = trace(&[source()], &[bs, m1, m2]);
+        let i = t.segments.iter().position(|s| s.hit.as_ref().is_some_and(|(n, _)| *n == NodeId(4))).unwrap();
+        assert!((t.path_length(i) - 150.0).abs() < 1e-9, "{}", t.path_length(i));
+        let r = t.probe(DVec3::new(25.0, 100.0, 0.0), PROBE_TOL_MM);
+        let d: Vec<f64> = r.iter().map(|r| r.distance).collect();
+        assert!(d.len() == 2 && (d[0] - 125.0).abs() < 1e-9 && (d[1] - 175.0).abs() < 1e-9, "{d:?}");
+    }
+
+    #[test]
     fn probe_off_beam_and_on_empty_trace_is_empty() {
         let m = port(2, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
         let t = trace(&[source()], &[m]);
@@ -889,6 +898,8 @@ mod tests {
         assert_eq!(Polarization { azimuth_deg: 0.0, ellipticity_deg: 45.0 }.label(), "Circular R");
         assert_eq!(Polarization { azimuth_deg: 0.0, ellipticity_deg: -44.8 }.label(), "Circular L");
         assert_eq!(Polarization { azimuth_deg: 30.0, ellipticity_deg: 12.0 }.label(), "Elliptical 30°, 12°");
+        assert_eq!(Polarization { azimuth_deg: 179.7, ellipticity_deg: 0.0 }.label(), "Linear 0°");
+        assert_eq!(Polarization { azimuth_deg: 179.7, ellipticity_deg: 12.0 }.label(), "Elliptical 0°, 12°");
     }
 
     #[test]

@@ -451,6 +451,7 @@ export component AppWindow inherits Window {
     in property <string> wizard-diameter;
     in property <int> wizard-optic-kind;
     in property <[string]> wizard-optic-kinds;
+    in property <string> wizard-optic-note;
     in property <string> wizard-aperture;
     in property <int> wizard-template;
     in property <int> wizard-direction;
@@ -1285,6 +1286,7 @@ export component AppWindow inherits Window {
                 diameter: root.wizard-diameter;
                 optic-kind: root.wizard-optic-kind;
                 optic-kinds: root.wizard-optic-kinds;
+                optic-note: root.wizard-optic-note;
                 aperture: root.wizard-aperture;
                 template: root.wizard-template;
                 direction: root.wizard-direction;
@@ -1582,7 +1584,8 @@ export component AppWindow inherits Window {
         }
 
         // ── Measure readout (bottom centre, above the toolbar) ───────────────
-        if (root.tool == 3 && root.measure-text != "") || root.tool-hint != "": Rectangle {
+        // The Profiler pins probes only in Top or Split view, and not while the wizard inspects a part.
+        if !(root.tool == 6 && (root.view-mode == 0 || root.wizard-open)) && ((root.tool == 3 && root.measure-text != "") || root.tool-hint != ""): Rectangle {
             x: toolbar.x + (toolbar.width - self.width) / 2;
             y: toolbar.y - self.height - 12px;
             height: 26px;
