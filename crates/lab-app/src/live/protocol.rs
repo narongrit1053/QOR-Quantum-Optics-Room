@@ -19,6 +19,7 @@ pub struct Envelope {
 pub enum Request {
     Read(ReadRequest),
     Write(WriteRequest),
+    App(AppRequest),
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -48,6 +49,26 @@ pub enum WriteRequest {
     Remove { nodes: Vec<u64> },
     Undo,
     Redo,
+}
+
+/// App-state requests (the downloadable catalog and reloading): no undo entry, no doc token,
+/// not paced.
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(tag = "cmd", content = "args", rename_all = "snake_case")]
+pub enum AppRequest {
+    Book { search: String, limit: Option<usize> },
+    BookList,
+    BookAdd { parts: Vec<String> },
+    BookRemove { parts: Vec<String> },
+    BookImport,
+    Reload,
+}
+
+impl AppRequest {
+    /// False for the reads, which are answered even while LabSetup is busy.
+    pub fn mutates(&self) -> bool {
+        !matches!(self, Self::Book { .. } | Self::BookList)
+    }
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -216,6 +237,12 @@ const ARGS: &[(&str, &[&str])] = &[
     ("remove", &["nodes"]),
     ("undo", &[]),
     ("redo", &[]),
+    ("book", &["search", "limit"]),
+    ("book_list", &[]),
+    ("book_add", &["parts"]),
+    ("book_remove", &["parts"]),
+    ("book_import", &[]),
+    ("reload", &[]),
 ];
 const CONSTRAINT_ARGS: &[&str] = &["child", "parent", "kind", "offset", "angle", "flip", "lock_rotation"];
 
@@ -239,17 +266,16 @@ pub fn parse_line(line: &str) -> Result<Envelope, LiveError> {
     };
     let cmd = obj.get("cmd").ok_or_else(|| LiveError::bad("missing field \"cmd\""))?;
     let args = obj.get("args");
-    let request = match decode::<ReadRequest>(cmd, args) {
-        Ok(r) => Request::Read(r),
-        Err(re) => match decode::<WriteRequest>(cmd, args) {
-            Ok(w) => Request::Write(w),
-            // Each enum rejects the other's commands as unknown; report the one that knew it.
-            Err(we) => {
-                let unknown = |e: &serde_json::Error| e.to_string().contains("unknown variant");
-                let e = if unknown(&we) && !unknown(&re) { re } else { we };
-                return Err(LiveError::bad(e.to_string()));
-            }
-        },
+    let request = match (decode::<ReadRequest>(cmd, args), decode::<WriteRequest>(cmd, args), decode::<AppRequest>(cmd, args)) {
+        (Ok(r), ..) => Request::Read(r),
+        (_, Ok(w), _) => Request::Write(w),
+        (.., Ok(a)) => Request::App(a),
+        // Each enum rejects the others' commands as unknown; report the one that knew it.
+        (Err(re), Err(we), Err(ae)) => {
+            let unknown = |e: &serde_json::Error| e.to_string().contains("unknown variant");
+            let e = [re, ae].into_iter().find(|e| !unknown(e)).unwrap_or(we);
+            return Err(LiveError::bad(e.to_string()));
+        }
     };
     let name = cmd.as_str().unwrap_or_default();
     if let Some((_, allowed)) = ARGS.iter().find(|(c, _)| *c == name) {
@@ -296,6 +322,19 @@ mod tests {
     }
     fn w(x: WriteRequest) -> Request {
         Request::Write(x)
+    }
+
+    #[test]
+    fn app_requests_parse() {
+        assert_eq!(
+            p(r#"{"v":1,"cmd":"book_add","args":{"parts":["PBS122"]}}"#),
+            Request::App(AppRequest::BookAdd { parts: vec!["PBS122".into()] })
+        );
+        assert_eq!(p(r#"{"v":1,"cmd":"reload"}"#), Request::App(AppRequest::Reload));
+        let e = parse_line(r#"{"v":1,"cmd":"book","args":{"search":"pbs","colour":1}}"#).unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert!(!AppRequest::BookList.mutates());
+        assert!(AppRequest::BookImport.mutates());
     }
 
     #[test]
