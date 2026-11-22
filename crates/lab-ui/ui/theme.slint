@@ -7,8 +7,10 @@ export global Theme {
     // 0 dark (default), 1 light, 2 high contrast. Set at start and by the view.theme.* actions.
     in-out property <int> mode: 0;
 
-    // The viewport keeps its studio look in every mode.
-    out property <brush> viewport-bg: @radial-gradient(circle, #2A2D33 0%, #16181C 55%, #0B0C0E 100%);
+    // Studio look; light mode uses a mid gray so the dark floor and the light table both still read.
+    out property <brush> viewport-bg: mode == 1
+        ? @radial-gradient(circle, #C9CCD1 0%, #ABAEB4 55%, #8F9298 100%)
+        : @radial-gradient(circle, #2A2D33 0%, #16181C 55%, #0B0C0E 100%);
 
     out property <color> window-bg: mode == 1 ? #F5F5F7 : mode == 2 ? #000000 : #0B0C0E;
     out property <color> panel-bg: mode == 1 ? #FFFFFFE6 : mode == 2 ? #000000 : #18191CE6;
