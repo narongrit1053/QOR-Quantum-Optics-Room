@@ -247,7 +247,7 @@ fn on_line(line: String, reply: Sender<String>) {
             };
             let _ = reply.send(answer(&a, with_ctx(&a, |ctx| read(&r, ctx, &status))));
         }
-        Request::App(_) => fail(LiveError::bad("not supported yet")),
+        Request::App(_) => fail(LiveError::new(ErrorCode::BadRequest, "not supported yet")),
         Request::Write(request) => {
             if let Some(agent) = app.borrow_mut().agent.as_mut() {
                 agent.queue.push_back(Queued { doc: env.doc, request, reply });
