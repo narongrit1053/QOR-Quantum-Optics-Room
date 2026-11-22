@@ -17,6 +17,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::app_state::AppState;
 use crate::catalog_update::{self, UpdateEvent, thousands};
+use lab_app::live::protocol::ErrorCode;
 
 const MAX_ROWS: usize = 500;
 const DURATION_NOTE: &str = "A full update takes one to two hours.";
@@ -525,20 +526,8 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
                 return;
             }
             "import" => {
-                // Its Thorlabs requests would break the updater's one-request-per-30-s gap.
-                if catalog_update::running() {
-                    ui.set_catalog_update_status("Download & import is paused while the catalog updates.".into());
-                    return;
-                }
-                let library = in_library(&a.borrow());
-                let items: Vec<BookItem> = STATE.with(|s| {
-                    s.borrow().list.iter().filter(|p| !library.contains(*p)).filter_map(|p| find(p)).collect()
-                });
-                if items.is_empty() {
-                    // Everything is in the library already: the list is done.
-                    after_import(&ui, &a.borrow());
-                } else {
-                    crate::import::start_book_batch(&ui, items);
+                if let Err(message) = start_import(&ui, &a.borrow()) {
+                    ui.set_catalog_update_status(message.into());
                 }
                 return;
             }
@@ -549,4 +538,139 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
         }
         refresh(&ui, &a.borrow());
     });
+}
+
+// ── Live control (spec 2026-11-22-live-catalog) ───────────────────────────────────────────────
+
+/// Adds (or removes) `parts` on `list`, all or nothing. `has_step` is `None` for a part the
+/// catalog doesn't know.
+pub fn edit_list(
+    list: &mut Vec<String>,
+    add: bool,
+    parts: &[String],
+    has_step: impl Fn(&str) -> Option<bool>,
+) -> Result<(), (ErrorCode, String)> {
+    if !add {
+        list.retain(|p| !parts.contains(p));
+        return Ok(());
+    }
+    for p in parts {
+        match has_step(p) {
+            None => return Err((ErrorCode::NotFound, format!("no part '{p}' in the catalog"))),
+            Some(false) => return Err((ErrorCode::Refused, format!("'{p}' has no STEP file to download"))),
+            Some(true) => {}
+        }
+    }
+    for p in parts {
+        if !list.contains(p) {
+            list.push(p.clone());
+        }
+    }
+    Ok(())
+}
+
+/// The list as saved: the window's copy while it is open, else `catalog-list.json`.
+fn sync_list(ui: &AppWindow) {
+    if !ui.get_catalog_open() {
+        STATE.with(|s| s.borrow_mut().list = load_list());
+    }
+}
+
+pub fn list(ui: &AppWindow) -> Vec<String> {
+    sync_list(ui);
+    STATE.with(|s| s.borrow().list.clone())
+}
+
+/// Adds or removes `parts` on the download list and saves it; returns the new list.
+pub fn add_parts(ui: &AppWindow, app: &AppState, parts: &[String], add: bool) -> Result<Vec<String>, (ErrorCode, String)> {
+    sync_list(ui);
+    let list = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        edit_list(&mut s.list, add, parts, |p| find(p).map(|i| i.step.is_some()))?;
+        save_list(&s.list);
+        Ok(s.list.clone())
+    })?;
+    if ui.get_catalog_open() {
+        refresh(ui, app);
+    }
+    Ok(list)
+}
+
+/// Downloadable-catalog rows for `query`.
+pub fn search(ui: &AppWindow, app: &AppState, query: &str, limit: usize) -> Vec<serde_json::Value> {
+    let library = in_library(app);
+    let listed = list(ui);
+    with_db(|db| db.search(query, None, limit).0)
+        .iter()
+        .map(|i| {
+            serde_json::json!({
+                "vendor": i.vendor, "part": i.part, "name": i.name, "has_step": i.step.is_some(),
+                "in_library": library.contains(&i.part), "listed": listed.contains(&i.part),
+            })
+        })
+        .collect()
+}
+
+/// Starts Download & import for the list, like the window's button; the number of parts sent.
+pub fn start_import(ui: &AppWindow, app: &AppState) -> Result<usize, String> {
+    // Its Thorlabs requests would break the updater's one-request-per-30-s gap.
+    if catalog_update::running() {
+        return Err("Download & import is paused while the catalog updates.".into());
+    }
+    sync_list(ui);
+    let library = in_library(app);
+    let items: Vec<BookItem> =
+        STATE.with(|s| s.borrow().list.iter().filter(|p| !library.contains(*p)).filter_map(|p| find(p)).collect());
+    if items.is_empty() {
+        // Everything is in the library already: the list is done.
+        after_import(ui, app);
+        return Ok(0);
+    }
+    let n = items.len();
+    crate::import::start_book_batch(ui, items);
+    Ok(n)
+}
+
+/// Imports changed catalog JSON files now (normally done at startup); the files skipped.
+pub fn resync(ui: &AppWindow) -> Vec<(String, String)> {
+    let skipped = DB.with(|d| {
+        let mut d = d.borrow_mut();
+        let (Some(db), Some(dir)) = (d.as_mut(), lab_catalog::catalogs_dir()) else { return Vec::new() };
+        db.sync_json_dir(&dir).skipped
+    });
+    show_db(ui);
+    skipped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_step(p: &str) -> Option<bool> {
+        match p {
+            "A" | "B" => Some(true),
+            "C" => Some(false),
+            _ => None,
+        }
+    }
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn edit_list_rules() {
+        let mut list = s(&["A"]);
+        edit_list(&mut list, true, &s(&["B"]), has_step).unwrap();
+        assert_eq!(list, s(&["A", "B"]));
+        let e = edit_list(&mut list, true, &s(&["B", "Z"]), has_step).unwrap_err();
+        assert_eq!(e.0, ErrorCode::NotFound);
+        assert!(e.1.contains('Z'), "{}", e.1);
+        assert_eq!(list, s(&["A", "B"]), "all or nothing");
+        assert_eq!(edit_list(&mut list, true, &s(&["C"]), has_step).unwrap_err().0, ErrorCode::Refused);
+        edit_list(&mut list, true, &s(&["A"]), has_step).unwrap();
+        assert_eq!(list, s(&["A", "B"]));
+        edit_list(&mut list, false, &s(&["A", "Q"]), has_step).unwrap();
+        assert_eq!(list, s(&["B"]));
+    }
 }
