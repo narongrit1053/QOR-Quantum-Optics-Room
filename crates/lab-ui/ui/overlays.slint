@@ -1,8 +1,8 @@
 // Modal sheets, the toast and the popup menus (spec §6.1, §6.4, §6.5).
 
 import { Theme } from "theme.slint";
-import { PresetRow, OverlayItem } from "types.slint";
-import { PillButton, SectionHeader } from "components.slint";
+import { PresetRow, OverlayItem, ProbeCard } from "types.slint";
+import { PillButton, SectionHeader, IconButton } from "components.slint";
 
 // A modal confirmation sheet. It dims the window, swallows pointer input and owns the
 // keyboard while open: its `sheet-keys` scope takes focus on open, so Return (default
@@ -554,6 +554,107 @@ export component ViewportOverlay inherits Rectangle {
             text: l.text;
             color: Theme.text;
             font-size: Theme.font-caption;
+        }
+    }
+}
+
+// Beam Profiler cards (Top view): a dot at each probe and a card beside it.
+export component ProbeCards inherits Rectangle {
+    in property <[ProbeCard]> cards;
+    callback close(int);
+
+    for c in root.cards: Rectangle {
+        Rectangle {
+            x: c.x - 4px;
+            y: c.y - 4px;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.accent;
+            border-width: 1px;
+            border-color: Theme.panel-bg;
+        }
+        Rectangle {
+            x: c.x + 12px;
+            y: c.y + 12px;
+            width: 176px;
+            height: card-col.preferred-height;
+            border-radius: 8px;
+            background: Theme.panel-bg;
+            border-width: Theme.border-width;
+            border-color: Theme.panel-border;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000033;
+            // The card body is not a click on the beam below it.
+            TouchArea { }
+            card-col := VerticalLayout {
+                padding: 8px;
+                padding-top: 4px;
+                spacing: 4px;
+                HorizontalLayout {
+                    Text {
+                        text: c.title;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                    IconButton {
+                        icon: "×";
+                        size: 20px;
+                        icon-size: 11px;
+                        clicked => { root.close(c.index); }
+                    }
+                }
+                if c.ellipse != "": HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        Rectangle {
+                            width: max(c.spot, 2px);
+                            height: max(c.spot, 2px);
+                            border-radius: self.width / 2;
+                            background: Theme.accent-soft;
+                            border-width: 1px;
+                            border-color: Theme.accent;
+                        }
+                    }
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        Path {
+                            width: 28px;
+                            height: 28px;
+                            viewbox-x: 0;
+                            viewbox-y: 0;
+                            viewbox-width: 28;
+                            viewbox-height: 28;
+                            commands: c.ellipse;
+                            stroke: Theme.text;
+                            stroke-width: 1.5px;
+                            fill: transparent;
+                        }
+                    }
+                }
+                if c.ellipse != "": Rectangle {
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Theme.hairline;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * clamp(c.power, 0, 1);
+                        border-radius: 2px;
+                        background: Theme.accent;
+                    }
+                }
+                Text {
+                    text: c.lines;
+                    color: Theme.text;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+            }
         }
     }
 }

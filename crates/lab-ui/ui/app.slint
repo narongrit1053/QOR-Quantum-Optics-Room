@@ -8,11 +8,11 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
-import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
-import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay, DragValueField } from "overlays.slint";
+import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay, ProbeCards, DragValueField } from "overlays.slint";
 import { ImportDialog } from "import.slint";
 import { CatalogBook } from "catalog_book.slint";
 import { ViewCube, CubeFaceRow } from "view_cube.slint";
@@ -32,7 +32,7 @@ import { ConstrainPanel } from "constrain_panel.slint";
 import { RelationChip } from "relations_bar.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 export { RelationChip } from "relations_bar.slint";
@@ -352,6 +352,7 @@ export component AppWindow inherits Window {
     in-out property <bool> show-labels: true;
     in property <[OverlayItem]> overlay-labels;
     in property <[OverlayItem]> overlay-dimensions;
+    in property <[ProbeCard]> probe-cards;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     // Returns true when accepted or a no-op; false keeps the text and marks the field invalid.
@@ -719,6 +720,21 @@ export component AppWindow inherits Window {
                 }
             }
 
+            // Beam Profiler cards, clipped to the Top pane like the labels.
+            if root.view-mode != 0: Rectangle {
+                x: root.view-mode == 2 ? parent.width / 2 : 0;
+                width: root.view-mode == 2 ? parent.width / 2 : parent.width;
+                height: 100%;
+                clip: true;
+                ProbeCards {
+                    x: -parent.x;
+                    width: viewport.width;
+                    height: 100%;
+                    cards: root.probe-cards;
+                    close(i) => { root.action("probe.close.\{i}"); }
+                }
+            }
+
             // Split view (POLA-51): the seam between the 3D and Top panes.
             if root.view-mode == 2: Rectangle {
                 x: parent.width / 2;
@@ -816,6 +832,10 @@ export component AppWindow inherits Window {
                     // Esc in the measure tool re-selects it, which clears the measurement.
                     if (event.text == Key.Escape && root.tool == 3) {
                         root.action("tool.measure");
+                        return accept;
+                    }
+                    if (event.text == Key.Escape && root.tool == 6) {
+                        root.action("probe.clear");
                         return accept;
                     }
                     if ((event.text == Key.F10 && event.modifiers.shift) || event.text == Key.Menu) {
@@ -1484,6 +1504,11 @@ export component AppWindow inherits Window {
                     label: "Measure";
                     active: root.tool == 3;
                     clicked => { root.action("tool.measure"); }
+                }
+                if !toolbar.compact: ToolButton {
+                    label: "Profiler";
+                    active: root.tool == 6;
+                    clicked => { root.action("tool.probe"); }
                 }
                 if !toolbar.compact: ToolButton {
                     label: "Constrain";
