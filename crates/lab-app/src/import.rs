@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use lab_app::live::resolve::finish_from_meta;
 use lab_core::Finish;
 use lab_core::glam::DVec3;
 use lab_core::part::{ConnectorDef, ConnectorKind, Feature, Frame, Gender, Geometry, PartDef};
@@ -27,7 +28,6 @@ type Handles = (Rc<RefCell<AppState>>, Rc<UiModels>);
 
 const VENDORS: [&str; 4] = ["Thorlabs", "MOGLabs", "Toptica", "Other"];
 const FINISHES: [&str; 3] = ["anodized_black", "stainless", "painted"];
-const PAINT: [u8; 3] = [210, 210, 205];
 
 /// Bumped by every start and cancel; a worker whose generation is stale is ignored.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -43,15 +43,6 @@ thread_local! {
     static BATCH: RefCell<Option<Batch>> = const { RefCell::new(None) };
     /// The error step shows a failed URL download: "Choose another file" returns to the URL step.
     static URL_FAILED: RefCell<bool> = const { RefCell::new(false) };
-}
-
-/// The `Finish` stored in an imported part's `meta["finish"]` (AnodizedBlack if unknown).
-pub fn finish_from_meta(value: &str) -> Finish {
-    match value {
-        "stainless" => Finish::Stainless,
-        "painted" => Finish::Painted { rgb: PAINT },
-        _ => Finish::AnodizedBlack,
-    }
 }
 
 fn finish_of(index: i32) -> Finish {

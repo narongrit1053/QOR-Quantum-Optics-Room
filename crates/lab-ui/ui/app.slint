@@ -148,6 +148,7 @@ component SceneItem inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
+    icon: @image-url("assets/app-icon.png");
     // ── Viewport (M0) ─────────────────────────────────────────────────────────
     in property <image> viewport-texture;
     // True from launch until the host has rendered its warm-up frames (pipelines compiled).
@@ -167,6 +168,9 @@ export component AppWindow inherits Window {
     in property <bool> dirty;
     // "", "Recovered — not saved yet", "Converted from an older format", "Saving…", "Opening…"
     in property <string> document-note;
+    // Live control badge text; empty hides it.
+    in property <string> agent-status;
+    callback agent-badge-clicked();
     in property <[LibraryRow]> library;
     in property <[SceneRow]> scene;
     in property <bool> can-undo;
@@ -385,7 +389,8 @@ export component AppWindow inherits Window {
     in property <int> settings-shadows;
     in property <int> settings-gpu;
     in property <[string]> settings-gpus;
-    callback settings-apply(int, int, int, int);
+    in property <bool> settings-allow-agents;
+    callback settings-apply(int, int, int, int, bool);
     // "" ok, else error text (the sheet stays open).
     callback paste-corners(string /* target */, string /* text */) -> string;
     callback sheet-button(int);
@@ -513,7 +518,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.font;
     forward-focus: shortcuts;
 
-    property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.changelog-open || root.settings-open || root.library-open || root.import-step != 0 || root.catalog-open;
+    out property <bool> modal: root.sheet-open || root.paste-target != "" || root.palette-open || root.export-open || root.shortcuts-open || root.changelog-open || root.settings-open || root.library-open || root.import-step != 0 || root.catalog-open;
     changed shortcuts-open => {
         if (!root.shortcuts-open) {
             EditState.focus-viewport += 1;
@@ -1035,6 +1040,26 @@ export component AppWindow inherits Window {
                             color: Theme.warning;
                             font-size: Theme.font-caption;
                             overflow: elide;
+                        }
+                        // Live control: an AI agent is connected. Click opens Settings.
+                        if root.agent-status != "": Rectangle {
+                            height: 18px;
+                            width: min(agent-text.preferred-width + 14px, parent.width);
+                            border-radius: 9px;
+                            background: Theme.control-thumb;
+                            accessible-role: button;
+                            accessible-label: root.agent-status;
+                            accessible-action-default => { root.agent-badge-clicked(); }
+                            agent-text := Text {
+                                text: root.agent-status;
+                                color: Theme.text-secondary;
+                                font-size: 10px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            TouchArea { clicked => { root.agent-badge-clicked(); } }
                         }
                     }
 
@@ -1698,8 +1723,9 @@ export component AppWindow inherits Window {
             shadows: root.settings-shadows;
             gpu: root.settings-gpu;
             gpus: root.settings-gpus;
+            allow-agents: root.settings-allow-agents;
             in-use: root.gpu;
-            apply(q, m, s, g) => { root.settings-apply(q, m, s, g); }
+            apply(q, m, s, g, ag) => { root.settings-apply(q, m, s, g, ag); }
             cancel => { root.settings-open = false; }
         }
 

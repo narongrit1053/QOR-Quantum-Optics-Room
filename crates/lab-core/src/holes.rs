@@ -202,6 +202,26 @@ impl fmt::Display for HoleRef {
     }
 }
 
+impl std::str::FromStr for HoleRef {
+    type Err = String;
+
+    /// Inverts `Display`: spreadsheet row letters (case-insensitive), then a 1-based column.
+    fn from_str(s: &str) -> Result<Self, String> {
+        let bad = || format!("bad hole label {s:?}");
+        let split = s.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(s.len());
+        let (letters, digits) = s.split_at(split);
+        // 7 letters cannot overflow u64; a larger row fails the u32 conversion below.
+        if letters.is_empty() || letters.len() > 7 || digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit())
+        {
+            return Err(bad());
+        }
+        let n = letters.bytes().fold(0u64, |n, b| n * 26 + u64::from(b.to_ascii_uppercase() - b'A') + 1);
+        let row = u32::try_from(n - 1).map_err(|_| bad())?;
+        let col = digits.parse::<u32>().ok().and_then(|c| c.checked_sub(1)).ok_or_else(bad)?;
+        Ok(HoleRef { col, row })
+    }
+}
+
 fn saturate_i32(v: i64) -> i32 {
     v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
@@ -587,6 +607,24 @@ mod tests {
         assert_eq!(HoleRef { col: 0, row: 25 }.to_string(), "Z1");
         assert_eq!(HoleRef { col: 0, row: 26 }.to_string(), "AA1");
         assert!(HoleRef { col: u32::MAX, row: u32::MAX }.to_string().ends_with("4294967296"));
+    }
+
+    #[test]
+    fn parses_hole_labels() {
+        let parse = |s: &str| s.parse::<HoleRef>();
+        assert_eq!(parse("A1"), Ok(HoleRef { col: 0, row: 0 }));
+        assert_eq!(parse("C14"), Ok(HoleRef { col: 13, row: 2 }));
+        assert_eq!(parse("c14"), Ok(HoleRef { col: 13, row: 2 }));
+        assert_eq!(parse("AA3"), Ok(HoleRef { col: 2, row: 26 }));
+        for row in 0..60 {
+            for col in [0, 47] {
+                let h = HoleRef { col, row };
+                assert_eq!(h.to_string().parse::<HoleRef>(), Ok(h));
+            }
+        }
+        for bad in ["", "14", "C", "C0", "C-1", "1C"] {
+            assert!(parse(bad).is_err(), "{bad:?} should not parse");
+        }
     }
 
     // ---- New tests ----

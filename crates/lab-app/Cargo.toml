@@ -31,6 +31,7 @@ lab-viewport.workspace = true
 lab-ui.workspace = true
 slint.workspace = true
 async-channel.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 blake3 = { version = "1.8", default-features = false }
@@ -43,4 +44,14 @@ windows-sys = { version = "0.60", features = [
     "Win32_Graphics_Dwm",
     "Win32_UI_Controls_Dialogs",
     "Win32_System_Com",
+    "Win32_System_Pipes",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+    "Win32_System_IO",
+    "Win32_System_WindowsProgramming",
 ] }
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.12"

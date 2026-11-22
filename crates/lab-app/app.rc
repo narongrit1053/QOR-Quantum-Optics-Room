@@ -1,0 +1,2 @@
+// First icon resource: Explorer, the taskbar pin and the .labsetup file association use it.
+1 ICON "../lab-ui/ui/assets/app-icon.ico"

@@ -29,6 +29,7 @@ pub fn on_transform_requested(
 ) {
     let result = {
         let mut a = app.borrow_mut();
+        a.dragging = !done;
         let session = &mut a.session;
         let Some(node) = session.doc.node(id) else { return };
         // A constrained node keeps its parent and constraints (the viewport's hole snap is ignored)

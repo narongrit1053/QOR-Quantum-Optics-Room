@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
+mod agent;
 mod app_state;
 mod beams;
 mod bom;
@@ -122,6 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     file_drop::connect(&ui, &app, &models);
     part_box::connect(&ui, &app);
     relations::connect(&ui, &app);
+    agent::connect(&ui, &app, &models);
     controller::refresh_all(&ui, &app.borrow(), &models);
     files::show_recent(&ui, &app.borrow().settings);
     if show_start {
@@ -241,6 +243,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     ui.run()?;
+    agent::shut_down(&ui, &app);
     crate::catalog_book::stop_update();
     Ok(())
 }

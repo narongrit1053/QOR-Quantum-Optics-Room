@@ -56,7 +56,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     crate::catalog_book::connect(ui, app);
     crate::catalog_book::startup_sync(ui);
     crate::palette::connect(ui, app, models);
-    crate::settings_ui::connect(ui, app);
+    crate::settings_ui::connect(ui, app, models);
 
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
     ui.on_paste_corners(move |target, text| {
@@ -271,6 +271,8 @@ pub fn replace_document(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc
     let snapshot = {
         let mut a = app.borrow_mut();
         a.session = session;
+        a.doc_token += 1;
+        a.dragging = false;
         a.session.selection = None;
         a.hole_cache.clear();
         a.toast_undo = false;
@@ -859,7 +861,7 @@ fn toast_for(fixes: &[OpeningFix], deleted: Option<(String, usize)>) -> Option<S
     (!text.is_empty()).then(|| text.join(" · "))
 }
 
-fn undo_redo(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, redo: bool) {
+pub(crate) fn undo_redo(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, redo: bool) {
     let outcome = {
         let mut a = app.borrow_mut();
         let history = &a.session.history;

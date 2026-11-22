@@ -4,9 +4,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lab_core::part::{Frame, Geometry, ParamValue};
+use lab_core::part::{Frame, ParamValue};
 use lab_catalog::Catalog;
-use lab_core::{Attach, Command, Finish, Node, NodeId, Parent, SelectionTarget, Shape};
+use lab_app::live::resolve::new_part_node;
+use lab_core::{Attach, Command, Node, NodeId, Parent, SelectionTarget, Shape};
 use lab_ui::AppWindow;
 use lab_core::glam::{DQuat, DVec3};
 use lab_viewport::{DragItem, PlaceRequest, stack_chain};
@@ -24,7 +25,7 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
     let (root, label, command) = {
         let a = app.borrow();
         let first = a.session.doc.next_free_id();
-        let Some(root) = new_node(&a.catalog, request.item.root(), first, request.parent, request.attach.clone(), request.position, request.rotation)
+        let Some(root) = new_part_node(&a.catalog, request.item.root(), first, request.parent, request.attach.clone(), request.position, request.rotation)
         else {
             return;
         };
@@ -56,7 +57,7 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 for (part, attach, position, rotation) in chain {
                     let below = Parent::Node(nodes.last().unwrap().id);
                     let id = first + nodes.len() as u64;
-                    let Some(node) = new_node(&a.catalog, &part, id, below, attach, position, rotation) else { return };
+                    let Some(node) = new_part_node(&a.catalog, &part, id, below, attach, position, rotation) else { return };
                     nodes.push(node);
                 }
                 (nodes[0].id, format!("Add stack of {} parts", nodes.len()), Command::PlaceAssembly { nodes })
@@ -120,44 +121,9 @@ fn riser_for(catalog: &Catalog, part: &str, lift: f64, head: &Node) -> Option<No
     let centre = DVec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, 0.0);
     let at = head.position + head.rotation * centre;
     let attach = if centre.truncate().length() > 1e-6 { Attach::Free } else { head.attach.clone() };
-    let mut riser = new_node(catalog, "generic:riser", head.id.0, head.parent, attach, at, head.rotation)?;
+    let mut riser = new_part_node(catalog, "generic:riser", head.id.0, head.parent, attach, at, head.rotation)?;
     for (k, v) in [("length", l), ("width", w), ("height", lift)] {
         riser.params.insert(k.into(), ParamValue::Number(v));
     }
     Some(riser)
-}
-
-/// A part node from the catalog; `None` when `part` is not in it.
-pub(crate) fn new_node(
-    catalog: &Catalog,
-    part: &str,
-    id: u64,
-    parent: Parent,
-    attach: Attach,
-    position: DVec3,
-    rotation: DQuat,
-) -> Option<Node> {
-    let def = catalog.get(part)?;
-    // The part's main finish: its first mesh piece.
-    let finish = match &def.geometry {
-        Geometry::Parametric { generator, params } => lab_parts::generate(generator, params)
-            .ok()
-            .and_then(|mesh| mesh.pieces.first().map(|(f, _)| f.clone())),
-        Geometry::Mesh { .. } => def.meta.get("finish").map(|f| crate::import::finish_from_meta(f)),
-    };
-    Some(Node { select_lock: false,
-        note: String::new(),
-        id: NodeId(id),
-        name: def.name.clone(),
-        part: def.id.clone(),
-        parent,
-        attach,
-        position,
-        rotation,
-        shape: Shape::Part,
-        finish: finish.unwrap_or(Finish::AnodizedBlack),
-        params: Default::default(),
-        pickable: true,
-        locked: false,
-    })
 }

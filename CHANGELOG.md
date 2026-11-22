@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **AI agents can build your setup.** Turn on *Allow AI agents to control LabSetup* in Settings, and an agent on this PC can place parts, stack posts and mounts at a beam height, and add constraints through `labsetup-cli live`. You watch each step appear, and Ctrl+Z undoes it.
+
 ## v0.0.7
 
 - **Report a bug.** A bug button at the bottom right of the 3D view opens a new GitHub issue with the app version filled in.
