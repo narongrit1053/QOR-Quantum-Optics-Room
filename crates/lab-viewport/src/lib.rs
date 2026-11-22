@@ -31,6 +31,7 @@ mod outline;
 mod overlay;
 mod part_box;
 mod picking;
+mod probe;
 mod place;
 mod platform;
 mod room;
@@ -171,6 +172,8 @@ pub enum ViewportRequest {
     ExportImage { path: std::path::PathBuf, width: u32, height: u32 },
     /// M6. Show or hide the traced laser beams (default shown).
     SetBeams(bool),
+    /// Beam Profiler: remove probe `i` (as `OverlayItem::Probe` numbers them), or all with `None`.
+    ClearProbes(Option<usize>),
     /// M8 view cube. Ease the 3D camera to this direction (as `CameraOrient` reports it) around
     /// the orbit pivot, keeping the distance. Ignored outside the 3D view.
     ViewDirection { yaw: f32, pitch: f32 },
@@ -236,6 +239,8 @@ pub enum Tool {
     Constrain,
     /// M9. Joint tool (docs/M9-PLAN.md E gives it behaviour).
     Joint,
+    /// Beam Profiler: in Top view a click near a beam pins a probe there (up to 4).
+    Probe,
 }
 
 /// What a library drag carries.
@@ -337,6 +342,8 @@ pub enum OverlayItem {
     Label { target: SelectionTarget, pos: Vec2 },
     /// Dimension line between two projected points; the app formats `length_mm` in the display unit.
     Dimension { a: Vec2, b: Vec2, length_mm: f64 },
+    /// Beam Profiler probe `index` at world point `at` (room frame, mm), projected to `pos`.
+    Probe { index: usize, at: bevy::math::DVec3, pos: Vec2 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -376,6 +383,7 @@ pub(crate) enum FrameRequest {
     RenderThumbnail(String, std::path::PathBuf),
     ExportImage(std::path::PathBuf, u32, u32),
     SetBeams(bool),
+    ClearProbes(Option<usize>),
     ViewDirection(f32, f32),
     HighlightFeature(Option<(SelectionTarget, lab_core::part::Feature)>),
     SetHidden(Vec<lab_core::NodeId>),

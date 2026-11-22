@@ -17,6 +17,6 @@ frame = { origin = [0, 0, 0], z = [0, -1, 0], x = [1, 0, 0] }
 
 [[optical_ports]]
 name = "plate"
-kind = "waveplate"
+kind = "qwp"
 clear_aperture = 22.9
 frame = { origin = [0, 0, 0], z = [0, 1, 0], x = [1, 0, 0] }

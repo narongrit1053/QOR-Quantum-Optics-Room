@@ -28,6 +28,7 @@ mod overlay;
 mod palette;
 mod part_box;
 mod place;
+mod probe;
 mod relations;
 mod transform;
 mod update;

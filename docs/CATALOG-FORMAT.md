@@ -81,3 +81,9 @@ Check the links before you rely on them: assistants can invent URLs.
 You are responsible for respecting each vendor's terms of use and copyright. LabSetup ships no vendor data; a catalog you make is for your own use.
 
 - **Thorlabs:** `url` is `https://www.thorlabs.com/item/<part>`. [scripts/catalog/fetch-thorlabs.py](../scripts/catalog/fetch-thorlabs.py) builds a whole catalog, with `step` and `cad_pdf` links, from the store search; site rules and usage are in [catalog/README.md](../catalog/README.md).
+
+## Optical port kinds and node parameters (built-in TOML parts)
+
+An `[[optical_ports]]` entry's `kind` is one of `mirror`, `lens`, `bs` (50/50 beamsplitter), `pbs` (polarizing beamsplitter), `hwp`, `qwp`, `isolator` (ideal Faraday isolator, passes along the port normal), `source`, `detector`, `dump`, `fiber`. The old `splitter` and `waveplate` still load (as `bs` and a pass-through).
+
+The beam trace reads these numeric node parameters: `wp_angle_deg` (waveplate fast-axis angle) and `iso_angle_deg` (isolator input polarizer angle). Both angles are in degrees from lab horizontal relative to the port normal (perpendicular to the normal and room +Z; the port frame `x` if the normal is vertical), rotated about the port normal, positive counter-clockwise as seen by the receiver of a beam travelling along the normal (looking back toward the source).

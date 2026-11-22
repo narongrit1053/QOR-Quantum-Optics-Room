@@ -134,7 +134,8 @@ pub struct Frame {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OpticalPort {
     pub name: String,
-    /// "mirror", "lens", "splitter", "waveplate", "source", "detector", "dump", "fiber".
+    /// "mirror", "lens", "bs", "pbs", "hwp", "qwp", "isolator", "source", "detector", "dump", "fiber"
+    /// (legacy "splitter" and "waveplate" still load).
     pub kind: String,
     #[serde(default)]
     pub clear_aperture: Option<f64>,

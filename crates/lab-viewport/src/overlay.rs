@@ -1,7 +1,7 @@
 //! Top-view labels and dimension lines (M3-PLAN POLA-54). The viewport only projects; Slint draws.
 //! After each update the items for the Top camera are recomputed and sent as
 //! [`ViewportEvent::Overlay`] when they differ from the last ones sent, so an idle viewport sends
-//! nothing and an animation sends at most one per frame.
+//! nothing and an animation sends at most one per frame. Beam Profiler probes ride along.
 
 use bevy::{math::DVec3, prelude::*, transform::TransformSystems};
 use lab_core::SelectionTarget;
@@ -10,6 +10,7 @@ use crate::camera::OrbitCamera;
 use crate::host::{EventSender, ViewportSize};
 use crate::isolate::{Isolated, kept_platforms};
 use crate::measure::node_room_pos;
+use crate::probe::Probes;
 use crate::scene::{SceneIndex, to_render};
 use crate::{OverlayItem, ViewMode, ViewportEvent};
 
@@ -33,6 +34,7 @@ fn send_overlay(
     index: Res<SceneIndex>,
     isolated: Res<Isolated>,
     full: Res<ViewportSize>,
+    probes: Res<Probes>,
     events: Res<EventSender>,
     mut last: ResMut<LastSent>,
 ) {
@@ -86,6 +88,11 @@ fn send_overlay(
                 }
                 if let Some(s) = node_room_pos(doc, n.id).and_then(project) {
                     label(&mut items, SelectionTarget::Node(n.id), s);
+                }
+            }
+            for (index, &at) in probes.points.iter().enumerate() {
+                if let Some(pos) = project(at).filter(|&p| inside(p)) {
+                    items.push(OverlayItem::Probe { index, at, pos });
                 }
             }
             items

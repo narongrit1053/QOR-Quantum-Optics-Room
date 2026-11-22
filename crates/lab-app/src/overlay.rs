@@ -21,6 +21,14 @@ thread_local! {
 }
 
 pub fn on_overlay(ui: &AppWindow, app: &Rc<RefCell<AppState>>, items: Vec<OverlayItem>) {
+    let probes = items
+        .iter()
+        .filter_map(|i| match i {
+            OverlayItem::Probe { index, at, pos } => Some((*index, *at, *pos)),
+            _ => None,
+        })
+        .collect();
+    crate::probe::on_items(ui, &app.borrow(), probes);
     LAST.with(|l| *l.borrow_mut() = items);
     refresh(ui, &app.borrow());
 }
@@ -62,6 +70,7 @@ pub fn refresh(ui: &AppWindow, app: &AppState) {
                     let m = (a + b) / 2.0;
                     dims.push(UiItem { x: m.x, y: m.y, text: format_length_with_unit(*length_mm, unit).into(), commands: commands.into() });
                 }
+                OverlayItem::Probe { .. } => {}
             }
         }
     });
