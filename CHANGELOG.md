@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.0.8
 
 - **AI agents can build your setup.** Turn on *Allow AI agents to control LabSetup* in Settings, and an agent on this PC can place parts, stack posts and mounts at a beam height, and add constraints through `labsetup-cli live`. You watch each step appear, and Ctrl+Z undoes it.
+- **Agents can fetch catalog parts.** An agent can search the catalog, put parts on the download list and run *Download & import*, the same list and progress you see in the Catalog window.
+- **No restart after adding catalog files.** An agent can ask LabSetup to re-read the catalogs folder and the part library (`labsetup-cli live reload`).
+- **Beams show right after opening a project.** The beam trace no longer stays empty until you edit a part.
 
 ## v0.0.7
 
