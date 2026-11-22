@@ -127,6 +127,81 @@ impl Trace {
     }
 }
 
+/// Probe radius: how close to a segment's axis a point counts as on the beam.
+pub const PROBE_TOL_MM: f64 = 2.0;
+
+/// What a probe reads where it meets one pass of a beam.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProbeReading {
+    pub source: NodeId,
+    pub segment: usize,
+    pub w: f64,
+    pub pol: Polarization,
+    pub power: f64,
+    /// Optical path from the source to the probed point.
+    pub distance: f64,
+}
+
+impl Segment {
+    /// Exact 1/e² radius at point `p` of the segment (projected onto its axis).
+    pub fn w_at(&self, p: DVec3) -> f64 {
+        gauss_w(self.q_start.0 + self.start.distance(p), self.q_start.1, self.lm2)
+    }
+}
+
+impl Trace {
+    /// Optical path from the source to the end of segment `i`: walk back through the segments
+    /// that end where the current one starts.
+    pub fn path_length(&self, mut i: usize) -> f64 {
+        let mut total = 0.0;
+        for _ in 0..self.segments.len() {
+            let s = &self.segments[i];
+            total += s.start.distance(s.end);
+            match self.segments[..i].iter().rposition(|p| p.source == s.source && p.end.distance(s.start) < 1e-6) {
+                Some(prev) => i = prev,
+                None => break,
+            }
+        }
+        total
+    }
+
+    /// Every pass of a beam within `tol` of `at`. Segments span `[0, len)`, so a joint counts once.
+    pub fn probe(&self, at: DVec3, tol: f64) -> Vec<ProbeReading> {
+        let mut out = Vec::new();
+        for (i, s) in self.segments.iter().enumerate() {
+            let len = s.start.distance(s.end);
+            if len < EPS {
+                continue;
+            }
+            let dir = (s.end - s.start) / len;
+            let t = (at - s.start).dot(dir);
+            if t >= len {
+                continue;
+            }
+            let t = t.max(0.0);
+            let closest = s.start + dir * t;
+            if closest.distance(at) > tol {
+                continue;
+            }
+            out.push(ProbeReading {
+                source: s.source,
+                segment: i,
+                w: s.w_at(closest),
+                pol: polarization_of(&s.field, dir, horizontal(dir, s.frame_x)),
+                power: s.power,
+                distance: self.path_length(i) - len + t,
+            });
+        }
+        out
+    }
+}
+
+/// 1/e² radius from q = re + i·im (mm) and λ·M² (mm).
+fn gauss_w(re: f64, im: f64, lm2: f64) -> f64 {
+    // w = sqrt(-λM² / (π Im(1/q))), Im(1/q) = -im / |q|².
+    (lm2 * (re * re + im * im) / (PI * im)).sqrt()
+}
+
 /// Gaussian q-parameter `q = z + i·zR` (mm) with the beam's λ·M² (mm).
 #[derive(Clone, Copy, Debug)]
 struct Beam {
@@ -137,8 +212,7 @@ struct Beam {
 
 impl Beam {
     fn w(&self) -> f64 {
-        // w = sqrt(-λM² / (π Im(1/q))), Im(1/q) = -im / |q|².
-        (self.lm2 * (self.re * self.re + self.im * self.im) / (std::f64::consts::PI * self.im)).sqrt()
+        gauss_w(self.re, self.im, self.lm2)
     }
 
     fn propagate(self, d: f64) -> Self {
@@ -703,6 +777,66 @@ mod tests {
         };
         let (_, ports) = scene(&doc, &lookup);
         assert_eq!(ports.iter().map(|p| (p.kind, p.angle_deg)).collect::<Vec<_>>(), [(PortKind::Hwp, 22.5), (PortKind::Isolator, 30.0)]);
+    }
+
+    #[test]
+    fn w_at_matches_analytic() {
+        let lens = port(2, PortKind::Lens, DVec3::new(0.0, 10.0, 0.0), DVec3::Y);
+        let t = trace(&[source()], &[lens]);
+        let seg = &t.segments[1];
+        let (wp, w0) = seg.waist.unwrap();
+        assert!((seg.w_at(wp) - w0).abs() < 1e-9);
+        let zr = PI * w0 * w0 / seg.lm2;
+        assert!((seg.w_at(wp + DVec3::Y * zr) - w0 * 2f64.sqrt()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn probe_reads_power_and_state() {
+        let t = trace(&[source()], &[plate(2, PortKind::Hwp, 50.0, 22.5), pbs_port(3, 100.0)]);
+        let r = t.probe(DVec3::new(0.0, 150.0, 0.0), PROBE_TOL_MM);
+        assert_eq!(r.len(), 1);
+        assert!((r[0].power - 0.5).abs() < 1e-9, "{}", r[0].power);
+        assert_eq!(r[0].pol.label(), "Linear 0\u{b0}");
+        assert!((r[0].distance - 150.0).abs() < 1e-9, "{}", r[0].distance);
+    }
+
+    #[test]
+    fn probe_at_a_joint_is_one_pass() {
+        let m = port(2, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let t = trace(&[source()], &[m]);
+        let r = t.probe(DVec3::new(0.0, 200.0, 0.0), 0.5);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].segment, 1);
+    }
+
+    #[test]
+    fn probe_lists_a_double_pass() {
+        let t = trace(
+            &[source()],
+            &[plate(2, PortKind::Qwp, 50.0, 45.0), plate(3, PortKind::Mirror, 100.0, 0.0), pbs_port(4, -50.0)],
+        );
+        let r = t.probe(DVec3::new(0.0, 75.0, 0.0), PROBE_TOL_MM);
+        assert_eq!(r.len(), 2);
+        assert!(r[0].segment < r[1].segment && r[0].distance < r[1].distance);
+    }
+
+    #[test]
+    fn probe_off_beam_and_on_empty_trace_is_empty() {
+        let m = port(2, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let t = trace(&[source()], &[m]);
+        assert_eq!(t.probe(DVec3::new(1.0, 100.0, 0.0), PROBE_TOL_MM).len(), 1);
+        assert_eq!(t.probe(DVec3::new(50.0, 100.0, 0.0), PROBE_TOL_MM).len(), 0);
+        assert_eq!(Trace::default().probe(DVec3::ZERO, PROBE_TOL_MM).len(), 0);
+    }
+
+    #[test]
+    fn isolator_at_30_degrees_rotates_to_75_and_blocks_the_return() {
+        let i = Port { angle_deg: 30.0, ..iso(2, 50.0, DVec3::Y) };
+        let m = port(3, PortKind::Mirror, DVec3::new(0.0, 100.0, 0.0), DVec3::Y);
+        let t = trace(&[src_pol(30.0)], &[i, m]);
+        assert_eq!(t.segments.len(), 3, "return must be blocked");
+        assert!((t.segments[1].power - 1.0).abs() < 1e-9);
+        assert!((state(&t.segments[1]).azimuth_deg - 75.0).abs() < 1e-6);
     }
 
     fn state(s: &Segment) -> Polarization {

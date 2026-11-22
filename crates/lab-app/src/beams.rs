@@ -73,23 +73,8 @@ fn describe(trace: &Trace, id: NodeId, app: &AppState) -> String {
     format!(
         "Beam Ø at this part: 2w = {:.2} mm · {} from the source",
         2.0 * w,
-        format_length_with_unit(path_length(trace, i), app.units())
+        format_length_with_unit(trace.path_length(i), app.units())
     )
-}
-
-/// Optical path from the source to the end of segment `i`: walk back through the segments that
-/// end where the current one starts.
-fn path_length(trace: &Trace, mut i: usize) -> f64 {
-    let mut total = 0.0;
-    for _ in 0..trace.segments.len() {
-        let s = &trace.segments[i];
-        total += s.start.distance(s.end);
-        match trace.segments[..i].iter().rposition(|p| p.source == s.source && p.end.distance(s.start) < 1e-6) {
-            Some(prev) => i = prev,
-            None => break,
-        }
-    }
-    total
 }
 
 fn laser(app: &AppState) -> Result<(NodeId, lab_core::part::Params), EditError> {
