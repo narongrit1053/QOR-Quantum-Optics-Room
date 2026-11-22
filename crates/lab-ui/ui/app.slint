@@ -1310,7 +1310,11 @@ export component AppWindow inherits Window {
             targets: root.library-menu-targets;
             active-library: root.library-active;
             bundle: root.library-menu-bundle;
-            edit-connectors => { root.library-edit(root.library-menu-part); }
+            edit-connectors => {
+                // The wizard works in the viewport, which the library menu would cover.
+                root.library-open = false;
+                root.library-edit(root.library-menu-part);
+            }
             cmd(verb, arg) => {
                 root.library-cmd(verb, root.library-menu-part, arg);
                 if (verb == "new") {
