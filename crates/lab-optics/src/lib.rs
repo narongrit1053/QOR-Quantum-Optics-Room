@@ -4,9 +4,12 @@
 //! Gaussian q-parameter carried per segment (ABCD, 1/e² radius `w`). Units: mm, radians, room
 //! frame (+Z up). Pure and deterministic: the viewport and the app call the same functions.
 
+pub mod pol;
+
 use glam::{DAffine3, DQuat, DVec3};
 use lab_core::part::{ParamValue, PartDef};
 use lab_core::{Document, NodeId, Shape};
+pub use pol::{field_from, horizontal, mirror, polarization_of, Field, Polarization};
 
 /// Port radius when a part gives no clear aperture.
 pub const DEFAULT_RADIUS: f64 = 12.7;
@@ -64,6 +67,9 @@ pub struct Source {
     /// 1/e² radius at the exit, where the beam has its waist.
     pub waist_mm: f64,
     pub m2: f64,
+    pub pol: Polarization,
+    /// Horizontal for a vertical beam, where `Z x dir` is undefined.
+    pub frame_x: DVec3,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +86,14 @@ pub struct Segment {
     pub hit: Option<(NodeId, String)>,
     /// 0 for the main beam, +1 per splitter reflection or transmission.
     pub depth: u32,
+    pub field: Field,
+    /// `field.power()`.
+    pub power: f64,
+    /// Gaussian q at `start` as (Re, Im), and lam*M2 (mm).
+    pub q_start: (f64, f64),
+    pub lm2: f64,
+    /// Horizontal fallback for this ray, carried from the source.
+    pub frame_x: DVec3,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -125,6 +139,8 @@ struct Ray {
     origin: DVec3,
     dir: DVec3,
     beam: Beam,
+    field: Field,
+    frame_x: DVec3,
     /// Index of the port the ray left from.
     from: Option<usize>,
     depth: u32,
@@ -141,7 +157,9 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
         let lm2 = s.wavelength_nm * 1e-6 * s.m2.max(1.0);
         let zr = std::f64::consts::PI * s.waist_mm * s.waist_mm / lm2;
         let from = ports.iter().position(|p| p.node == s.node && p.kind == PortKind::Source);
-        let mut stack = vec![Ray { origin: s.origin, dir, beam: Beam { re: 0.0, im: zr, lm2 }, from, depth: 0 }];
+        let field = field_from(s.pol, dir, horizontal(dir, s.frame_x));
+        let beam = Beam { re: 0.0, im: zr, lm2 };
+        let mut stack = vec![Ray { origin: s.origin, dir, beam, field, frame_x: s.frame_x, from, depth: 0 }];
         let mut count = 0;
         while let Some(ray) = stack.pop() {
             if count == MAX_SEGMENTS {
@@ -165,15 +183,28 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
                 waist,
                 hit: hit.map(|(i, _)| (ports[i].node, ports[i].port.clone())),
                 depth: ray.depth,
+                field: ray.field,
+                power: ray.field.power(),
+                q_start: (ray.beam.re, ray.beam.im),
+                lm2: ray.beam.lm2,
+                frame_x: ray.frame_x,
             });
             let Some((i, _)) = hit else { continue };
             let p = &ports[i];
-            let next = |dir: DVec3, beam: Beam, depth: u32| Ray { origin: end, dir, beam, from: Some(i), depth };
+            let next = |dir: DVec3, beam: Beam, depth: u32| Ray {
+                origin: end,
+                dir,
+                beam,
+                field: ray.field,
+                frame_x: ray.frame_x,
+                from: Some(i),
+                depth,
+            };
             let reflected = ray.dir - 2.0 * ray.dir.dot(p.normal) * p.normal;
             match p.kind {
                 PortKind::Source | PortKind::Stop => {}
                 PortKind::Pass => stack.push(next(ray.dir, out, ray.depth)),
-                PortKind::Mirror => stack.push(next(reflected, out, ray.depth)),
+                PortKind::Mirror => stack.push(Ray { field: mirror(ray.field, p.normal), ..next(reflected, out, ray.depth) }),
                 PortKind::Lens => {
                     let f = p.focal_length.unwrap_or(DEFAULT_FOCAL_LENGTH);
                     stack.push(next(ray.dir, out.lens(f), ray.depth));
@@ -252,6 +283,11 @@ pub fn scene(doc: &Document, part: &dyn Fn(&str) -> Option<PartDef>) -> (Vec<Sou
                     wavelength_nm: param(node, "beam_wavelength_nm").unwrap_or(780.0),
                     waist_mm: param(node, "beam_waist_mm").unwrap_or(0.5),
                     m2: param(node, "beam_m2").unwrap_or(1.0),
+                    pol: Polarization {
+                        azimuth_deg: param(node, "beam_pol_angle_deg").unwrap_or(0.0),
+                        ellipticity_deg: param(node, "beam_pol_ellipticity_deg").unwrap_or(0.0),
+                    },
+                    frame_x: pose.transform_vector3(op.frame.x),
                 });
             }
             ports.push(Port {
@@ -285,7 +321,7 @@ mod tests {
     use super::*;
 
     fn source() -> Source {
-        Source { node: NodeId(1), origin: DVec3::ZERO, dir: DVec3::Y, wavelength_nm: 780.0, waist_mm: 0.5, m2: 1.0 }
+        Source { node: NodeId(1), origin: DVec3::ZERO, dir: DVec3::Y, wavelength_nm: 780.0, waist_mm: 0.5, m2: 1.0, pol: Polarization::default(), frame_x: DVec3::X }
     }
 
     fn port(node: u64, kind: PortKind, origin: DVec3, normal: DVec3) -> Port {
@@ -425,5 +461,63 @@ mod tests {
         assert_eq!(trace_document(&doc, &lookup).segments.len(), 1);
         doc.nodes[0].params.insert("beam_on".into(), ParamValue::Flag(false));
         assert!(trace_document(&doc, &lookup).segments.is_empty());
+    }
+
+    fn state(s: &Segment) -> Polarization {
+        let d = (s.end - s.start).normalize();
+        polarization_of(&s.field, d, horizontal(d, s.frame_x))
+    }
+
+    #[test]
+    fn source_state_round_trips() {
+        for (a, e) in [(0.0, 0.0), (90.0, 0.0), (45.0, 0.0), (30.0, 20.0), (0.0, 45.0), (0.0, -45.0)] {
+            let h = horizontal(DVec3::Y, DVec3::X);
+            let p = polarization_of(&field_from(Polarization { azimuth_deg: a, ellipticity_deg: e }, DVec3::Y, h), DVec3::Y, h);
+            assert!((p.ellipticity_deg - e).abs() < 1e-9);
+            if e.abs() < 44.9 {
+                assert!((p.azimuth_deg - a).abs() < 1e-9, "{a} {e} -> {p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn labels() {
+        assert_eq!(Polarization { azimuth_deg: 45.0, ellipticity_deg: 0.0 }.label(), "Linear 45°");
+        assert_eq!(Polarization { azimuth_deg: 0.0, ellipticity_deg: 45.0 }.label(), "Circular R");
+        assert_eq!(Polarization { azimuth_deg: 0.0, ellipticity_deg: -44.8 }.label(), "Circular L");
+        assert_eq!(Polarization { azimuth_deg: 30.0, ellipticity_deg: 12.0 }.label(), "Elliptical 30°, 12°");
+    }
+
+    #[test]
+    fn fold_mirror_keeps_horizontal() {
+        let m = port(2, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let t = trace(&[source()], &[m]);
+        let p = state(&t.segments[1]);
+        assert!(p.azimuth_deg < 1e-6 || p.azimuth_deg > 180.0 - 1e-6, "{p:?}");
+        assert!(p.ellipticity_deg.abs() < 1e-6);
+        assert!((t.segments[1].power - 1.0).abs() < 1e-12);
+    }
+
+    fn periscope() -> Trace {
+        let lower = port(2, PortKind::Mirror, DVec3::new(0.0, 100.0, 0.0), DVec3::new(0.0, -0.7071, 0.7071));
+        let upper = port(3, PortKind::Mirror, DVec3::new(0.0, 100.0, 90.0), DVec3::new(-1.0, 0.0, 1.0));
+        trace(&[source()], &[lower, upper])
+    }
+
+    #[test]
+    fn periscope_rotates_horizontal_to_vertical() {
+        let t = periscope();
+        assert_eq!(t.segments.len(), 3);
+        let p = state(&t.segments[2]);
+        assert!((p.azimuth_deg - 90.0).abs() < 1e-6, "{p:?}");
+    }
+
+    #[test]
+    fn vertical_beam_has_finite_field() {
+        let s = &periscope().segments[1];
+        assert!((s.end - s.start).normalize().distance(DVec3::Z) < 1e-9);
+        let p = state(s);
+        assert!(s.field.re.is_finite() && s.field.im.is_finite());
+        assert!(p.azimuth_deg.is_finite() && p.ellipticity_deg.is_finite());
     }
 }

@@ -193,6 +193,11 @@ mod tests {
             waist: Some((DVec3::new(0.0, 100.0, 0.0), 0.05)),
             hit: None,
             depth: 0,
+            field: lab_optics::Field { re: DVec3::X, im: DVec3::ZERO },
+            power: 1.0,
+            q_start: (0.0, 1.0),
+            lm2: 1e-3,
+            frame_x: DVec3::X,
         };
         let solid = pieces(&s, false);
         assert_eq!(solid.len(), 2);
