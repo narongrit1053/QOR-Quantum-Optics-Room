@@ -521,16 +521,19 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
 
 /// Reloads the catalog from disk, sends it to the viewport and refreshes the sidebar
 /// (M4-PLAN: after an import and after the connector wizard saves).
-pub fn reload_catalog(app: &mut AppState, models: &UiModels) {
+/// Re-reads the part library; returns its warnings (`file: message`), also printed.
+pub fn reload_catalog(app: &mut AppState, models: &UiModels) -> Vec<String> {
     let (catalog, warnings) = Catalog::load_default();
+    let warnings: Vec<String> = warnings.iter().map(|w| format!("{}: {}", w.path.display(), w.message)).collect();
     for w in &warnings {
-        eprintln!("library: {}: {}", w.path.display(), w.message);
+        eprintln!("library: {w}");
     }
     app.catalog = std::sync::Arc::new(catalog);
     app.send(ViewportRequest::SetCatalog(app.catalog.clone()));
     // Ports may have changed, and a project opened before the catalog loaded has no trace yet.
     crate::beams::retrace(app);
     fill(app, models);
+    warnings
 }
 
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
