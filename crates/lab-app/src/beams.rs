@@ -27,7 +27,7 @@ type Param = (&'static str, &'static str, &'static str, f64);
 /// The editable beam params of node `id` by its port kinds (a laser wins over the rest).
 fn params_of(app: &AppState, id: NodeId) -> &'static [Param] {
     let def = app.session.doc.node(id).and_then(|n| app.catalog.get(&n.part));
-    let kinds: Vec<_> = def.map(|d| d.optical_ports.iter().map(|p| PortKind::from_kind(&p.kind)).collect()).unwrap_or_default();
+    let kinds: Vec<_> = def.map(|d| d.optical_ports.iter().map(|p| PortKind::of(&p.kind, d)).collect()).unwrap_or_default();
     if kinds.contains(&PortKind::Source) {
         &PARAMS
     } else if kinds.iter().any(|k| matches!(k, PortKind::Hwp | PortKind::Qwp)) {
@@ -266,10 +266,16 @@ mod tests {
         let port = builtin.get("generic:isolator").unwrap().optical_ports[0].clone();
         multi.optical_ports.push(port);
         let qwp_part = builtin.all().into_iter().find(|d| d.optical_ports.iter().any(|p| p.kind == "qwp")).unwrap().id.clone();
+        // A catalog import with the legacy generic kind: read from its name.
+        let mut legacy = builtin.get(&qwp_part).unwrap().clone();
+        legacy.id = "test:legacy-hwp".into();
+        legacy.name = "Zero-Order Half-Wave Plate, 850 nm".into();
+        legacy.optical_ports[0].kind = "waveplate".into();
         let mut defs: Vec<_> = builtin.all().into_iter().cloned().collect();
         defs.push(multi);
+        defs.push(legacy);
         let mut doc = laser_table(&builtin);
-        let parts = ["generic:isolator", &qwp_part, "generic:pbs-cube-1in", "generic:mirror-1in", "test:laser-isolator", "generic:laser-head"];
+        let parts = ["generic:isolator", &qwp_part, "generic:pbs-cube-1in", "generic:mirror-1in", "test:laser-isolator", "generic:laser-head", "test:legacy-hwp"];
         let nodes: Vec<_> = parts.iter().enumerate().map(|(i, p)| {
             lab_app::live::resolve::new_part_node(&Catalog::from_defs(defs.clone()), p, 200 + i as u64, Parent::Platform(PlatformId(1)),
                 Attach::Free, DVec3::new(100.0 * i as f64, 0.0, 0.0), DQuat::IDENTITY).unwrap()
@@ -283,6 +289,7 @@ mod tests {
         assert!(keys(2).is_empty() && keys(3).is_empty());
         assert_eq!(keys(4).len(), 5, "laser wins");
         assert_eq!(keys(5).len(), 5);
+        assert_eq!(keys(6), ["wp_angle_deg"], "legacy waveplate read from its name");
     }
 
     #[test]

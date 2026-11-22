@@ -59,6 +59,20 @@ impl PortKind {
             _ => PortKind::Pass,
         }
     }
+
+    /// [`from_kind`](Self::from_kind), but the generic legacy kinds that catalog imports wrote
+    /// ("splitter", "waveplate") are read from the part's name and category: a polarizing
+    /// splitter is a PBS, a half-/quarter-wave plate an HWP/QWP.
+    pub fn of(kind: &str, def: &PartDef) -> Self {
+        let text = format!("{} {} {}", def.name, def.category, def.tags.join(" ")).to_lowercase();
+        let has = |words: &[&str]| words.iter().any(|w| text.contains(w));
+        match kind {
+            "splitter" if has(&["polariz", "polaris", "pbs"]) => PortKind::Pbs,
+            "waveplate" if has(&["half-wave", "half wave", "λ/2"]) => PortKind::Hwp,
+            "waveplate" if has(&["quarter-wave", "quarter wave", "λ/4"]) => PortKind::Qwp,
+            _ => Self::from_kind(kind),
+        }
+    }
 }
 
 /// An optical surface in world space: a disc of `radius` around `origin`, normal `normal`.
@@ -392,7 +406,7 @@ pub fn scene(doc: &Document, part: &dyn Fn(&str) -> Option<PartDef>) -> (Vec<Sou
         let focal_length = def.meta.get("focal_length_mm").and_then(|f| f.trim().parse::<f64>().ok());
         let beam_on = !matches!(node.params.get("beam_on"), Some(ParamValue::Flag(false)));
         for op in &def.optical_ports {
-            let kind = PortKind::from_kind(&op.kind);
+            let kind = PortKind::of(&op.kind, &def);
             let origin = pose.transform_point3(op.frame.origin);
             let normal = pose.transform_vector3(op.frame.z).normalize_or_zero();
             if kind == PortKind::Source && beam_on {
@@ -747,6 +761,38 @@ mod tests {
     #[test]
     fn reversed_isolator_blocks_forward() {
         assert_eq!(trace(&[source()], &[iso(2, 50.0, -DVec3::Y)]).segments.len(), 1);
+    }
+
+    #[test]
+    fn legacy_kinds_are_read_from_the_part_name() {
+        let def = |name: &str, category: &str| PartDef {
+            id: "t:x".into(),
+            version: 1,
+            vendor: String::new(),
+            part_number: String::new(),
+            name: name.into(),
+            category: category.into(),
+            tags: vec![],
+            geometry: Geometry::Parametric { generator: "x".into(), params: Default::default() },
+            connectors: vec![],
+            optical_ports: vec![],
+            meta: Default::default(),
+            features: Vec::new(),
+        };
+        // As Thorlabs catalog imports name them.
+        let pbs = def("1/2\" Polarizing Beamsplitter Cube, 620 - 1000 nm", "Polarizers/Polarizing Beamsplitters");
+        let hwp = def("Ø1\" Zero-Order Half-Wave Plate, SM1-Threaded Mount, 850 nm", "Wave Plates");
+        let qwp = def("Ø1\" Zero-Order Quarter-Wave Plate, SM1-Threaded Mount, 850 nm", "Wave Plates");
+        assert_eq!(PortKind::of("splitter", &pbs), PortKind::Pbs);
+        assert_eq!(PortKind::of("waveplate", &hwp), PortKind::Hwp);
+        assert_eq!(PortKind::of("waveplate", &qwp), PortKind::Qwp);
+        // Nothing to go on: legacy behaviour.
+        let plain = def("Beamsplitter Cube 50:50", "Beamsplitters");
+        assert_eq!(PortKind::of("splitter", &plain), PortKind::Bs);
+        assert_eq!(PortKind::of("waveplate", &plain), PortKind::Pass);
+        // Explicit kinds win over the name.
+        assert_eq!(PortKind::of("bs", &pbs), PortKind::Bs);
+        assert_eq!(PortKind::of("mirror", &hwp), PortKind::Mirror);
     }
 
     #[test]

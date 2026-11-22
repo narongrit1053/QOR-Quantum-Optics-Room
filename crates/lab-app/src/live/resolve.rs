@@ -141,11 +141,11 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
                 def.is_some_and(|d| {
                     matches!(&d.geometry, Geometry::Parametric { params, .. } if params.contains_key(k))
                         || (LASER_PARAMS.contains(&k)
-                            && d.optical_ports.iter().any(|p| PortKind::from_kind(&p.kind) == PortKind::Source))
+                            && d.optical_ports.iter().any(|p| PortKind::of(&p.kind, d) == PortKind::Source))
                         || (k == "wp_angle_deg"
-                            && d.optical_ports.iter().any(|p| matches!(PortKind::from_kind(&p.kind), PortKind::Hwp | PortKind::Qwp)))
+                            && d.optical_ports.iter().any(|p| matches!(PortKind::of(&p.kind, d), PortKind::Hwp | PortKind::Qwp)))
                         || (k == "iso_angle_deg"
-                            && d.optical_ports.iter().any(|p| PortKind::from_kind(&p.kind) == PortKind::Isolator))
+                            && d.optical_ports.iter().any(|p| PortKind::of(&p.kind, d) == PortKind::Isolator))
                 })
             };
             let mut merged = n.params.clone();
