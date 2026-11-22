@@ -1,8 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.0.8
 
 - **AI agents can build your setup.** Turn on *Allow AI agents to control LabSetup* in Settings, and an agent on this PC can place parts, stack posts and mounts at a beam height, and add constraints through `labsetup-cli live`. You watch each step appear, and Ctrl+Z undoes it.
+- **Agents can fetch catalog parts.** An agent can search the catalog, put parts on the download list and run *Download & import*, the same list and progress you see in the Catalog window.
+- **No restart after adding catalog files.** An agent can ask LabSetup to re-read the catalogs folder and the part library (`labsetup-cli live reload`).
+- **Polarization.** Beams carry their polarization. Mirrors, polarizing and plain beam splitters (PBS, BS), half- and quarter-wave plates act on it, and the inspector shows it for each pass of the beam.
+- **Faraday isolator.** A new library part that passes light one way and blocks the return beam.
+- **Beam Profiler.** In the Top view, click a beam to drop a probe that shows the spot size, polarization and power at that point.
+- **Path lengths through returning beams.** A Michelson arm now reads its true length.
+- The library's right-click menu is clickable again.
+- **Beams show right after opening a project.** The beam trace no longer stays empty until you edit a part.
 
 ## v0.0.7
 

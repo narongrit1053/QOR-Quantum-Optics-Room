@@ -39,7 +39,7 @@ Reads:
   platforms                                           live platforms
   holes      --platform ID                            live holes --platform 1
   part       --id CATALOG_ID                          live part --id thorlabs:KM100
-  catalog    --search TEXT [--limit N]                live catalog --search "post holder" --limit 10
+  catalog    --search TEXT [--limit N]                parts in the library: live catalog --search "post holder" --limit 10
   features   --node ID                                live features --node 5
   beams                                               live beams
   snapshot   [--path FILE] [--width N] [--height N]   live snapshot --path view.png
@@ -60,7 +60,16 @@ Writes (each is one undo step, labelled "Agent: ..."):
   note       --node ID --text TEXT                    live note --node 5 --text "Check angle" --doc TOKEN
   remove     --nodes "[ID,...]"                       live remove --nodes "[5,6]" --doc TOKEN
   undo                                                live undo
-  redo                                                live redo"#;
+  redo                                                live redo
+
+Downloadable catalog and reloading (no undo step, no --doc needed; book-add, book-remove, book-import
+and reload are refused as busy while LabSetup is busy, importing or updating the catalog):
+  book       --search TEXT [--limit N]   catalog rows: vendor, part, name, has_step, in_library, listed
+  book-list                              the download list and the Download & import progress
+  book-add   --parts '["PBS122"]'        put parts with a STEP file on the download list
+  book-remove --parts '["PBS122"]'       take parts off the download list
+  book-import                            Download & import the list, as in the Catalog window; poll book-list
+  reload                                 re-read catalog files and the part library, then recompute the beam"#;
 
 #[derive(Debug, PartialEq)]
 enum Cmd {
@@ -414,6 +423,16 @@ mod tests {
             let Ok(Cmd::Live(Live::Call { line: wire, .. })) = parse(&args(line)) else { panic!() };
             assert!(lab_app::live::protocol::parse_line(&wire).is_ok(), "{wire}");
         }
+    }
+
+    #[test]
+    fn book_add_sends_a_parts_array() {
+        let line = r#"live book-add --parts ["PBS122","KM100"]"#;
+        let v = live_line(line);
+        assert_eq!(v["cmd"], "book_add");
+        assert_eq!(v["args"], json!({"parts":["PBS122","KM100"]}));
+        let Ok(Cmd::Live(Live::Call { line: wire, .. })) = parse(&args(line)) else { panic!() };
+        assert!(lab_app::live::protocol::parse_line(&wire).is_ok(), "{wire}");
     }
 
     #[test]

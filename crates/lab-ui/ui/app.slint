@@ -8,11 +8,11 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
-import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, ProbePass, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
-import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay, DragValueField } from "overlays.slint";
+import { Sheet, PasteSheet, Toast, ProjectMenu, PresetMenu, PartMenu, ViewportOverlay, ProbeCards, DragValueField } from "overlays.slint";
 import { ImportDialog } from "import.slint";
 import { CatalogBook } from "catalog_book.slint";
 import { ViewCube, CubeFaceRow } from "view_cube.slint";
@@ -32,7 +32,7 @@ import { ConstrainPanel } from "constrain_panel.slint";
 import { RelationChip } from "relations_bar.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, ProbePass, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 export { RelationChip } from "relations_bar.slint";
@@ -352,6 +352,7 @@ export component AppWindow inherits Window {
     in-out property <bool> show-labels: true;
     in property <[OverlayItem]> overlay-labels;
     in property <[OverlayItem]> overlay-dimensions;
+    in property <[ProbeCard]> probe-cards;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     // Returns true when accepted or a no-op; false keeps the text and marks the field invalid.
@@ -450,6 +451,7 @@ export component AppWindow inherits Window {
     in property <string> wizard-diameter;
     in property <int> wizard-optic-kind;
     in property <[string]> wizard-optic-kinds;
+    in property <string> wizard-optic-note;
     in property <string> wizard-aperture;
     in property <int> wizard-template;
     in property <int> wizard-direction;
@@ -818,6 +820,10 @@ export component AppWindow inherits Window {
                         root.action("tool.measure");
                         return accept;
                     }
+                    if (event.text == Key.Escape && root.tool == 6) {
+                        root.action("probe.clear");
+                        return accept;
+                    }
                     if ((event.text == Key.F10 && event.modifiers.shift) || event.text == Key.Menu) {
                         root.action("view.context_menu");
                         return accept;
@@ -860,6 +866,23 @@ export component AppWindow inherits Window {
                             root.viewport-left();
                         }
                     }
+                }
+            }
+
+            // Beam Profiler cards, clipped to the Top pane like the labels.
+            // After `keys` so the cards (and their ×) get the pointer before the viewport does;
+            // they hold no focus, so keys still gets Esc.
+            if root.view-mode != 0: Rectangle {
+                x: root.view-mode == 2 ? parent.width / 2 : 0;
+                width: root.view-mode == 2 ? parent.width / 2 : parent.width;
+                height: 100%;
+                clip: true;
+                ProbeCards {
+                    x: -parent.x;
+                    width: viewport.width;
+                    height: 100%;
+                    cards: root.probe-cards;
+                    close(i) => { root.action("probe.close.\{i}"); }
                 }
             }
 
@@ -1263,6 +1286,7 @@ export component AppWindow inherits Window {
                 diameter: root.wizard-diameter;
                 optic-kind: root.wizard-optic-kind;
                 optic-kinds: root.wizard-optic-kinds;
+                optic-note: root.wizard-optic-note;
                 aperture: root.wizard-aperture;
                 template: root.wizard-template;
                 direction: root.wizard-direction;
@@ -1286,7 +1310,11 @@ export component AppWindow inherits Window {
             targets: root.library-menu-targets;
             active-library: root.library-active;
             bundle: root.library-menu-bundle;
-            edit-connectors => { root.library-edit(root.library-menu-part); }
+            edit-connectors => {
+                // The wizard works in the viewport, which the library menu would cover.
+                root.library-open = false;
+                root.library-edit(root.library-menu-part);
+            }
             cmd(verb, arg) => {
                 root.library-cmd(verb, root.library-menu-part, arg);
                 if (verb == "new") {
@@ -1486,6 +1514,11 @@ export component AppWindow inherits Window {
                     clicked => { root.action("tool.measure"); }
                 }
                 if !toolbar.compact: ToolButton {
+                    label: "Profiler";
+                    active: root.tool == 6;
+                    clicked => { root.action("tool.probe"); }
+                }
+                if !toolbar.compact: ToolButton {
                     label: "Constrain";
                     active: root.tool == 4;
                     clicked => { root.action("tool.constrain"); }
@@ -1555,7 +1588,8 @@ export component AppWindow inherits Window {
         }
 
         // ── Measure readout (bottom centre, above the toolbar) ───────────────
-        if (root.tool == 3 && root.measure-text != "") || root.tool-hint != "": Rectangle {
+        // The Profiler pins probes only in Top or Split view, and not while the wizard inspects a part.
+        if !(root.tool == 6 && (root.view-mode == 0 || root.wizard-open)) && ((root.tool == 3 && root.measure-text != "") || root.tool-hint != ""): Rectangle {
             x: toolbar.x + (toolbar.width - self.width) / 2;
             y: toolbar.y - self.height - 12px;
             height: 26px;

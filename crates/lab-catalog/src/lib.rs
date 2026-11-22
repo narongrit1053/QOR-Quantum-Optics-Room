@@ -293,4 +293,13 @@ mod tests {
         }
         assert!(cat.search("thorlabs lens", 10).is_empty());
     }
+
+    #[test]
+    fn builtin_has_the_isolator_and_polarization_kinds() {
+        let (cat, _) = Catalog::load_builtin();
+        let kind = |id: &str| cat.get(id).unwrap().optical_ports[0].kind.clone();
+        assert_eq!(kind("generic:isolator"), "isolator");
+        assert_eq!(kind("generic:pbs-cube-1in"), "pbs");
+        assert_eq!(kind("generic:hwp-1in"), "hwp");
+    }
 }

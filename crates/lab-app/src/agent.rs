@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use lab_app::live::features::FeatureLookup;
 use lab_app::live::protocol::{
-    Envelope, ErrorCode, LiveError, ReadRequest, Request, WriteRequest, err_line, ok_line, parse_line,
+    AppRequest, Envelope, ErrorCode, LiveError, ReadRequest, Request, WriteRequest, err_line, ok_line, parse_line,
 };
 use lab_app::live::read::{StatusInfo, read};
 use lab_app::live::resolve::{Ctx, quat_to_euler_deg, resolve};
@@ -172,6 +172,12 @@ pub fn is_busy(a: &AppState, ui_busy: bool) -> bool {
         || crate::wizard::is_open()
 }
 
+/// Busy for app requests (catalog, reload): they don't touch the document, so the Catalog
+/// window (which shows the agent's list changes) and the start page don't block them.
+fn app_busy(state_busy: bool, modal: bool, catalog_open: bool, importing: bool) -> bool {
+    state_busy || importing || (modal && !catalog_open)
+}
+
 fn ui_busy(ui: &AppWindow) -> bool {
     ui.get_modal() || ui.get_start_page_visible()
 }
@@ -181,8 +187,11 @@ fn disabled() -> LiveError {
 }
 
 fn admit(env: &Envelope, token: u64, busy: bool) -> Result<(), LiveError> {
-    if matches!(env.request, Request::Read(_)) {
-        return Ok(());
+    match &env.request {
+        Request::Read(_) => return Ok(()),
+        // App requests don't touch the document: no token check.
+        Request::App(r) if !r.mutates() || !busy => return Ok(()),
+        _ => {}
     }
     if env.doc.as_ref().is_some_and(|d| *d != token.to_string()) {
         return Err(LiveError::new(ErrorCode::DocChanged, "another project was opened; read it again"));
@@ -231,7 +240,13 @@ fn on_line(line: String, reply: Sender<String>) {
         Err(e) => return fail(e),
     };
     refresh_badge(&ui, &app, true);
-    if let Err(e) = admit(&env, token, is_busy(&app.borrow(), ui_busy(&ui))) {
+    let busy = match &env.request {
+        Request::App(_) => {
+            app_busy(is_busy(&app.borrow(), false), ui.get_modal(), ui.get_catalog_open(), crate::import::progress().is_some())
+        }
+        _ => is_busy(&app.borrow(), ui_busy(&ui)),
+    };
+    if let Err(e) = admit(&env, token, busy) {
         return fail(e);
     }
     match env.request {
@@ -247,6 +262,10 @@ fn on_line(line: String, reply: Sender<String>) {
             };
             let _ = reply.send(answer(&a, with_ctx(&a, |ctx| read(&r, ctx, &status))));
         }
+        Request::App(r) => {
+            let line = app_request(&ui, &app, &models, r);
+            let _ = reply.send(line);
+        }
         Request::Write(request) => {
             if let Some(agent) = app.borrow_mut().agent.as_mut() {
                 agent.queue.push_back(Queued { doc: env.doc, request, reply });
@@ -254,6 +273,60 @@ fn on_line(line: String, reply: Sender<String>) {
             drain(&ui, &app, &models);
         }
     }
+}
+
+/// The downloadable catalog and reloading (spec 2026-11-22-live-catalog): answered at once, no undo.
+fn app_request(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, r: AppRequest) -> String {
+    let busy = |why: &str| answer(&app.borrow(), Err(LiveError::new(ErrorCode::Busy, why)));
+    if r.mutates() && crate::catalog_update::running() {
+        return busy("the catalog is updating; retry when it is done");
+    }
+    let result = match r {
+        AppRequest::Book { search, limit } => {
+            Ok(json!(crate::catalog_book::search(ui, &app.borrow(), &search, limit.unwrap_or(50))))
+        }
+        AppRequest::BookList => {
+            let progress = crate::import::progress();
+            Ok(json!({
+                "list": crate::catalog_book::list(ui),
+                "running": progress.is_some(),
+                "done": progress.map_or(0, |p| p.0),
+                "total": progress.map_or(0, |p| p.1),
+                "failed": progress.map_or(0, |p| p.2),
+                "last_summary": crate::import::last_summary(),
+            }))
+        }
+        AppRequest::BookAdd { parts } | AppRequest::BookRemove { parts } if parts.is_empty() => {
+            Err(LiveError::new(ErrorCode::BadRequest, "'parts' needs at least one part number"))
+        }
+        AppRequest::BookAdd { parts } => add(ui, app, &parts, true),
+        AppRequest::BookRemove { parts } => add(ui, app, &parts, false),
+        AppRequest::BookImport | AppRequest::Reload if crate::import::progress().is_some() => {
+            return busy("a Download & import is running; retry when it is done");
+        }
+        AppRequest::BookImport => match crate::catalog_book::start_import(ui, app) {
+            Ok(count) => Ok(json!({"started": count > 0, "count": count})),
+            Err(message) => Err(LiveError::new(ErrorCode::Busy, message)),
+        },
+        AppRequest::Reload => {
+            let skipped = crate::catalog_book::resync(ui);
+            let warnings = crate::library::reload_catalog(&mut app.borrow_mut(), models);
+            crate::library::sync_ui(ui, &app.borrow());
+            controller::refresh(ui, app, models);
+            Ok(json!({
+                "skipped": skipped.iter().map(|(file, error)| json!({"file": file, "error": error})).collect::<Vec<_>>(),
+                "warnings": warnings,
+                "parts": app.borrow().catalog.all().len(),
+            }))
+        }
+    };
+    answer(&app.borrow(), result)
+}
+
+fn add(ui: &AppWindow, app: &Rc<RefCell<AppState>>, parts: &[String], add: bool) -> Result<Value, LiveError> {
+    crate::catalog_book::add_parts(ui, &app.borrow(), parts, add)
+        .map(|list| json!({"list": list}))
+        .map_err(|(code, message)| LiveError::new(code, message))
 }
 
 fn answer(a: &AppState, result: Result<Value, LiveError>) -> String {
@@ -451,6 +524,32 @@ mod tests {
     fn write_while_busy_is_busy() {
         let e = env(r#"{"v":1,"cmd":"undo"}"#);
         assert_eq!(admit(&e, 1, true).unwrap_err().code, ErrorCode::Busy);
+    }
+
+    #[test]
+    fn catalog_window_alone_does_not_block_app_requests() {
+        assert!(!app_busy(false, true, true, false));
+        assert!(app_busy(false, true, false, false), "another sheet is open");
+        assert!(app_busy(false, true, true, true), "an import is running");
+        assert!(app_busy(true, false, false, false), "the user is editing");
+    }
+
+    #[test]
+    fn app_read_ignores_busy() {
+        let e = env(r#"{"v":1,"cmd":"book_list","doc":"old"}"#);
+        assert!(admit(&e, 1, true).is_ok());
+    }
+
+    #[test]
+    fn app_write_while_busy_is_busy() {
+        let e = env(r#"{"v":1,"cmd":"book_add","args":{"parts":["PBS122"]}}"#);
+        assert_eq!(admit(&e, 1, true).unwrap_err().code, ErrorCode::Busy);
+    }
+
+    #[test]
+    fn app_write_ignores_doc_token() {
+        let e = env(r#"{"v":1,"cmd":"reload","doc":"old"}"#);
+        assert!(admit(&e, 1, false).is_ok());
     }
 
     #[test]

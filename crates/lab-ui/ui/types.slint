@@ -150,6 +150,28 @@ export struct OverlayItem {
     commands: string,
 }
 
+// One pass of a beam through a Beam Profiler probe: `spot` is the drawn spot diameter (the real 2w
+// is in `text`), `ellipse` the polarization path in a 28 px box (empty: no beam, no graphics),
+// `power` the fraction of the source.
+export struct ProbePass {
+    text: string,
+    spot: length,
+    ellipse: string,
+    power: float,
+}
+
+// A Beam Profiler card at probe point (x, y), a row per pass.
+export struct ProbeCard {
+    index: int,
+    x: length,
+    y: length,
+    // Top-left of the card, placed by lab-app so cards do not overlap.
+    card-x: length,
+    card-y: length,
+    title: string,
+    passes: [ProbePass],
+}
+
 // A command palette row (POLA-65).
 // One line of the What's new / update sheet: a heading, or a text paragraph.
 export struct ChangelogLine {

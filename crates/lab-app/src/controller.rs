@@ -179,6 +179,7 @@ pub fn refresh_all(ui: &AppWindow, app: &AppState, models: &UiModels) {
     refresh_document(ui, app, models);
     refresh_inspector(ui, app, models);
     crate::overlay::refresh(ui, app);
+    crate::probe::refresh(ui, app);
     ui.set_busy(app.busy);
 }
 
@@ -606,20 +607,32 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         "library.import_folder" => crate::import::choose_folder(ui),
         "import.step_insert" => crate::import::insert_dialog(ui, app, models),
         "paste.cancel" => ui.set_paste_target("".into()),
-        "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" | "tool.constrain" | "tool.joint" => {
+        "probe.clear" => app.borrow().send(ViewportRequest::ClearProbes(None)),
+        id if id.starts_with("probe.close.") => {
+            if let Ok(i) = id["probe.close.".len()..].parse() {
+                app.borrow().send(ViewportRequest::ClearProbes(Some(i)));
+            }
+        }
+        "tool.select" | "tool.move" | "tool.rotate" | "tool.measure" | "tool.constrain" | "tool.joint" | "tool.probe" => {
             let (index, tool) = match id {
                 "tool.move" => (1, Tool::Move),
                 "tool.rotate" => (2, Tool::Rotate),
                 "tool.measure" => (3, Tool::Measure),
                 "tool.constrain" => (4, Tool::Constrain),
                 "tool.joint" => (5, Tool::Joint),
+                "tool.probe" => (6, Tool::Probe),
                 _ => (0, Tool::Select),
             };
             ui.set_tool(index);
+            // A tool's own hint is set below or by its reset.
+            set_hint(ui, "");
             crate::constrain::reset(ui, app, models, tool == Tool::Constrain);
             crate::joint::reset(ui, app, models, tool == Tool::Joint);
-            if tool == Tool::Measure {
-                set_hint(ui, "Click the first point");
+            match tool {
+                Tool::Measure => set_hint(ui, "Click the first point"),
+                // Cards follow committed edits; during a gizmo drag they update on release.
+                Tool::Probe => set_hint(ui, "Click a beam to pin a probe"),
+                _ => {}
             }
             app.borrow().send(ViewportRequest::SetTool(tool));
         }

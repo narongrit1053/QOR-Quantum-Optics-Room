@@ -136,9 +136,12 @@ pub fn read(req: &ReadRequest, ctx: &Ctx, status: &StatusInfo) -> Result<Value, 
                 .segments
                 .iter()
                 .map(|s| {
+                    let pol = s.polarization();
                     json!({
                         "start": [s.start.x, s.start.y, s.start.z], "end": [s.end.x, s.end.y, s.end.z],
                         "hits": s.hit.as_ref().map(|(n, _)| n.0), "radius": [s.w_start, s.w_end],
+                        "power": s.power, "polarization": pol.label(),
+                        "azimuth_deg": pol.azimuth_deg, "ellipticity_deg": pol.ellipticity_deg,
                     })
                 })
                 .collect(),
@@ -305,6 +308,12 @@ mod tests {
             waist: None,
             hit,
             depth: 0,
+            field: lab_optics::Field { re: DVec3::Y, im: DVec3::ZERO },
+            power: 1.0,
+            q_start: (0.0, 1.0),
+            lm2: 1e-3,
+            frame_x: DVec3::X,
+            path_start: 0.0,
         };
         w.trace.segments = vec![seg(Some((NodeId(7), "in".into()))), seg(None)];
         let v = w.read(ReadRequest::Beams).unwrap();

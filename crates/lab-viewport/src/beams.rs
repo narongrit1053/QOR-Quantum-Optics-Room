@@ -8,7 +8,7 @@ use bevy::{
     camera::visibility::VisibilitySystems, light::NotShadowCaster, math::DVec3, mesh::ConicalFrustumMeshBuilder,
     mesh::MeshBuilder, prelude::*,
 };
-use lab_optics::Segment;
+use lab_optics::{Segment, Trace};
 
 use crate::host::{PendingRequests, SettleFrames};
 use crate::isolate::{Isolated, apply_isolation, kept_platforms};
@@ -23,16 +23,18 @@ const GAP_MM: f64 = 4.0;
 const MAX_DASHES: f64 = 400.0;
 
 #[derive(Resource)]
-struct Beams {
+pub(crate) struct Beams {
     show: bool,
     inspecting: bool,
     root: Option<Entity>,
     materials: HashMap<u64, Handle<StandardMaterial>>,
+    /// The last trace drawn (empty while beams are hidden), for the probe's screen-space snap.
+    pub(crate) trace: Trace,
 }
 
 impl Default for Beams {
     fn default() -> Self {
-        Beams { show: true, inspecting: false, root: None, materials: HashMap::new() }
+        Beams { show: true, inspecting: false, root: None, materials: HashMap::new(), trace: Trace::default() }
     }
 }
 
@@ -81,6 +83,7 @@ fn update_beams(
         commands.entity(root).try_despawn();
     }
     settle.0 = settle.0.max(2);
+    beams.trace = Trace::default();
     let Some(doc) = index.snapshot.as_ref().filter(|_| beams.show && !beams.inspecting) else { return };
     let trace = lab_optics::trace_document(doc, &|id| catalog.0.get(id).cloned());
     if trace.segments.is_empty() {
@@ -94,6 +97,7 @@ fn update_beams(
         {
             continue;
         }
+        beams.trace.segments.push(segment.clone());
         let wavelength = doc
             .node(segment.source)
             .and_then(|n| n.params.get("beam_wavelength_nm"))
@@ -193,6 +197,12 @@ mod tests {
             waist: Some((DVec3::new(0.0, 100.0, 0.0), 0.05)),
             hit: None,
             depth: 0,
+            field: lab_optics::Field { re: DVec3::X, im: DVec3::ZERO },
+            power: 1.0,
+            q_start: (0.0, 1.0),
+            lm2: 1e-3,
+            frame_x: DVec3::X,
+            path_start: 0.0,
         };
         let solid = pieces(&s, false);
         assert_eq!(solid.len(), 2);

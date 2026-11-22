@@ -62,6 +62,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("tool.move", "Move Tool", "Tools", "translate drag gizmo", "M"),
     a("tool.rotate", "Rotate Tool", "Tools", "turn angle gizmo", ""),
     a("tool.measure", "Measure Tool", "Tools", "distance ruler dimension", "I"),
+    a("tool.probe", "Beam Profiler", "Tools", "beam profiler probe polarization power", ""),
     a("tool.constrain", "Constrain", "Tools", "joint mate flush concentric angle align face axis", ""),
     a("tool.rotate_left", "Rotate −15°", "Tools", "turn nudge counterclockwise", "Shift+R"),
     a("tool.rotate_right", "Rotate +15°", "Tools", "turn nudge clockwise", "R"),

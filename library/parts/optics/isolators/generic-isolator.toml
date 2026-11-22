@@ -1,0 +1,20 @@
+id = "generic:isolator"
+name = "Optical Isolator (Faraday)"
+category = "optics/isolators"
+tags = ["isolator", "faraday", "polarization"]
+
+[geometry]
+kind = "parametric"
+generator = "modulator_box"
+params = { length = 60, width = 40, height = 30, axis_height = 20 }
+
+[[connectors]]
+name = "seat"
+kind = "hole_grid_seat"
+frame = { origin = [0, 0, 0], z = [0, 0, -1], x = [1, 0, 0] }
+
+[[optical_ports]]
+name = "isolator"
+kind = "isolator"
+clear_aperture = 5
+frame = { origin = [0, 0, 20], z = [0, 1, 0], x = [1, 0, 0] }

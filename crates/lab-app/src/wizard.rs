@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lab_core::glam::DVec3;
+use lab_core::glam::{DQuat, DVec3};
 use lab_core::part::{ConnectorDef, ConnectorKind, Feature, Frame, Gender, Geometry, OpticalPort, PartDef};
 use lab_geom::TriMesh;
 use lab_import::fit::{HoleFit, fit_hole, suggest};
@@ -17,7 +17,12 @@ use crate::controller::show_toast;
 use crate::{library, thumbs};
 use crate::ui_models::UiModels;
 
-const OPTIC_KINDS: [&str; 8] = ["mirror", "lens", "splitter", "waveplate", "source", "detector", "dump", "fiber"];
+const OPTIC_KINDS: [&str; 11] = ["mirror", "lens", "bs", "pbs", "hwp", "qwp", "isolator", "source", "detector", "dump", "fiber"];
+/// What the wizard shows for each of `OPTIC_KINDS`, same order.
+const OPTIC_LABELS: [&str; 11] = [
+    "Mirror", "Lens", "Beamsplitter (50/50)", "Polarizing beamsplitter", "Half-wave plate",
+    "Quarter-wave plate", "Optical isolator", "Laser output", "Detector", "Beam dump", "Fiber",
+];
 const THREAD_KINDS: [&str; 3] = ["thread", "bore", "optic_bore"];
 
 struct Wizard {
@@ -164,7 +169,7 @@ pub fn open(ui: &AppWindow, app: &AppState, part_id: &str) {
     });
     app.send(ViewportRequest::InspectPart(Some(part_id.to_string())));
     send_markers(app);
-    ui.set_wizard_optic_kinds(ModelRc::new(VecModel::from(OPTIC_KINDS.map(SharedString::from).to_vec())));
+    ui.set_wizard_optic_kinds(ModelRc::new(VecModel::from(OPTIC_LABELS.map(SharedString::from).to_vec())));
     ui.set_wizard_open(true);
     refresh(&ui.as_weak());
 }
@@ -267,8 +272,8 @@ fn confirm(wz: &mut Wizard) {
             wz.def.connectors.push(ConnectorDef { name, kind, frame: fit.axis });
         }
         3 => {
-            let kind = OPTIC_KINDS[wz.optic_kind.clamp(0, OPTIC_KINDS.len() as i32 - 1) as usize];
-            let z = wz.normal.normalize_or(DVec3::Z);
+            let kind = optic_kind(wz);
+            let z = port_normal(kind, wz.normal);
             let helper = if z.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
             let frame = Frame { origin: wz.point, z, x: z.cross(helper).cross(z).normalize() };
             let name = unique(&wz.def, kind);
@@ -300,6 +305,26 @@ fn confirm(wz: &mut Wizard) {
     wz.message.clear();
     wz.step = 0;
     wz.fit = None;
+}
+
+fn optic_kind(wz: &Wizard) -> &'static str {
+    OPTIC_KINDS[wz.optic_kind.clamp(0, OPTIC_KINDS.len() as i32 - 1) as usize]
+}
+
+/// Port normal for a clicked face: a cube splitter works on its diagonal, so `bs`/`pbs` turn
+/// 45° about the part's vertical.
+fn port_normal(kind: &str, face_normal: DVec3) -> DVec3 {
+    let z = face_normal.normalize_or(DVec3::Z);
+    if matches!(kind, "bs" | "pbs") { DQuat::from_rotation_z(std::f64::consts::FRAC_PI_4) * z } else { z }
+}
+
+/// One-line hint under the optic kind picker.
+fn optic_note(kind: &str) -> &'static str {
+    match kind {
+        "bs" | "pbs" => "A cube splits on its diagonal: the port is set at 45° to the face you clicked. Rotate the part to choose the reflected side.",
+        "isolator" => "For an isolator, click the face the light leaves from (the pass direction).",
+        _ => "",
+    }
 }
 
 fn row(c: &ConnectorDef) -> String {
@@ -352,6 +377,7 @@ fn refresh(ui: &slint::Weak<AppWindow>) {
         ui.set_wizard_gender(wz.gender);
         ui.set_wizard_diameter(format!("{:.2}", wz.diameter).into());
         ui.set_wizard_optic_kind(wz.optic_kind);
+        ui.set_wizard_optic_note(optic_note(optic_kind(wz)).into());
         ui.set_wizard_template(wz.template);
         ui.set_wizard_direction(wz.direction);
         ui.set_wizard_wavelength(wz.wavelength.map(|w| format!("{w}")).unwrap_or_default().into());
@@ -380,4 +406,30 @@ fn save(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     let a = app.borrow();
     close(ui, &a);
     show_toast(ui, &a, &format!("Saved the connectors of {}.", def.name), false);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optic_kinds_cover_polarization_parts_and_have_labels() {
+        for k in ["bs", "pbs", "hwp", "qwp", "isolator", "source"] {
+            assert!(OPTIC_KINDS.contains(&k), "{k}");
+        }
+        assert_eq!(OPTIC_LABELS.len(), OPTIC_KINDS.len());
+    }
+
+    #[test]
+    fn splitter_ports_sit_at_45_degrees_to_the_clicked_face() {
+        for kind in ["bs", "pbs"] {
+            let n = port_normal(kind, DVec3::X);
+            assert!(n.distance(DVec3::new(1.0, 1.0, 0.0).normalize()) < 1e-12, "{kind} {n}");
+            assert!(!optic_note(kind).is_empty());
+        }
+        assert_eq!(port_normal("mirror", DVec3::X), DVec3::X);
+        assert_eq!(port_normal("hwp", DVec3::ZERO), DVec3::Z);
+        assert!(optic_note("isolator").contains("leaves from"));
+        assert_eq!(optic_note("mirror"), "");
+    }
 }

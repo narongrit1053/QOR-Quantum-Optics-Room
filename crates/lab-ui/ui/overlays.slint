@@ -1,8 +1,8 @@
 // Modal sheets, the toast and the popup menus (spec §6.1, §6.4, §6.5).
 
 import { Theme } from "theme.slint";
-import { PresetRow, OverlayItem } from "types.slint";
-import { PillButton, SectionHeader } from "components.slint";
+import { PresetRow, OverlayItem, ProbeCard } from "types.slint";
+import { PillButton, SectionHeader, IconButton } from "components.slint";
 
 // A modal confirmation sheet. It dims the window, swallows pointer input and owns the
 // keyboard while open: its `sheet-keys` scope takes focus on open, so Return (default
@@ -558,6 +558,112 @@ export component ViewportOverlay inherits Rectangle {
     }
 }
 
+// Beam Profiler cards (Top view): a dot at each probe and a card beside it.
+export component ProbeCards inherits Rectangle {
+    in property <[ProbeCard]> cards;
+    callback close(int);
+
+    for c in root.cards: Rectangle {
+        Rectangle {
+            x: c.x - 4px;
+            y: c.y - 4px;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.accent;
+            border-width: 1px;
+            border-color: Theme.panel-bg;
+        }
+        Rectangle {
+            x: c.card-x;
+            y: c.card-y;
+            width: 176px;  // CARD_W in lab-app/src/probe.rs
+            height: card-col.preferred-height;
+            border-radius: 8px;
+            // Opaque: a card never shows another through it.
+            background: Theme.sheet-bg;
+            border-width: Theme.border-width;
+            border-color: Theme.panel-border;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000033;
+            // The card body is not a click on the beam below it.
+            TouchArea { }
+            card-col := VerticalLayout {
+                padding: 8px;
+                padding-top: 4px;
+                spacing: 4px;
+                HorizontalLayout {
+                    Text {
+                        text: c.title;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-caption;
+                        vertical-alignment: center;
+                    }
+                    IconButton {
+                        icon: "×";
+                        size: 20px;
+                        icon-size: 11px;
+                        clicked => { root.close(c.index); }
+                    }
+                }
+                for pass in c.passes: VerticalLayout {
+                    spacing: 4px;
+                    if pass.ellipse != "": HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            Rectangle {
+                                width: max(pass.spot, 2px);
+                                height: max(pass.spot, 2px);
+                                border-radius: self.width / 2;
+                                background: Theme.accent-soft;
+                                border-width: 1px;
+                                border-color: Theme.accent;
+                            }
+                        }
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            Path {
+                                width: 28px;
+                                height: 28px;
+                                viewbox-x: 0;
+                                viewbox-y: 0;
+                                viewbox-width: 28;
+                                viewbox-height: 28;
+                                commands: pass.ellipse;
+                                stroke: Theme.text;
+                                stroke-width: 1.5px;
+                                fill: transparent;
+                            }
+                        }
+                    }
+                    if pass.ellipse != "": Rectangle {
+                        height: 4px;
+                        border-radius: 2px;
+                        background: Theme.hairline;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * clamp(pass.power, 0, 1);
+                            border-radius: 2px;
+                            background: Theme.accent;
+                        }
+                    }
+                    // One line per row (no wrap), so the card's preferred height counts every line.
+                    Text {
+                        text: pass.text;
+                        color: Theme.text;
+                        font-size: Theme.font-caption;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // POLA-60: right-click menu of a library part.
 export component PartMenu inherits PopupWindow {
     // POLA-162: library entries. `targets`: separate libraries without this part.
@@ -580,37 +686,36 @@ export component PartMenu inherits PopupWindow {
         drop-shadow-offset-y: 8px;
         drop-shadow-color: Theme.shadow;
 
-        if root.bundle: VerticalLayout {
+        // One unconditional layout: a Rectangle does not take its size from `if` children, so
+        // wrapping the layout in `if` left the popup 0 px tall and its rows unclickable.
+        VerticalLayout {
             padding: 5px;
-            MenuRow {
+            if root.bundle: MenuRow {
                 label: "Rename…";
                 clicked => { root.cmd("bundle_rename", ""); }
             }
-            MenuRow {
+            if root.bundle: MenuRow {
                 label: "Delete Bundle";
                 clicked => { root.cmd("bundle_delete", ""); }
             }
-        }
-        if !root.bundle: VerticalLayout {
-            padding: 5px;
-            MenuRow {
+            if !root.bundle: MenuRow {
                 label: root.hidden ? "Show in library" : "Hide from library";
                 clicked => { root.cmd("hide", ""); }
             }
-            for t in root.targets: MenuRow {
+            for t in root.bundle ? [] : root.targets: MenuRow {
                 label: "Add to \"" + t + "\"";
                 clicked => { root.cmd("add", t); }
             }
-            MenuRow {
+            if !root.bundle: MenuRow {
                 label: "Add to new library…";
                 clicked => { root.cmd("new", ""); }
             }
-            if root.active-library != "": MenuRow {
+            if !root.bundle && root.active-library != "": MenuRow {
                 label: "Remove from \"" + root.active-library + "\"";
                 clicked => { root.cmd("remove", ""); }
             }
-            MenuSeparator { }
-            MenuRow {
+            if !root.bundle: MenuSeparator { }
+            if !root.bundle: MenuRow {
                 label: "Edit connectors…";
                 clicked => { root.edit-connectors(); }
             }
