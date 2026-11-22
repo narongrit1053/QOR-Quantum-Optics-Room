@@ -5,6 +5,8 @@
 //! toward the source, horizontal to the right, vertical up); handedness follows Hecht, so
 //! positive ellipticity is right-handed.
 
+use std::f64::consts::FRAC_PI_4;
+
 use glam::DVec3;
 
 /// Complex field vector `re + i·im`, transverse to the beam, unit power at the source.
@@ -120,4 +122,16 @@ pub fn pbs(f: Field, d: DVec3, n: DVec3) -> (Field, Field) {
     let s = s.normalize();
     let r = Field { re: s * f.re.dot(s), im: s * f.im.dot(s) };
     (Field { re: f.re - r.re, im: f.im - r.im }, r)
+}
+
+/// Ideal Faraday isolator with normal `n` (forward = `d·n > 0`): polarizer at `angle_deg`, 45° rotator,
+/// analyzer at `angle_deg + 45`. The rotation is about `n` for both directions, so it is non-reciprocal.
+pub fn isolator(f: Field, d: DVec3, n: DVec3, frame_x: DVec3, angle_deg: f64) -> Field {
+    let a = plate_axis(n, frame_x, angle_deg, d);
+    let b = plate_axis(n, frame_x, angle_deg + 45.0, d);
+    let (first, last) = if d.dot(n) >= 0.0 { (a, b) } else { (b, a) };
+    let project = |f: Field, x: DVec3| Field { re: x * f.re.dot(x), im: x * f.im.dot(x) };
+    let (s, c) = FRAC_PI_4.sin_cos();
+    let rotated = project(f, first).map(|v| v * c + n.cross(v) * s);
+    project(rotated, last)
 }

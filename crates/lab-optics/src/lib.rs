@@ -11,7 +11,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
 use glam::{DAffine3, DQuat, DVec3};
 use lab_core::part::{ParamValue, PartDef};
 use lab_core::{Document, NodeId, Shape};
-pub use pol::{field_from, horizontal, mirror, pbs, plate_axis, polarization_of, waveplate, Field, Polarization};
+pub use pol::{field_from, horizontal, isolator, mirror, pbs, plate_axis, polarization_of, waveplate, Field, Polarization};
 
 /// Port radius when a part gives no clear aperture.
 pub const DEFAULT_RADIUS: f64 = 12.7;
@@ -227,7 +227,11 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
             };
             match p.kind {
                 PortKind::Source | PortKind::Stop => {}
-                PortKind::Pass | PortKind::Isolator => push(next(ray.dir, out, ray.depth)),
+                PortKind::Pass => push(next(ray.dir, out, ray.depth)),
+                PortKind::Isolator => {
+                    let field = isolator(ray.field, ray.dir, p.normal, p.frame_x, p.angle_deg);
+                    push(Ray { field, ..next(ray.dir, out, ray.depth) });
+                }
                 PortKind::Mirror => push(Ray { field: mirror(ray.field, p.normal), ..next(reflected, out, ray.depth) }),
                 PortKind::Lens => {
                     let f = p.focal_length.unwrap_or(DEFAULT_FOCAL_LENGTH);
@@ -465,6 +469,9 @@ mod tests {
         let t = trace(&[source()], &[plate(2, PortKind::Hwp, 50.0, 22.5), pbs_port(3, 100.0)]);
         assert_eq!(t.segments.len(), 4);
         assert_eq!(powers_after(&t, 2).iter().filter(|p| (*p - 0.5).abs() < 1e-9).count(), 2);
+        assert!((state(&t.segments[1]).azimuth_deg - 45.0).abs() < 1e-9);
+        let t = trace(&[source()], &[plate(2, PortKind::Hwp, 50.0, -22.5)]);
+        assert!((state(&t.segments[1]).azimuth_deg - 135.0).abs() < 1e-9);
     }
 
     #[test]
@@ -614,6 +621,88 @@ mod tests {
         assert_eq!(trace_document(&doc, &lookup).segments.len(), 1);
         doc.nodes[0].params.insert("beam_on".into(), ParamValue::Flag(false));
         assert!(trace_document(&doc, &lookup).segments.is_empty());
+    }
+
+    fn iso(node: u64, y: f64, normal: DVec3) -> Port {
+        port(node, PortKind::Isolator, DVec3::new(0.0, y, 0.0), normal)
+    }
+
+    #[test]
+    fn isolator_forward_passes_and_rotates() {
+        let t = trace(&[source()], &[iso(2, 50.0, DVec3::Y)]);
+        assert_eq!(t.segments.len(), 2);
+        assert!((t.segments[1].power - 1.0).abs() < 1e-9);
+        let p = state(&t.segments[1]);
+        assert!((p.azimuth_deg - 45.0).abs() < 1e-6 && p.ellipticity_deg.abs() < 1e-6, "{p:?}");
+    }
+
+    #[test]
+    fn isolator_forward_malus() {
+        let t = trace(&[src_pol(45.0)], &[iso(2, 50.0, DVec3::Y)]);
+        assert_eq!(t.segments.len(), 2);
+        assert!((t.segments[1].power - 0.5).abs() < 1e-9, "{}", t.segments[1].power);
+    }
+
+    #[test]
+    fn isolator_blocks_the_return() {
+        let t = trace(&[source()], &[iso(2, 50.0, DVec3::Y), port(3, PortKind::Mirror, DVec3::new(0.0, 100.0, 0.0), DVec3::Y)]);
+        // source -> isolator -> mirror -> isolator (blocked): nothing leaves the input side.
+        assert_eq!(t.segments.len(), 3);
+        assert_eq!(t.segments[2].hit, Some((NodeId(2), "p".into())));
+    }
+
+    #[test]
+    fn isolator_blocks_any_backward_input() {
+        let h = horizontal(-DVec3::Y, DVec3::X);
+        for (a, e) in [(0.0, 0.0), (90.0, 0.0), (45.0, 0.0), (0.0, 45.0)] {
+            let f = field_from(Polarization { azimuth_deg: a, ellipticity_deg: e }, -DVec3::Y, h);
+            let out = isolator(f, -DVec3::Y, DVec3::Y, DVec3::X, 0.0);
+            assert!(out.power() < MIN_POWER, "{a} {e}: {}", out.power());
+        }
+        let s = Source { origin: DVec3::new(0.0, 100.0, 0.0), dir: -DVec3::Y, ..source() };
+        assert_eq!(trace(&[s], &[iso(2, 50.0, DVec3::Y)]).segments.len(), 1);
+    }
+
+    #[test]
+    fn reversed_isolator_blocks_forward() {
+        assert_eq!(trace(&[source()], &[iso(2, 50.0, -DVec3::Y)]).segments.len(), 1);
+    }
+
+    #[test]
+    fn scene_reads_waveplate_and_isolator_angles() {
+        let def = |id: &str, kind: &str| PartDef {
+            id: id.into(),
+            version: 1,
+            vendor: String::new(),
+            part_number: String::new(),
+            name: id.into(),
+            category: "optics".into(),
+            tags: vec![],
+            geometry: Geometry::Parametric { generator: "x".into(), params: Default::default() },
+            connectors: vec![],
+            optical_ports: vec![OpticalPort {
+                name: "p".into(),
+                kind: kind.into(),
+                clear_aperture: None,
+                frame: Frame { origin: DVec3::ZERO, z: DVec3::Y, x: DVec3::X },
+            }],
+            meta: Default::default(),
+            features: Vec::new(),
+        };
+        let mut doc = Document::new("t");
+        for (id, part, key, v) in [(1, "t:hwp", "wp_angle_deg", 22.5), (2, "t:iso", "iso_angle_deg", 30.0)] {
+            let mut n = part_node(id, Parent::Room, DVec3::ZERO, DQuat::IDENTITY);
+            n.part = part.into();
+            n.params.insert(key.into(), ParamValue::Number(v));
+            doc.nodes.push(n);
+        }
+        let lookup = |id: &str| match id {
+            "t:hwp" => Some(def(id, "hwp")),
+            "t:iso" => Some(def(id, "isolator")),
+            _ => None,
+        };
+        let (_, ports) = scene(&doc, &lookup);
+        assert_eq!(ports.iter().map(|p| (p.kind, p.angle_deg)).collect::<Vec<_>>(), [(PortKind::Hwp, 22.5), (PortKind::Isolator, 30.0)]);
     }
 
     fn state(s: &Segment) -> Polarization {
