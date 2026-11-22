@@ -605,54 +605,57 @@ export component ProbeCards inherits Rectangle {
                         clicked => { root.close(c.index); }
                     }
                 }
-                if c.ellipse != "": HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    Rectangle {
-                        width: 40px;
-                        height: 40px;
+                for pass in c.passes: VerticalLayout {
+                    spacing: 4px;
+                    if pass.ellipse != "": HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
                         Rectangle {
-                            width: max(c.spot, 2px);
-                            height: max(c.spot, 2px);
-                            border-radius: self.width / 2;
-                            background: Theme.accent-soft;
-                            border-width: 1px;
-                            border-color: Theme.accent;
+                            width: 40px;
+                            height: 40px;
+                            Rectangle {
+                                width: max(pass.spot, 2px);
+                                height: max(pass.spot, 2px);
+                                border-radius: self.width / 2;
+                                background: Theme.accent-soft;
+                                border-width: 1px;
+                                border-color: Theme.accent;
+                            }
+                        }
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            Path {
+                                width: 28px;
+                                height: 28px;
+                                viewbox-x: 0;
+                                viewbox-y: 0;
+                                viewbox-width: 28;
+                                viewbox-height: 28;
+                                commands: pass.ellipse;
+                                stroke: Theme.text;
+                                stroke-width: 1.5px;
+                                fill: transparent;
+                            }
                         }
                     }
-                    Rectangle {
-                        width: 40px;
-                        height: 40px;
-                        Path {
-                            width: 28px;
-                            height: 28px;
-                            viewbox-x: 0;
-                            viewbox-y: 0;
-                            viewbox-width: 28;
-                            viewbox-height: 28;
-                            commands: c.ellipse;
-                            stroke: Theme.text;
-                            stroke-width: 1.5px;
-                            fill: transparent;
-                        }
-                    }
-                }
-                if c.ellipse != "": Rectangle {
-                    height: 4px;
-                    border-radius: 2px;
-                    background: Theme.hairline;
-                    Rectangle {
-                        x: 0;
-                        width: parent.width * clamp(c.power, 0, 1);
+                    if pass.ellipse != "": Rectangle {
+                        height: 4px;
                         border-radius: 2px;
-                        background: Theme.accent;
+                        background: Theme.hairline;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * clamp(pass.power, 0, 1);
+                            border-radius: 2px;
+                            background: Theme.accent;
+                        }
                     }
-                }
-                Text {
-                    text: c.lines;
-                    color: Theme.text;
-                    font-size: Theme.font-caption;
-                    wrap: word-wrap;
+                    Text {
+                        text: pass.text;
+                        color: Theme.text;
+                        font-size: Theme.font-caption;
+                        wrap: word-wrap;
+                    }
                 }
             }
         }

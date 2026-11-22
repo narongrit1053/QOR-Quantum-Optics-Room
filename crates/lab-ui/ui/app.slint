@@ -8,7 +8,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import "../../../library/fonts/Inter-VariableFont.ttf";
-import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
+import { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, ProbePass, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 import { Panel, SectionHeader, Glyph, ListRow, SegmentedControl, ToolButton, IconButton, PillButton, Spinner } from "components.slint";
 import { EditState, TableFocus, DragState } from "fields.slint";
 import { NodeInspector, PlatformInspector, RoomInspector } from "inspector.slint";
@@ -32,7 +32,7 @@ import { ConstrainPanel } from "constrain_panel.slint";
 import { RelationChip } from "relations_bar.slint";
 
 export { Theme }
-export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
+export { SceneRow, LibraryRow, InspectorField, EditField, SetRow, ConstraintRow, CornerRow, ZoneRow, DoorRow, WallChoice, OutlinePreview, PreviewLabel, PresetRow, OverlayItem, ProbeCard, ProbePass, PaletteItem, CatalogRow, ChangelogLine } from "types.slint";
 // Globals, so Rust can read the edit state and move focus to a field by id.
 export { EditState, TableFocus, DragState } from "fields.slint";
 export { RelationChip } from "relations_bar.slint";
@@ -720,21 +720,6 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Beam Profiler cards, clipped to the Top pane like the labels.
-            if root.view-mode != 0: Rectangle {
-                x: root.view-mode == 2 ? parent.width / 2 : 0;
-                width: root.view-mode == 2 ? parent.width / 2 : parent.width;
-                height: 100%;
-                clip: true;
-                ProbeCards {
-                    x: -parent.x;
-                    width: viewport.width;
-                    height: 100%;
-                    cards: root.probe-cards;
-                    close(i) => { root.action("probe.close.\{i}"); }
-                }
-            }
-
             // Split view (POLA-51): the seam between the 3D and Top panes.
             if root.view-mode == 2: Rectangle {
                 x: parent.width / 2;
@@ -880,6 +865,23 @@ export component AppWindow inherits Window {
                             root.viewport-left();
                         }
                     }
+                }
+            }
+
+            // Beam Profiler cards, clipped to the Top pane like the labels.
+            // After `keys` so the cards (and their ×) get the pointer before the viewport does;
+            // they hold no focus, so keys still gets Esc.
+            if root.view-mode != 0: Rectangle {
+                x: root.view-mode == 2 ? parent.width / 2 : 0;
+                width: root.view-mode == 2 ? parent.width / 2 : parent.width;
+                height: 100%;
+                clip: true;
+                ProbeCards {
+                    x: -parent.x;
+                    width: viewport.width;
+                    height: 100%;
+                    cards: root.probe-cards;
+                    close(i) => { root.action("probe.close.\{i}"); }
                 }
             }
 

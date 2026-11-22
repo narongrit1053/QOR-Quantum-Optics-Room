@@ -8,7 +8,7 @@ use lab_core::glam::DVec3;
 use lab_core::units::format_length_with_unit;
 use lab_core::{Document, LengthUnit};
 use lab_optics::{PROBE_TOL_MM, Polarization, ProbeReading};
-use lab_ui::{AppWindow, ProbeCard};
+use lab_ui::{AppWindow, ProbeCard, ProbePass};
 use lab_viewport::Vec2;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
@@ -34,37 +34,52 @@ pub fn refresh(ui: &AppWindow, app: &AppState) {
     let scale = ui.window().scale_factor();
     let probes = LAST.with(|l| l.borrow().clone());
     let readings: Vec<_> = probes.iter().map(|(_, at, _)| app.beams.probe(*at, PROBE_TOL_MM)).collect();
-    let widest = readings.iter().filter_map(|r| r.first()).map(|r| r.w).fold(0.0, f64::max);
+    let widest = readings.iter().flatten().map(|r| r.w).fold(0.0, f64::max);
     let cards: Vec<ProbeCard> = probes
         .iter()
         .zip(&readings)
         .map(|((index, _, pos), readings)| {
-            let (title, lines) = card(readings, &app.session.doc, app.units());
-            // The graphics show the first pass; the lines list every pass.
-            let first = readings.first();
+            let (title, _) = card(readings, &app.session.doc, app.units());
+            let rows = passes(readings, &app.session.doc, app.units(), widest);
             ProbeCard {
                 index: *index as i32,
                 x: pos.x / scale,
                 y: pos.y / scale,
                 title: title.into(),
-                lines: lines.join("\n").into(),
-                spot: first.filter(|_| widest > 0.0).map_or(0.0, |r| (SPOT_PX * r.w / widest) as f32),
-                ellipse: first.map(|r| ellipse_path(r.pol, ELLIPSE_R_PX)).unwrap_or_default().into(),
-                power: first.map_or(0.0, |r| r.power as f32),
+                passes: ModelRc::new(VecModel::from(rows)),
             }
         })
         .collect();
     ui.set_probe_cards(ModelRc::new(VecModel::from(cards)));
 }
 
-/// The card title and its text lines, one block per pass.
+/// One graphics row per pass; `widest` is the largest w among all shown passes.
+fn passes(readings: &[ProbeReading], doc: &Document, unit: LengthUnit, widest: f64) -> Vec<ProbePass> {
+    let (_, texts) = card(readings, doc, unit);
+    if readings.is_empty() {
+        return texts.into_iter().map(|text| ProbePass { text: text.into(), spot: 0.0, ellipse: "".into(), power: 0.0 }).collect();
+    }
+    readings
+        .iter()
+        .zip(texts)
+        .map(|(r, text)| ProbePass {
+            text: text.into(),
+            spot: if widest > 0.0 { (SPOT_PX * r.w / widest) as f32 } else { 0.0 },
+            ellipse: ellipse_path(r.pol, ELLIPSE_R_PX).into(),
+            power: r.power as f32,
+        })
+        .collect()
+}
+
+/// The card title and one text block per pass (lines joined by newlines).
 fn card(readings: &[ProbeReading], doc: &Document, unit: LengthUnit) -> (String, Vec<String>) {
     if readings.is_empty() {
         return ("Beam profiler".into(), vec!["No beam here".into()]);
     }
     let several = readings.len() > 1;
-    let mut lines = Vec::new();
+    let mut blocks = Vec::new();
     for (k, r) in readings.iter().enumerate() {
+        let mut lines = Vec::new();
         if several {
             lines.push(format!("Pass {}", k + 1));
         }
@@ -73,9 +88,10 @@ fn card(readings: &[ProbeReading], doc: &Document, unit: LengthUnit) -> (String,
         lines.push(r.pol.label());
         lines.push(format!("{:.0} % power", r.power * 100.0));
         lines.push(format!("{} from {name}", format_length_with_unit(r.distance, unit)));
+        blocks.push(lines.join("\n"));
     }
     let title = if several { format!("Beam profiler · {} passes", readings.len()) } else { "Beam profiler".into() };
-    (title, lines)
+    (title, blocks)
 }
 
 /// SVG path commands of the polarization ellipse in a `2 × radius_px` box, as seen by the receiver
@@ -124,6 +140,25 @@ mod tests {
         for want in ["2w = 1.02 mm", "Linear 22°", "62 % power", "from Laser"] {
             assert!(text.contains(want), "{want} missing in {text}");
         }
+    }
+
+    /// A double pass shows a graphics row per pass; the widest spot fills the box.
+    #[test]
+    fn each_pass_gets_its_own_row() {
+        let doc = lab_core::sample::demo_document();
+        let laser = doc.nodes.iter().find(|n| n.name.starts_with("Laser")).unwrap().id;
+        let linear = reading(Polarization { azimuth_deg: 0.0, ellipticity_deg: 0.0 }, laser);
+        let mut circular = reading(Polarization { azimuth_deg: 0.0, ellipticity_deg: 45.0 }, laser);
+        circular.w = 0.255;
+        let rows = passes(&[linear, circular], &doc, LengthUnit::Millimetre, 0.51);
+        assert_eq!(rows.len(), 2);
+        assert_ne!(rows[0].ellipse, rows[1].ellipse);
+        assert!(rows[0].text.contains("Linear 0°") && rows[1].text.contains("Circular R"), "{} / {}", rows[0].text, rows[1].text);
+        assert!((rows[0].spot - 40.0).abs() < 1e-4 && (rows[1].spot - 20.0).abs() < 1e-4);
+        let none = passes(&[], &doc, LengthUnit::Millimetre, 0.0);
+        assert_eq!(none.len(), 1);
+        assert_eq!(none[0].text, "No beam here");
+        assert_eq!(none[0].ellipse, "");
     }
 
     #[test]

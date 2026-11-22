@@ -51,10 +51,14 @@ fn probe_input(
     if !probes.active {
         return;
     }
-    // Clicks pin probes instead of selecting.
+    // Clicks in the Top pane pin probes instead of selecting; in Split the 3D pane still selects.
+    let mut others = Vec::new();
     for click in std::mem::take(&mut clicks.0) {
         let hit = camera_at(cameras.iter().map(|(o, c, t)| (o, c, t)), &full, click);
-        let Some((_, camera, transform, _)) = hit.filter(|h| h.0.mode() == ViewMode::Top) else { continue };
+        let Some((_, camera, transform, _)) = hit.filter(|h| h.0.mode() == ViewMode::Top) else {
+            others.push(click);
+            continue;
+        };
         let to_full = |v: Vec2| match camera.logical_target_size() {
             Some(size) if full.0.x > 0.0 && full.0.y > 0.0 => v * full.0 / size,
             _ => v,
@@ -70,6 +74,7 @@ fn probe_input(
             push_probe(&mut probes.points, p);
         }
     }
+    clicks.0 = others;
 }
 
 /// The nearest point on the projected segments `(a, b, world a, world b)` within `max_px` of
