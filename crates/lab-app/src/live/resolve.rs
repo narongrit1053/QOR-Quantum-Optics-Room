@@ -31,7 +31,10 @@ pub struct Resolved {
 }
 
 /// Node params of a laser that the inspector's Beam section edits (`beams.rs` PARAMS + on/off).
-pub const LASER_PARAMS: &[&str] = &["beam_wavelength_nm", "beam_waist_mm", "beam_m2", "beam_on"];
+pub const LASER_PARAMS: &[&str] =
+    &["beam_wavelength_nm", "beam_waist_mm", "beam_m2", "beam_on", "beam_pol_angle_deg", "beam_pol_ellipticity_deg"];
+/// Angle params of waveplate and isolator parts.
+pub const OPTIC_PARAMS: &[&str] = &["wp_angle_deg", "iso_angle_deg"];
 
 const PAINT: [u8; 3] = [210, 210, 205];
 
@@ -139,6 +142,10 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
                     matches!(&d.geometry, Geometry::Parametric { params, .. } if params.contains_key(k))
                         || (LASER_PARAMS.contains(&k)
                             && d.optical_ports.iter().any(|p| PortKind::from_kind(&p.kind) == PortKind::Source))
+                        || (k == "wp_angle_deg"
+                            && d.optical_ports.iter().any(|p| matches!(PortKind::from_kind(&p.kind), PortKind::Hwp | PortKind::Qwp)))
+                        || (k == "iso_angle_deg"
+                            && d.optical_ports.iter().any(|p| PortKind::from_kind(&p.kind) == PortKind::Isolator))
                 })
             };
             let mut merged = n.params.clone();

@@ -147,6 +147,12 @@ impl Segment {
     pub fn w_at(&self, p: DVec3) -> f64 {
         gauss_w(self.q_start.0 + self.start.distance(p), self.q_start.1, self.lm2)
     }
+
+    /// Polarization state of the beam along this segment.
+    pub fn polarization(&self) -> Polarization {
+        let dir = (self.end - self.start).normalize_or_zero();
+        polarization_of(&self.field, dir, horizontal(dir, self.frame_x))
+    }
 }
 
 impl Trace {
@@ -192,7 +198,7 @@ impl Trace {
                 source: s.source,
                 segment: i,
                 w: s.w_at(closest),
-                pol: polarization_of(&s.field, dir, horizontal(dir, s.frame_x)),
+                pol: s.polarization(),
                 power: s.power,
                 distance: self.path_length(i) - len + t,
             });
