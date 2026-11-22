@@ -112,6 +112,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("library: {}: {}", w.path.display(), w.message);
     }
     state.catalog = std::sync::Arc::new(catalog);
+    // The document was loaded before the catalog: trace now or the first trace waits for an edit.
+    crate::beams::retrace(&mut state);
     let app = Rc::new(RefCell::new(state));
 
     bridge::listen_to_io(&ui, &app, &models);

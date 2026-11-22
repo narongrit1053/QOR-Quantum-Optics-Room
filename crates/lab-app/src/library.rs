@@ -528,6 +528,8 @@ pub fn reload_catalog(app: &mut AppState, models: &UiModels) {
     }
     app.catalog = std::sync::Arc::new(catalog);
     app.send(ViewportRequest::SetCatalog(app.catalog.clone()));
+    // Ports may have changed, and a project opened before the catalog loaded has no trace yet.
+    crate::beams::retrace(app);
     fill(app, models);
 }
 
