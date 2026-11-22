@@ -172,6 +172,12 @@ pub fn is_busy(a: &AppState, ui_busy: bool) -> bool {
         || crate::wizard::is_open()
 }
 
+/// Busy for app requests (catalog, reload): they don't touch the document, so the Catalog
+/// window (which shows the agent's list changes) and the start page don't block them.
+fn app_busy(state_busy: bool, modal: bool, catalog_open: bool, importing: bool) -> bool {
+    state_busy || importing || (modal && !catalog_open)
+}
+
 fn ui_busy(ui: &AppWindow) -> bool {
     ui.get_modal() || ui.get_start_page_visible()
 }
@@ -234,7 +240,13 @@ fn on_line(line: String, reply: Sender<String>) {
         Err(e) => return fail(e),
     };
     refresh_badge(&ui, &app, true);
-    if let Err(e) = admit(&env, token, is_busy(&app.borrow(), ui_busy(&ui))) {
+    let busy = match &env.request {
+        Request::App(_) => {
+            app_busy(is_busy(&app.borrow(), false), ui.get_modal(), ui.get_catalog_open(), crate::import::progress().is_some())
+        }
+        _ => is_busy(&app.borrow(), ui_busy(&ui)),
+    };
+    if let Err(e) = admit(&env, token, busy) {
         return fail(e);
     }
     match env.request {
@@ -292,7 +304,7 @@ fn app_request(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
         AppRequest::BookImport | AppRequest::Reload if crate::import::progress().is_some() => {
             return busy("a Download & import is running; retry when it is done");
         }
-        AppRequest::BookImport => match crate::catalog_book::start_import(ui, &app.borrow()) {
+        AppRequest::BookImport => match crate::catalog_book::start_import(ui, app) {
             Ok(count) => Ok(json!({"started": count > 0, "count": count})),
             Err(message) => Err(LiveError::new(ErrorCode::Busy, message)),
         },
@@ -512,6 +524,14 @@ mod tests {
     fn write_while_busy_is_busy() {
         let e = env(r#"{"v":1,"cmd":"undo"}"#);
         assert_eq!(admit(&e, 1, true).unwrap_err().code, ErrorCode::Busy);
+    }
+
+    #[test]
+    fn catalog_window_alone_does_not_block_app_requests() {
+        assert!(!app_busy(false, true, true, false));
+        assert!(app_busy(false, true, false, false), "another sheet is open");
+        assert!(app_busy(false, true, true, true), "an import is running");
+        assert!(app_busy(true, false, false, false), "the user is editing");
     }
 
     #[test]

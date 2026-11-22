@@ -526,7 +526,7 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {
                 return;
             }
             "import" => {
-                if let Err(message) = start_import(&ui, &a.borrow()) {
+                if let Err(message) = start_import(&ui, &a) {
                     ui.set_catalog_update_status(message.into());
                 }
                 return;
@@ -612,18 +612,20 @@ pub fn search(ui: &AppWindow, app: &AppState, query: &str, limit: usize) -> Vec<
 }
 
 /// Starts Download & import for the list, like the window's button; the number of parts sent.
-pub fn start_import(ui: &AppWindow, app: &AppState) -> Result<usize, String> {
+/// No borrow of `app` is held while the batch starts: it can end at once, and `end_batch`
+/// borrows the app mutably.
+pub fn start_import(ui: &AppWindow, app: &Rc<RefCell<AppState>>) -> Result<usize, String> {
     // Its Thorlabs requests would break the updater's one-request-per-30-s gap.
     if catalog_update::running() {
         return Err("Download & import is paused while the catalog updates.".into());
     }
     sync_list(ui);
-    let library = in_library(app);
+    let library = in_library(&app.borrow());
     let items: Vec<BookItem> =
         STATE.with(|s| s.borrow().list.iter().filter(|p| !library.contains(*p)).filter_map(|p| find(p)).collect());
     if items.is_empty() {
         // Everything is in the library already: the list is done.
-        after_import(ui, app);
+        after_import(ui, &app.borrow());
         return Ok(0);
     }
     let n = items.len();
