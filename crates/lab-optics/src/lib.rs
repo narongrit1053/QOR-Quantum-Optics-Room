@@ -168,6 +168,9 @@ impl Trace {
     /// Every pass of a beam within `tol` of `at`. Segments span `[0, len)`, so a joint counts once.
     pub fn probe(&self, at: DVec3, tol: f64) -> Vec<ProbeReading> {
         let mut out = Vec::new();
+        if !at.is_finite() {
+            return out;
+        }
         for (i, s) in self.segments.iter().enumerate() {
             let len = s.start.distance(s.end);
             if len < EPS {
@@ -175,7 +178,9 @@ impl Trace {
             }
             let dir = (s.end - s.start) / len;
             let t = (at - s.start).dot(dir);
-            if t >= len {
+            // A joint belongs to the outgoing segment; only a chain's first segment has a start cap.
+            let continues = self.segments[..i].iter().any(|p| p.source == s.source && p.end.distance(s.start) < 1e-6);
+            if t >= len - EPS || (continues && t < -EPS) {
                 continue;
             }
             let t = t.max(0.0);
@@ -807,6 +812,22 @@ mod tests {
         let r = t.probe(DVec3::new(0.0, 200.0, 0.0), 0.5);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].segment, 1);
+    }
+
+    #[test]
+    fn probe_near_a_joint_reports_one_pass() {
+        // Oblique mirror: the hit point is off-grid.
+        let n = DVec3::new(1.0, -0.8, 0.0);
+        let m = port(2, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), n);
+        let t = trace(&[source()], &[m]);
+        assert_eq!(t.segments.len(), 2);
+        let hit = t.segments[0].end;
+        let out = (t.segments[1].end - t.segments[1].start).normalize();
+        for (at, seg) in [(hit - DVec3::Y, 0), (hit, 1), (hit + out, 1)] {
+            let r = t.probe(at, PROBE_TOL_MM);
+            assert_eq!(r.iter().map(|r| r.segment).collect::<Vec<_>>(), [seg], "{at}");
+        }
+        assert!(t.probe(DVec3::NAN, PROBE_TOL_MM).is_empty());
     }
 
     #[test]
