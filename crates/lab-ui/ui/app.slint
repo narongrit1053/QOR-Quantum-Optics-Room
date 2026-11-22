@@ -148,6 +148,7 @@ component SceneItem inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
+    icon: @image-url("assets/app-icon.png");
     // ── Viewport (M0) ─────────────────────────────────────────────────────────
     in property <image> viewport-texture;
     // True from launch until the host has rendered its warm-up frames (pipelines compiled).

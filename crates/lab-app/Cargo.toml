@@ -52,3 +52,6 @@ windows-sys = { version = "0.60", features = [
     "Win32_System_IO",
     "Win32_System_WindowsProgramming",
 ] }
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.12"

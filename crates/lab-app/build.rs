@@ -1,5 +1,5 @@
 //! Puts `dxcompiler.dll` next to the executable so wgpu compiles shaders with DXC instead of the
-//! much slower FXC (see `third_party/dxc/README.md`).
+//! much slower FXC (see `third_party/dxc/README.md`), and embeds the app icon (`app.rc`).
 
 use std::path::Path;
 
@@ -9,6 +9,11 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
+    println!("cargo:rerun-if-changed=../lab-ui/ui/assets/app-icon.ico");
+    #[cfg(windows)]
+    embed_resource::compile("app.rc", embed_resource::NONE)
+        .manifest_optional()
+        .expect("app.rc (exe icon) failed to compile");
     // OUT_DIR is <target>/<profile>/build/lab-app-<hash>/out; the executable goes to <target>/<profile>.
     let out_dir = std::env::var("OUT_DIR").expect("cargo sets OUT_DIR");
     let profile_dir = Path::new(&out_dir).ancestors().nth(3).expect("OUT_DIR is inside the target directory");

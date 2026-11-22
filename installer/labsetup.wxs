@@ -5,6 +5,8 @@
            UpgradeCode="6F1B7A52-3C0E-4D8B-9E47-2A5D8C1F0B93">
     <MajorUpgrade DowngradeErrorMessage="A newer version of LabSetup is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Icon Id="AppIcon" SourceFile="$(sys.SOURCEFILEDIR)..\crates\lab-ui\ui\assets\app-icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="LabSetup" />
@@ -21,9 +23,9 @@
     <Component Id="MainExe" Directory="INSTALLFOLDER" Guid="B3D9E1C4-7A62-4F0B-8E15-9C4A7D2E6F38">
       <File Id="LabSetupExe" Source="$(StageDir)\labsetup.exe" KeyPath="yes">
         <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="LabSetup"
-                  WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+                  WorkingDirectory="INSTALLFOLDER" Advertise="no" Icon="AppIcon" />
       </File>
-      <ProgId Id="LabSetup.Project" Description="LabSetup project" Advertise="no">
+      <ProgId Id="LabSetup.Project" Description="LabSetup project" Advertise="no" Icon="LabSetupExe" IconIndex="0">
         <Extension Id="labsetup" ContentType="application/x-labsetup">
           <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" TargetFile="LabSetupExe" />
         </Extension>
