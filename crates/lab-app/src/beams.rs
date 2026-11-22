@@ -132,7 +132,7 @@ pub fn field_edit(app: &AppState, field: &str, text: &str) -> Result<EditOutcome
         .ok_or_else(|| EditError::Invalid(format!("{label} must be a {}number.", if angle { "" } else { "positive " })))?;
     let value = match key {
         "beam_pol_ellipticity_deg" => value.clamp(-45.0, 45.0),
-        _ if angle => value.rem_euclid(180.0),
+        _ if angle => value.rem_euclid(180.0) % 180.0,
         _ => value,
     };
     let current = params.get(key).and_then(ParamValue::as_f64).unwrap_or(*default);
@@ -205,6 +205,80 @@ mod tests {
         assert_eq!(super::describe(&app.beams, NodeId(9), &app), "No beam");
     }
 
+    /// The demo-style table with one laser at (0,-300) firing along +Y.
+    fn laser_table(catalog: &Catalog) -> Document {
+        let mut doc = Document::new("Pass");
+        doc.platforms.push(Platform { select_lock: false, id: PlatformId(1), name: "Table 1".into(), kind: PlatformKind::OpticalTable,
+            surface: Surface::Stainless, outline: Outline::Rectangle { size: DVec2::new(1200.0, 900.0) }, thickness: 100.0,
+            top_height: 800.0, position: DVec2::ZERO, rotation_z: 0.0, hole_grid: Some(HoleGrid::metric()),
+            support: Support::Legs { size: 120.0, inset: 150.0 } });
+        let laser = lab_app::live::resolve::new_part_node(catalog, "generic:laser-head", 100, Parent::Platform(PlatformId(1)),
+            Attach::Free, DVec3::new(0.0, -300.0, 0.0), DQuat::IDENTITY).unwrap();
+        History::default().execute(&mut doc, Command::PlaceAssembly { nodes: vec![laser] }).unwrap();
+        doc
+    }
+
+    /// A real double pass: a QWP at 45 in front of a mirror that sends the beam back through it.
+    #[test]
+    fn real_double_pass_changes_state() {
+        let (catalog, _) = Catalog::load_builtin();
+        let qwp_part = catalog.all().into_iter().find(|d| d.optical_ports.iter().any(|p| p.kind == "qwp")).unwrap().id.clone();
+        let mut doc = laser_table(&catalog);
+        let hit_twice = |d: &Document, id: NodeId| {
+            let t = lab_optics::trace_document(d, &|p| catalog.get(p).cloned());
+            t.segments.iter().filter(|s| s.hit.as_ref().is_some_and(|h| h.0 == id)).count() == 2
+        };
+        let qwp = aim(&mut doc, &catalog, &qwp_part, "thorlabs:FMP1", DVec2::new(0.0, -100.0), &|d, id| hits(d, &catalog, id));
+        let mut params = doc.node(qwp).unwrap().params.clone();
+        params.insert("wp_angle_deg".into(), ParamValue::Number(45.0));
+        History::default().execute(&mut doc, Command::SetParams { id: qwp, params }).unwrap();
+        aim(&mut doc, &catalog, "generic:mirror-1in", "thorlabs:KM100", DVec2::new(0.0, 150.0), &|d, _| hit_twice(d, qwp));
+        let app = app_with(doc);
+        let text = super::describe(&app.beams, qwp, &app);
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        assert!(lines[0].contains("Linear 0°"), "{text}");
+        assert!(lines[1].contains("Circular"), "{text}");
+    }
+
+    /// Fields come from the part's port kinds: a laser wins, plates and isolators get their angle.
+    #[test]
+    fn params_follow_port_kinds() {
+        let (builtin, _) = Catalog::load_builtin();
+        let mut multi = builtin.get("generic:laser-head").unwrap().clone();
+        multi.id = "test:laser-isolator".into();
+        let port = builtin.get("generic:isolator").unwrap().optical_ports[0].clone();
+        multi.optical_ports.push(port);
+        let qwp_part = builtin.all().into_iter().find(|d| d.optical_ports.iter().any(|p| p.kind == "qwp")).unwrap().id.clone();
+        let mut defs: Vec<_> = builtin.all().into_iter().cloned().collect();
+        defs.push(multi);
+        let mut doc = laser_table(&builtin);
+        let parts = ["generic:isolator", &qwp_part, "generic:pbs-cube-1in", "generic:mirror-1in", "test:laser-isolator", "generic:laser-head"];
+        let nodes: Vec<_> = parts.iter().enumerate().map(|(i, p)| {
+            lab_app::live::resolve::new_part_node(&Catalog::from_defs(defs.clone()), p, 200 + i as u64, Parent::Platform(PlatformId(1)),
+                Attach::Free, DVec3::new(100.0 * i as f64, 0.0, 0.0), DQuat::IDENTITY).unwrap()
+        }).collect();
+        History::default().execute(&mut doc, Command::PlaceAssembly { nodes }).unwrap();
+        let mut app = new_app(doc);
+        app.catalog = std::sync::Arc::new(Catalog::from_defs(defs));
+        let keys = |i: u64| super::params_of(&app, NodeId(200 + i)).iter().map(|p| p.0).collect::<Vec<_>>();
+        assert_eq!(keys(0), ["iso_angle_deg"]);
+        assert_eq!(keys(1), ["wp_angle_deg"]);
+        assert!(keys(2).is_empty() && keys(3).is_empty());
+        assert_eq!(keys(4).len(), 5, "laser wins");
+        assert_eq!(keys(5).len(), 5);
+    }
+
+    #[test]
+    fn angle_wrap_stays_below_180() {
+        let mut app = app_with(lab_core::sample::demo_document());
+        let hwp = app.session.doc.nodes.iter().find(|n| n.name.starts_with("HWP") && !n.name.contains('·')).unwrap().id;
+        app.session.selection = Some(lab_core::SelectionTarget::Node(hwp));
+        let Ok(lab_app::EditOutcome::Command { command: Command::SetParams { params, .. }, .. }) = super::field_edit(&app, "beam.wp_angle_deg", "-1e-20") else { panic!() };
+        let v = params["wp_angle_deg"].as_f64().unwrap();
+        assert!((0.0..180.0).contains(&v), "{v}");
+    }
+
     #[test]
     fn angle_fields_wrap() {
         let doc = lab_core::sample::demo_document();
@@ -231,6 +305,7 @@ mod tests {
     use lab_core::model::{Attach, Document, NodeId, Parent, Platform, PlatformId, PlatformKind, Support, Surface};
     use lab_core::outline::Outline;
     use lab_core::{Command, History};
+    use lab_core::part::ParamValue;
     use lab_viewport::{DragItem, StackSpec};
 
     /// Places a 75 mm stack of `optic` in `mount` at `at`, turned `yaw`; returns the optic's id.
