@@ -41,6 +41,8 @@ thread_local! {
     static QUEUE: RefCell<std::collections::VecDeque<PathBuf>> = const { RefCell::new(std::collections::VecDeque::new()) };
     /// The running "Import Folder into Library…" batch (POLA-163).
     static BATCH: RefCell<Option<Batch>> = const { RefCell::new(None) };
+    /// The summary of the last finished batch, for live control's `book_list`.
+    static LAST_SUMMARY: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The error step shows a failed URL download: "Choose another file" returns to the URL step.
     static URL_FAILED: RefCell<bool> = const { RefCell::new(false) };
 }
@@ -563,6 +565,16 @@ fn next_job(ui: &AppWindow) {
     });
 }
 
+/// `(done, total, failed)` of the running batch; `None` when no batch runs.
+pub fn progress() -> Option<(usize, usize, usize)> {
+    BATCH.with(|b| b.borrow().as_ref().map(|b| (b.imported + b.skipped + b.failed.len(), b.total, b.failed.len())))
+}
+
+/// The summary line of the last finished batch.
+pub fn last_summary() -> Option<String> {
+    LAST_SUMMARY.with(|s| s.borrow().clone())
+}
+
 /// Ends the batch (if one runs): reloads the catalog once, adds the parts to the library named
 /// after their vendor and shows the summary.
 fn end_batch(ui: &AppWindow) {
@@ -578,6 +590,7 @@ fn end_batch(ui: &AppWindow) {
         summary += &format!(": {}", batch.failed.join(", "));
     }
     eprintln!("import folder: {summary}");
+    LAST_SUMMARY.with(|s| *s.borrow_mut() = Some(summary.clone()));
     if !batch.failed.is_empty() {
         eprintln!("import folder: failed: {}", batch.failed.join(", "));
     }
