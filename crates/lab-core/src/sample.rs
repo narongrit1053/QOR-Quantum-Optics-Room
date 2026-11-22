@@ -209,6 +209,10 @@ pub fn demo_document() -> Document {
     b.mirror("M2", 18, 24, x - y);
     b.ring_optic("L1 (f = 100 mm)", "generic:lens-1in", 26, 24, x, 19.0, 8.0);
     b.ring_optic("HWP", "generic:hwp-1in", 30, 24, x, 22.0, 14.0);
+    // 22.5 deg turns the laser's horizontal polarization into an even split at the PBS.
+    if let Some(hwp) = b.doc.nodes.last_mut() {
+        hwp.params.insert("wp_angle_deg".into(), crate::part::ParamValue::Number(22.5));
+    }
 
     let pbs_at = b.hole(34, 24);
     b.post_stack("PBS", pbs_at, 0.0, BEAM_HEIGHT - 12.7 - 5.0);

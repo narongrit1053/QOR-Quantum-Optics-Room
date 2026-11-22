@@ -17,7 +17,12 @@ use crate::controller::show_toast;
 use crate::{library, thumbs};
 use crate::ui_models::UiModels;
 
-const OPTIC_KINDS: [&str; 8] = ["mirror", "lens", "splitter", "waveplate", "source", "detector", "dump", "fiber"];
+const OPTIC_KINDS: [&str; 11] = ["mirror", "lens", "bs", "pbs", "hwp", "qwp", "isolator", "source", "detector", "dump", "fiber"];
+/// What the wizard shows for each of `OPTIC_KINDS`, same order.
+const OPTIC_LABELS: [&str; 11] = [
+    "Mirror", "Lens", "Beamsplitter (50/50)", "Polarizing beamsplitter", "Half-wave plate",
+    "Quarter-wave plate", "Optical isolator", "Laser output", "Detector", "Beam dump", "Fiber",
+];
 const THREAD_KINDS: [&str; 3] = ["thread", "bore", "optic_bore"];
 
 struct Wizard {
@@ -164,7 +169,7 @@ pub fn open(ui: &AppWindow, app: &AppState, part_id: &str) {
     });
     app.send(ViewportRequest::InspectPart(Some(part_id.to_string())));
     send_markers(app);
-    ui.set_wizard_optic_kinds(ModelRc::new(VecModel::from(OPTIC_KINDS.map(SharedString::from).to_vec())));
+    ui.set_wizard_optic_kinds(ModelRc::new(VecModel::from(OPTIC_LABELS.map(SharedString::from).to_vec())));
     ui.set_wizard_open(true);
     refresh(&ui.as_weak());
 }
@@ -380,4 +385,17 @@ fn save(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {
     let a = app.borrow();
     close(ui, &a);
     show_toast(ui, &a, &format!("Saved the connectors of {}.", def.name), false);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optic_kinds_cover_polarization_parts_and_have_labels() {
+        for k in ["bs", "pbs", "hwp", "qwp", "isolator", "source"] {
+            assert!(OPTIC_KINDS.contains(&k), "{k}");
+        }
+        assert_eq!(OPTIC_LABELS.len(), OPTIC_KINDS.len());
+    }
 }

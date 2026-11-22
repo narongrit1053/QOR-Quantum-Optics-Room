@@ -143,5 +143,8 @@ fn v2_nodes_migrate_to_parents() {
     let (doc, report) = Document::from_json(&value.to_string()).unwrap();
     assert_eq!(report.migrated_from, Some(2));
     assert_eq!(report.repairs, vec!["Converted from an older format.".to_string()]);
-    assert_eq!(doc, demo_document());
+    // v2 had no node params, so the demo's waveplate angle is not expected back.
+    let mut expected = demo_document();
+    expected.nodes.iter_mut().for_each(|n| n.params.clear());
+    assert_eq!(doc, expected);
 }
