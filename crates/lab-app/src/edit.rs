@@ -12,7 +12,7 @@ use lab_core::selection::SelectionTarget;
 use lab_core::units::{
     LengthUnit, ParseError, format_angle_deg, format_length, parse_angle_deg, parse_length,
 };
-use lab_core::Command;
+use lab_core::{Command, remove_nodes_command};
 use lab_core::glam::{DQuat, DVec3, EulerRot};
 use lab_core::model::{Attach, Node, Parent};
 use lab_core::model::NodeId;
@@ -922,7 +922,7 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
     if action == "selection.delete" {
         return match cx.selection {
             Some(SelectionTarget::Node(nid)) => Ok(EditOutcome::Command {
-                command: Command::RemoveNodes(vec![nid]),
+                command: remove_nodes_command(cx.doc, vec![nid]),
                 label: "Delete".into(),
                 select: None,
                 fixes: Vec::new(),
