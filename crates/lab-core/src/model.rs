@@ -25,6 +25,17 @@ pub struct PlatformId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OpeningId(pub u64);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct GroupId(pub u64);
+
+/// A named set of chain-root nodes moved together as one block.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Group {
+    pub id: GroupId,
+    pub name: String,
+    pub members: Vec<NodeId>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub schema_version: u32,
@@ -32,6 +43,8 @@ pub struct Document {
     pub room: Room,
     pub platforms: Vec<Platform>,
     pub nodes: Vec<Node>,
+    #[serde(default)]
+    pub groups: Vec<Group>,
     next_id: u64,
 }
 
@@ -44,6 +57,7 @@ impl Document {
             room: Room::default(),
             platforms: Vec::new(),
             nodes: Vec::new(),
+            groups: Vec::new(),
             next_id: 1,
         }
     }
@@ -89,6 +103,35 @@ impl Document {
 
     pub fn platform_index(&self, id: PlatformId) -> Option<usize> {
         self.platforms.iter().position(|p| p.id == id)
+    }
+
+    pub fn group(&self, id: GroupId) -> Option<&Group> {
+        self.groups.iter().find(|g| g.id == id)
+    }
+
+    pub fn group_of(&self, node: NodeId) -> Option<&Group> {
+        self.groups.iter().find(|g| g.members.contains(&node))
+    }
+
+    /// Walks up every `Parent::Node` link (any attach) until the parent is a platform or the room.
+    pub fn chain_root(&self, id: NodeId) -> NodeId {
+        let Some(mut node) = self.node(id) else { return id };
+        // A valid chain has at most `nodes.len()` links; the bound stops cycles in unvalidated data.
+        for _ in 0..self.nodes.len() {
+            match node.parent {
+                Parent::Node(p) => match self.node(p) {
+                    Some(parent) => node = parent,
+                    None => break,
+                },
+                Parent::Platform(_) | Parent::Room => break,
+            }
+        }
+        node.id
+    }
+
+    /// The `parent` of `chain_root(id)` (or `Parent::Room` if `id` is unknown).
+    pub fn top_parent(&self, id: NodeId) -> Parent {
+        self.node(self.chain_root(id)).map_or(Parent::Room, |n| n.parent)
     }
 
     /// The nodes whose root platform is `id`, in document order.
@@ -185,19 +228,21 @@ impl Document {
         Some((lo.extend(origin.z - p.thickness), hi.extend(origin.z)))
     }
 
-    /// Whether any node, platform or opening uses `raw` as its id.
+    /// Whether any node, platform, opening or group uses `raw` as its id.
     pub fn contains_id(&self, raw: u64) -> bool {
         self.nodes.iter().any(|n| n.id.0 == raw)
             || self.platforms.iter().any(|p| p.id.0 == raw)
             || self.room.openings.iter().any(|o| o.id.0 == raw)
+            || self.groups.iter().any(|g| g.id.0 == raw)
     }
 
-    /// Largest id in use; 0 if the document has no nodes, platforms or openings.
+    /// Largest id in use; 0 if the document has no nodes, platforms, openings or groups.
     pub fn max_id(&self) -> u64 {
         let nodes = self.nodes.iter().map(|n| n.id.0);
         let platforms = self.platforms.iter().map(|p| p.id.0);
         let openings = self.room.openings.iter().map(|o| o.id.0);
-        nodes.chain(platforms).chain(openings).max().unwrap_or(0)
+        let groups = self.groups.iter().map(|g| g.id.0);
+        nodes.chain(platforms).chain(openings).chain(groups).max().unwrap_or(0)
     }
 
     /// Equality ignoring `next_id` (which only grows). Use in every undo/redo test.
@@ -207,6 +252,7 @@ impl Document {
             && self.room == other.room
             && self.platforms == other.platforms
             && self.nodes == other.nodes
+            && self.groups == other.groups
     }
 
     /// Pretty JSON.
@@ -682,5 +728,89 @@ mod tests {
         assert!(!doc.content_eq(&other));
         assert!(!doc.contains_id(1));
         assert_eq!(doc.schema_version, SCHEMA_VERSION);
+    }
+
+    fn node(id: u64, parent: Parent, attach: Attach) -> Node {
+        Node {
+            id: NodeId(id),
+            name: format!("Node {id}"),
+            part: "generic:box".into(),
+            parent,
+            attach,
+            position: DVec3::ZERO,
+            rotation: DQuat::IDENTITY,
+            shape: Shape::Part,
+            finish: Finish::AnodizedBlack,
+            params: Params::new(),
+            pickable: true,
+            locked: false,
+            select_lock: false,
+            note: String::new(),
+        }
+    }
+
+    #[test]
+    fn old_document_without_groups_loads() {
+        let doc = Document::new("Legacy");
+        let mut value = serde_json::to_value(&doc).unwrap();
+        assert!(value.as_object_mut().unwrap().remove("groups").is_some());
+        let loaded: Document = serde_json::from_value(value.clone()).unwrap();
+        assert!(loaded.groups.is_empty());
+        let (migrated, _) = Document::from_json(&value.to_string()).unwrap();
+        assert!(migrated.groups.is_empty());
+    }
+
+    #[test]
+    fn chain_root_walks_mate_constrained_and_joint() {
+        let mut doc = Document::new("Chain");
+        let plat = Parent::Platform(PlatformId(10));
+        let frame = Frame { origin: DVec3::ZERO, z: DVec3::Z, x: DVec3::X };
+        doc.nodes.push(node(1, plat, Attach::Free));
+        doc.nodes.push(node(
+            2,
+            Parent::Node(NodeId(1)),
+            Attach::Mate { self_conn: "a".into(), parent_conn: "b".into(), slide: 0.0, twist: 0.0 },
+        ));
+        doc.nodes.push(node(3, Parent::Node(NodeId(2)), Attach::Constrained { constraints: Vec::new() }));
+        doc.nodes.push(node(
+            4,
+            Parent::Node(NodeId(3)),
+            Attach::Joint(Joint {
+                kind: JointKind::Rigid,
+                child: frame,
+                parent: frame,
+                offset: DVec3::ZERO,
+                angle: 0.0,
+                flip: false,
+                values: [0.0; 3],
+                limits: [None; 3],
+                suppressed: false,
+                seq: 0,
+            }),
+        ));
+        assert_eq!(doc.chain_root(NodeId(4)), NodeId(1));
+        assert_eq!(doc.chain_root(NodeId(1)), NodeId(1));
+        assert_eq!(doc.top_parent(NodeId(4)), plat);
+
+        // Cycle guard terminates on unvalidated cyclic data.
+        doc.nodes.push(node(5, Parent::Node(NodeId(6)), Attach::Free));
+        doc.nodes.push(node(6, Parent::Node(NodeId(5)), Attach::Free));
+        let root = doc.chain_root(NodeId(5));
+        assert!(root == NodeId(5) || root == NodeId(6));
+    }
+
+    #[test]
+    fn contains_id_sees_groups() {
+        let mut doc = Document::new("Groups");
+        let before = doc.clone();
+        let group = crate::Group { id: crate::GroupId(77), name: "Optics".into(), members: vec![NodeId(1), NodeId(2)] };
+        doc.groups.push(group.clone());
+        assert!(doc.contains_id(77));
+        assert_eq!(doc.max_id(), 77);
+        assert_eq!(doc.group(GroupId(77)), Some(&group));
+        assert_eq!(doc.group(GroupId(99)), None);
+        assert_eq!(doc.group_of(NodeId(2)), Some(&group));
+        assert_eq!(doc.group_of(NodeId(3)), None);
+        assert!(!doc.content_eq(&before));
     }
 }
