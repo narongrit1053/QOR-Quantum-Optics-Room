@@ -808,7 +808,11 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    let text = if error == crate::nudge::NudgeError::Locked { "Part is locked" } else { "No hole there" };
+                    let text = match error {
+                        crate::nudge::NudgeError::Locked => "Part is locked",
+                        crate::nudge::NudgeError::NoHole => "No hole there",
+                        crate::nudge::NudgeError::MixedParents => "Can't move parts on different platforms together",
+                    };
                     show_toast(ui, &app.borrow(), text, false);
                 }
             }

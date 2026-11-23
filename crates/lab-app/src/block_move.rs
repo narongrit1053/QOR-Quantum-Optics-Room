@@ -8,6 +8,7 @@ use lab_core::{Attach, Command, Document, Node, NodeId, Parent, PlatformId};
 pub enum BlockMoveError {
     OffPlate,
     Locked,
+    MixedParents,
 }
 
 /// Extends `primary_cmd` (a `SetAttach` for `primary`) into a rigid `Command::Batch` covering
@@ -44,6 +45,10 @@ pub fn block_move(
     }
     if members.iter().any(|n| n.locked) {
         return Err(BlockMoveError::Locked);
+    }
+    let primary_parent = doc.top_parent(primary);
+    if members.iter().any(|n| doc.top_parent(n.id) != primary_parent) {
+        return Err(BlockMoveError::MixedParents);
     }
 
     let cur_root_pos = doc.node_pose(primary).map_or(primary_node.position, |(p, _)| p);
@@ -418,5 +423,32 @@ mod tests {
 
         history.undo(&mut doc).unwrap().unwrap();
         assert!(doc.content_eq(&start));
+    }
+
+    #[test]
+    fn block_mixed_parents_refuses() {
+        let (mut doc, _holes) = table_doc();
+        let plat2 = PlatformId(2);
+        let mut p2 = doc.platforms[0].clone();
+        p2.id = plat2;
+        p2.name = "Table 2".into();
+        doc.platforms.push(p2);
+
+        let a = make_node(1, Attach::Free, DVec3::ZERO);
+        let mut b = make_node(2, Attach::Free, DVec3::new(50.0, 0.0, 0.0));
+        b.parent = Parent::Platform(plat2);
+        let mut c = make_node(3, Attach::Free, DVec3::new(100.0, 0.0, 0.0));
+        c.parent = Parent::Room;
+        let primary_cmd = drag_cmd(&a, Attach::Free, DVec3::new(25.0, 0.0, 0.0));
+        doc.nodes.extend([a, b, c]);
+
+        assert_eq!(
+            block_move(&doc, NodeId(1), primary_cmd.clone(), &[NodeId(2)]),
+            Err(BlockMoveError::MixedParents)
+        );
+        assert_eq!(
+            block_move(&doc, NodeId(1), primary_cmd, &[NodeId(3)]),
+            Err(BlockMoveError::MixedParents)
+        );
     }
 }

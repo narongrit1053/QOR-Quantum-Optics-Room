@@ -104,6 +104,7 @@ pub fn on_transform_requested(
             let text = match err {
                 BlockMoveError::OffPlate => "Can't move: a part would leave the plate",
                 BlockMoveError::Locked => "Part is locked",
+                BlockMoveError::MixedParents => "Can't move parts on different platforms together",
             };
             // Send the unchanged snapshot so the viewport snaps the gizmo back.
             app.borrow().send(lab_viewport::ViewportRequest::ApplyChanges {
