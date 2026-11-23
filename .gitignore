@@ -3,3 +3,6 @@
 
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# Vendor manuals/CAD, kept in a separate private repo
+vendor-parts/
