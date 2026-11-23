@@ -12,7 +12,7 @@ use lab_core::selection::SelectionTarget;
 use lab_core::units::{
     LengthUnit, ParseError, format_angle_deg, format_length, parse_angle_deg, parse_length,
 };
-use lab_core::{Command, remove_nodes_command};
+use lab_core::{Command, remove_nodes_command, remove_platform_command};
 use lab_core::glam::{DQuat, DVec3, EulerRot};
 use lab_core::model::{Attach, Node, Parent};
 use lab_core::model::NodeId;
@@ -928,7 +928,7 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
                 fixes: Vec::new(),
             }),
             Some(SelectionTarget::Platform(pid)) => Ok(EditOutcome::Command {
-                command: Command::RemovePlatform(pid),
+                command: remove_platform_command(cx.doc, pid),
                 label: "Delete Platform".into(),
                 select: None,
                 fixes: Vec::new(),
@@ -948,7 +948,7 @@ pub fn action_edit(cx: &EditContext, action: &str) -> Result<EditOutcome, EditEr
             }
         };
         return Ok(EditOutcome::Command {
-            command: Command::RemovePlatform(pid),
+            command: remove_platform_command(cx.doc, pid),
             label: "Delete Platform".into(),
             select: None,
             fixes: Vec::new(),

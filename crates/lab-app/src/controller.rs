@@ -807,12 +807,17 @@ pub(crate) fn execute(
     let result = {
         let mut a = app.borrow_mut();
         // Captured before the command removes it, for the toast.
-        let deleted = match &command {
-            Command::RemovePlatform(pid) => {
-                a.session.doc.platform(*pid).map(|p| (p.name.clone(), a.session.doc.nodes_on(*pid).count()))
-            }
+        let removed_platform = match &command {
+            Command::RemovePlatform(pid) => Some(*pid),
+            Command::Batch(cmds) => cmds.iter().find_map(|c| match c {
+                Command::RemovePlatform(pid) => Some(*pid),
+                _ => None,
+            }),
             _ => None,
         };
+        let deleted = removed_platform.and_then(|pid| {
+            a.session.doc.platform(pid).map(|p| (p.name.clone(), a.session.doc.nodes_on(pid).count()))
+        });
         let before = a.session.selection;
         match a.session.execute(command, Some(label)) {
             Ok(changes) => {

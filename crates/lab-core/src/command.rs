@@ -756,7 +756,7 @@ impl Command {
             Command::RenameGroup { .. } => "Rename Group".into(),
             Command::Batch(commands) => commands
                 .iter()
-                .find(|c| matches!(c, Command::RemoveNodes(_)))
+                .find(|c| matches!(c, Command::RemoveNodes(_) | Command::RemovePlatform(_)))
                 .or_else(|| commands.first())
                 .map_or_else(String::new, |c| c.label(doc)),
         }
@@ -790,6 +790,25 @@ pub fn remove_nodes_command(doc: &Document, ids: Vec<NodeId>) -> Command {
         Command::RemoveNodes(ids)
     } else {
         cmds.push(Command::RemoveNodes(ids));
+        Command::Batch(cmds)
+    }
+}
+
+/// Builds a platform delete command that drops groups on that platform; plain `RemovePlatform`
+/// when no group is affected.
+pub fn remove_platform_command(doc: &Document, id: PlatformId) -> Command {
+    let on: Vec<NodeId> = doc.nodes_on(id).map(|n| n.id).collect();
+    // Group removals run before RemovePlatform so undo restores the platform and nodes first.
+    let mut cmds: Vec<Command> = doc
+        .groups
+        .iter()
+        .filter(|g| g.members.iter().any(|m| on.contains(m)))
+        .map(|g| Command::RemoveGroup(g.id))
+        .collect();
+    if cmds.is_empty() {
+        Command::RemovePlatform(id)
+    } else {
+        cmds.push(Command::RemovePlatform(id));
         Command::Batch(cmds)
     }
 }
@@ -1551,5 +1570,40 @@ mod tests {
         let changes = history.execute(&mut doc, cmd).unwrap();
         assert!(!changes.groups_changed);
         assert_eq!(doc.group(gid).unwrap().members, vec![root, other]);
+    }
+
+    #[test]
+    fn remove_platform_drops_its_groups_and_undo_restores() {
+        let mut doc = demo_document();
+        let table = doc.platforms[0].id;
+        let (n1, n2) = (doc.nodes[0].id, doc.nodes[1].id);
+        let gid = GroupId(doc.next_free_id());
+        Command::AddGroup { group: Group { id: gid, name: "G1".into(), members: vec![n1, n2] }, index: None }
+            .apply(&mut doc)
+            .unwrap();
+        let before = doc.clone();
+        let mut history = History::default();
+
+        let cmd = remove_platform_command(&doc, table);
+        assert_eq!(cmd.label(&doc), "Delete Table A");
+        let changes = history.execute(&mut doc, cmd).unwrap();
+        assert!(changes.groups_changed);
+        assert_eq!(changes.platforms_removed, vec![table]);
+        assert!(doc.groups.is_empty());
+
+        history.undo(&mut doc).unwrap().unwrap();
+        assert_eq!(doc.groups.len(), 1);
+        assert_eq!(doc.group(gid).unwrap().members, vec![n1, n2]);
+        assert!(doc.content_eq(&before));
+
+        history.redo(&mut doc).unwrap().unwrap();
+        assert!(doc.groups.is_empty());
+    }
+
+    #[test]
+    fn remove_platform_without_groups_is_plain() {
+        let doc = demo_document();
+        let table = doc.platforms[0].id;
+        assert_eq!(remove_platform_command(&doc, table), Command::RemovePlatform(table));
     }
 }
