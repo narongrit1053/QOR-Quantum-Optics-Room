@@ -208,8 +208,7 @@ pub fn on_feature_point(
                     {
                         let mut a = app.borrow_mut();
                         a.session.history.end_gesture();
-                        a.session.selection = Some(target);
-                        a.send(ViewportRequest::Select(Some(target)));
+                        controller::store_sel(&mut a, lab_app::multi_select::Sel { primary: Some(target), extra: Vec::new() });
                     }
                     controller::refresh(ui, app, models);
                 } else {

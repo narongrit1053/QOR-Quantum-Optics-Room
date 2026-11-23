@@ -38,14 +38,26 @@ export { EditState, TableFocus, DragState } from "fields.slint";
 export { RelationChip } from "relations_bar.slint";
 export { StartEntry } from "start_page.slint";
 
-// One scene-tree row: chevron, label (double-click to rename), lock and delete on hover.
+// One scene-tree row: chevron, label (double-click to rename), hover actions and folder menu.
 component SceneItem inherits Rectangle {
     in property <SceneRow> item;
-    callback clicked();
+    in property <bool> start-rename;
+    callback clicked(bool /* ctrl */, bool /* shift */);
     callback renamed(string);
     callback action(string);
+    callback menu(length /* x */, length /* y */);
+    callback rename-started();
     property <bool> renaming;
-    property <bool> hot: row-touch.has-hover || lock-btn.hovered || iso-btn.hovered || del-btn.hovered;
+    property <bool> last-ctrl;
+    property <bool> last-shift;
+    property <bool> hot: row-touch.has-hover || lock-btn.hovered || iso-btn.hovered || ungroup-btn.hovered || del-btn.hovered;
+
+    changed start-rename => {
+        if (self.start-rename) {
+            root.renaming = true;
+            root.rename-started();
+        }
+    }
 
     height: 28px;
     border-radius: 7px;
@@ -60,7 +72,16 @@ component SceneItem inherits Rectangle {
     }
 
     row-touch := TouchArea {
-        clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down || event.kind == PointerEventKind.up) {
+                root.last-ctrl = event.modifiers.control;
+                root.last-shift = event.modifiers.shift;
+            }
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up && item.kind == 3) {
+                root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+        clicked => { root.clicked(root.last-ctrl, root.last-shift); }
         double-clicked => { if (item.kind != 2) { root.renaming = true; } }
     }
     HorizontalLayout {
@@ -78,6 +99,16 @@ component SceneItem inherits Rectangle {
                 y: (parent.height - self.height) / 2;
             }
             if item.expandable: TouchArea { clicked => { root.action("toggle"); } }
+        }
+        if item.kind == 3: Rectangle {
+            width: 14px;
+            Icon {
+                name: "folder";
+                tint: item.selected ? Theme.accent : Theme.text-secondary;
+                width: 13px;
+                height: 13px;
+                y: (parent.height - self.height) / 2;
+            }
         }
         if item.is-beam: Rectangle {
             width: 10px;
@@ -135,6 +166,13 @@ component SceneItem inherits Rectangle {
             size: 22px;
             icon-size: 12px;
             clicked => { root.action("isolate"); }
+        }
+        ungroup-btn := IconButton {
+            visible: item.kind == 3 && root.hot;
+            icon: "⊟";
+            size: 22px;
+            icon-size: 12px;
+            clicked => { root.action("ungroup"); }
         }
         del-btn := IconButton {
             visible: item.kind != 2 && root.hot;
@@ -397,9 +435,13 @@ export component AppWindow inherits Window {
     callback paste-corners(string /* target */, string /* text */) -> string;
     callback sheet-button(int);
     callback toast-action-clicked();
-    callback scene-row-clicked(int /* kind */, int /* id */);
+    callback scene-row-clicked(int /* kind */, int /* id */, bool /* ctrl */, bool /* shift */);
     callback scene-row-renamed(int /* kind */, int /* id */, string);
-    callback scene-row-action(int /* kind */, int /* id */, string /* "delete" | "lock" | "unlock" | "toggle" */);
+    callback scene-row-action(int /* kind */, int /* id */, string /* "delete" | "lock" | "unlock" | "toggle" | "ungroup" | "save_bundle" */);
+    property <int> scene-menu-id: -1;
+    property <length> scene-menu-x;
+    property <length> scene-menu-y;
+    property <int> scene-rename-id: -1;
     // M0 viewport input. kind: 0 down, 1 up, 2 move, 3 cancel. button: 0 left, 1 right, 2 middle, 3 other.
     callback viewport-pointer(int, int, length, length, bool, bool, bool);
     callback viewport-scroll(length, length, length, length, bool /* shift */);
@@ -657,6 +699,10 @@ export component AppWindow inherits Window {
                     if (event.text == "x" || event.text == "X") { root.action("edit.cut"); return accept; }
                     if (event.text == "v" || event.text == "V") { root.action("edit.paste"); return accept; }
                     if (event.text == "d" || event.text == "D") { root.action("edit.duplicate"); return accept; }
+                }
+                if (!EditState.text-focused && (event.text == "g" || event.text == "G")) {
+                    root.action(event.modifiers.shift ? "edit.ungroup" : "edit.group");
+                    return accept;
                 }
                 return reject;
             }
@@ -1143,9 +1189,17 @@ export component AppWindow inherits Window {
                     min-height: (root.height - 2 * Theme.inset) * 0.4;
                     for row in root.scene: SceneItem {
                         item: row;
-                        clicked => { root.scene-row-clicked(row.kind, row.id); }
+                        start-rename: row.kind == 3 && root.scene-rename-id == row.id;
+                        rename-started => { root.scene-rename-id = -1; }
+                        clicked(ctrl, shift) => { root.scene-row-clicked(row.kind, row.id, ctrl, shift); }
                         renamed(text) => { root.scene-row-renamed(row.kind, row.id, text); }
                         action(a) => { root.scene-row-action(row.kind, row.id, a); }
+                        menu(x, y) => {
+                            root.scene-menu-id = row.id;
+                            root.scene-menu-x = x;
+                            root.scene-menu-y = y;
+                            scene-group-menu.show();
+                        }
                     }
                 }
             }
@@ -1300,6 +1354,25 @@ export component AppWindow inherits Window {
                 remove(i) => { root.wizard-remove(i); }
                 save => { root.wizard-save(); }
                 cancel => { root.wizard-cancel(); }
+            }
+        }
+
+        // Right-click menu for group folder rows in the scene tree (popups cannot be repeated).
+        scene-group-menu := ContextMenu {
+            x: root.scene-menu-x;
+            y: root.scene-menu-y;
+            rows: [
+                { id: "rename", title: "Rename", group: "", shortcut: "" },
+                { id: "ungroup", title: "Ungroup", group: "", shortcut: "" },
+                { id: "save_bundle", title: "Save as Bundle…", group: "", shortcut: "" },
+                { id: "delete", title: "Delete", group: "", shortcut: "" },
+            ];
+            chosen(a) => {
+                if (a == "rename") {
+                    root.scene-rename-id = root.scene-menu-id;
+                } else {
+                    root.scene-row-action(3, root.scene-menu-id, a);
+                }
             }
         }
 

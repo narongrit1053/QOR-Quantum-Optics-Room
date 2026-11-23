@@ -95,7 +95,7 @@ fn bundle_place_command(bundle: &lab_file::Bundle, nodes: Vec<Node>, next: u64) 
 /// POLA-203: a library bundle dropped where its ghost (anchor) part would go: one `PlaceAssembly`
 /// (plus `AddGroup` in a `Batch` when the bundle was saved from a group).
 fn place_bundle(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, name: &str, request: &PlaceRequest) {
-    let (command, root, skipped) = {
+    let (command, roots, skipped) = {
         let a = app.borrow();
         let Some(bundle) = a.settings.bundles.iter().find(|b| b.name == name) else { return };
         let keep = |n: &Node| !matches!(n.shape, Shape::Part) || a.catalog.get(&n.part).is_some();
@@ -103,10 +103,19 @@ fn place_bundle(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModel
         // shortcut: saved rotations are kept, the drop's rotation is ignored.
         let (nodes, skipped) =
             crate::clipboard::place_bundle(&bundle.nodes, next, request.parent, &request.attach, request.position, keep);
-        let Some(root) = nodes.first().map(|n| n.id) else { return };
-        (bundle_place_command(bundle, nodes, next), root, skipped)
+        if nodes.is_empty() {
+            return;
+        }
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        let roots: Vec<NodeId> = nodes
+            .iter()
+            .filter(|n| !matches!(n.parent, Parent::Node(p) if ids.contains(&p)))
+            .map(|n| n.id)
+            .collect();
+        (bundle_place_command(bundle, nodes, next), roots, skipped)
     };
-    controller::execute(ui, app, models, "place", command, format!("Add bundle {name}"), Some(SelectionTarget::Node(root)), Vec::new());
+    let sel = lab_app::multi_select::Sel::from_nodes(&roots);
+    controller::execute_sel(ui, app, models, "place", command, format!("Add bundle {name}"), Some(sel), Vec::new());
     if skipped > 0 {
         controller::show_toast(ui, &app.borrow(), &format!("Skipped {skipped} missing parts"), false);
     }

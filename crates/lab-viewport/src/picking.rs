@@ -124,17 +124,20 @@ pub(crate) fn pick(
     let exists = |t: SelectionTarget| index.snapshot.as_ref().is_some_and(|doc| t.exists_in(doc));
 
     let mut selected = selection.selected;
-    let mut extra = selection.extra.clone();
-    let mut extra_changed = false;
     for request in &pending.0 {
         match request {
-            FrameRequest::Select(target) => selected = target.filter(|&t| exists(t)),
+            // App-driven selection updates the viewport without echoing SelectionChanged back.
+            FrameRequest::Select(target) => {
+                selected = target.filter(|&t| exists(t));
+                if selection.selected != selected {
+                    selection.selected = selected;
+                }
+            }
             FrameRequest::SelectExtra(ids) => {
                 let filtered: Vec<_> =
                     ids.iter().copied().filter(|&id| exists(SelectionTarget::Node(id))).collect();
-                if filtered != extra {
-                    extra = filtered;
-                    extra_changed = true;
+                if filtered != selection.extra {
+                    selection.extra = filtered;
                 }
             }
             _ => {}
@@ -144,7 +147,7 @@ pub(crate) fn pick(
     let mut toggles = Vec::new();
     for &click in &clicks.0 {
         let hit = target_at(click, !mods.shift);
-        let (next, event) = resolve_left_click(selected, &extra, hit, mods.ctrl);
+        let (next, event) = resolve_left_click(selected, &selection.extra, hit, mods.ctrl);
         selected = next;
         match event {
             Some(ViewportEvent::SelectionToggled(t)) => toggles.push(t),
@@ -154,8 +157,14 @@ pub(crate) fn pick(
     }
     let mut menu = None;
     for &click in &right_clicks.0 {
-        selected = target_at(click, false);
-        menu = Some(click);
+        let hit = target_at(click, false);
+        let already_selected = hit.is_some_and(|t| {
+            selected == Some(t) || matches!(t, SelectionTarget::Node(id) if selection.extra.contains(&id))
+        });
+        if !already_selected {
+            selected = hit;
+        }
+        menu = Some((hit, click));
     }
 
     // Hover follows the pointer (nodes only), but not while dragging the camera.
@@ -170,9 +179,6 @@ pub(crate) fn pick(
         };
     }
 
-    if extra_changed {
-        selection.extra = extra;
-    }
     if selected != selection.selected || force_select_event {
         selection.selected = selected;
         events.send(ViewportEvent::SelectionChanged(selected));
@@ -180,8 +186,8 @@ pub(crate) fn pick(
     for target in toggles {
         events.send(ViewportEvent::SelectionToggled(target));
     }
-    if let Some(pos) = menu {
-        events.send(ViewportEvent::ContextMenu { target: selected, pos });
+    if let Some((target, pos)) = menu {
+        events.send(ViewportEvent::ContextMenu { target, pos });
     }
     if hovered != selection.hovered {
         selection.hovered = hovered;

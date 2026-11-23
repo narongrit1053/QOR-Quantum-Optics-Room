@@ -25,6 +25,12 @@ fn rows(app: &AppState, target: Option<SelectionTarget>) -> Vec<(&'static str, &
             if crate::beams::is_laser(app, id) {
                 rows.push(("beam.toggle", if crate::beams::is_on(app, id) { "Turn Laser Off" } else { "Turn Laser On" }));
             }
+            if app.session.selected_nodes().len() >= 2 {
+                rows.push(("edit.group", "Group"));
+            }
+            if doc.group_of(doc.chain_root(id)).is_some() {
+                rows.push(("edit.ungroup", "Ungroup"));
+            }
             rows.push(lock(doc.node(id).is_some_and(|n| n.select_lock)));
             rows.push(("library.save_bundle", "Save as Bundle…"));
             rows.push(("selection.delete", "Delete"));
@@ -50,4 +56,44 @@ pub fn open(ui: &AppWindow, app: &AppState, target: Option<SelectionTarget>, pos
     ui.set_context_x(pos.x / scale);
     ui.set_context_y(pos.y / scale);
     ui.invoke_open_context_menu();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lab_core::{Group, GroupId, NodeId, Parent};
+
+    fn ids(app: &AppState, target: Option<SelectionTarget>) -> Vec<&'static str> {
+        rows(app, target).into_iter().map(|(id, _)| id).collect()
+    }
+
+    #[test]
+    fn node_menu_shows_group_and_ungroup_when_applicable() {
+        let mut doc = lab_core::sample::demo_document();
+        let plat = doc.platforms[0].id;
+        let roots: Vec<NodeId> = doc.children(Parent::Platform(plat)).map(|n| n.id).collect();
+        assert!(roots.len() >= 2);
+        let (n1, n2) = (roots[0], roots[1]);
+
+        let mut app = AppState::new(lab_app::Session::new_clean(doc.clone(), None), lab_file::Settings::default());
+        app.session.selection = Some(SelectionTarget::Node(n1));
+        let single = ids(&app, Some(SelectionTarget::Node(n1)));
+        assert!(!single.contains(&"edit.group"));
+        assert!(!single.contains(&"edit.ungroup"));
+
+        // Selecting 2+ nodes adds Group.
+        app.session.extra = vec![n2];
+        let multi = ids(&app, Some(SelectionTarget::Node(n1)));
+        assert!(multi.contains(&"edit.group"));
+        assert!(!multi.contains(&"edit.ungroup"));
+
+        // Grouping n1 and n2 adds Ungroup (also for a child of n1).
+        let gid = GroupId(doc.allocate_id());
+        doc.groups.push(Group { id: gid, name: "Group 1".into(), members: vec![n1, n2] });
+        app.session.doc = doc;
+        app.session.extra.clear();
+        let grouped = ids(&app, Some(SelectionTarget::Node(n1)));
+        assert!(!grouped.contains(&"edit.group"));
+        assert!(grouped.contains(&"edit.ungroup"));
+    }
 }

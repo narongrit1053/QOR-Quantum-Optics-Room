@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use lab_catalog::{Catalog, Source};
 use lab_core::part::{ConnectorKind, PartDef};
-use lab_core::{Document, NodeId, SelectionTarget};
+use lab_core::{Document, NodeId};
 use lab_file::{Bundle, UserLibrary};
 use lab_ui::{AppWindow, LibraryRow};
 use lab_viewport::{DragItem, Modifiers, PartDrag, Vec2, ViewportRequest};
@@ -435,13 +435,10 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
         // POLA-203 bundles.
         "bundle_save" => {
             let a = &*app;
-            let selected = match &a.session.selection {
-                Some(SelectionTarget::Node(id)) => std::slice::from_ref(id),
-                _ => &[],
-            };
+            let selected = a.session.selected_nodes();
             let bundles = &a.settings.bundles;
             let Some(name) = unique_name(|n| bundles.iter().any(|b| b.name == n), arg) else { return };
-            let Some(bundle) = build_bundle(&a.session.doc, selected, name) else { return };
+            let Some(bundle) = build_bundle(&a.session.doc, &selected, name) else { return };
             crate::controller::show_toast(ui, a, &format!("Saved bundle {}", bundle.name), false);
             app.settings.bundles.push(bundle);
         }

@@ -163,8 +163,10 @@ pub fn on_feature_point(
     {
         let mut a = app.borrow_mut();
         a.session.history.end_gesture();
-        a.session.selection = Some(SelectionTarget::Node(child));
-        a.send(ViewportRequest::Select(Some(SelectionTarget::Node(child))));
+        controller::store_sel(
+            &mut a,
+            lab_app::multi_select::Sel { primary: Some(SelectionTarget::Node(child)), extra: Vec::new() },
+        );
     }
     STATE.with(|s| {
         let mut s = s.borrow_mut();

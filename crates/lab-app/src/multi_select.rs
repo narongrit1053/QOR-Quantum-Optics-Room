@@ -1,12 +1,61 @@
 //! Pure multi-selection transitions: plain click, Ctrl+click toggle, Shift+click range,
 //! and whole-group matching.
 
-use lab_core::{Document, GroupId, NodeId, SelectionTarget};
+use lab_core::{Command, Document, Group, GroupId, NodeId, SelectionTarget};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Sel {
     pub primary: Option<SelectionTarget>,
     pub extra: Vec<NodeId>,
+}
+
+impl Sel {
+    pub fn from_nodes(nodes: &[NodeId]) -> Self {
+        let Some((&first, rest)) = nodes.split_first() else {
+            return Self::default();
+        };
+        Self { primary: Some(SelectionTarget::Node(first)), extra: rest.to_vec() }
+    }
+}
+
+pub fn chain_roots(doc: &Document, selected: &[NodeId]) -> Vec<NodeId> {
+    let mut roots = Vec::new();
+    for &id in selected {
+        let root = doc.chain_root(id);
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots
+}
+
+pub fn next_group_name(doc: &Document) -> String {
+    let mut n = 1usize;
+    while doc.groups.iter().any(|g| g.name == format!("Group {n}")) {
+        n += 1;
+    }
+    format!("Group {n}")
+}
+
+/// Right-click keeps an active multi-selection when hitting an already-selected node,
+/// and otherwise selects the clicked target (clearing stale extras).
+pub fn right_click(doc: &Document, prev: &Sel, hit: Option<SelectionTarget>) -> Sel {
+    if let Some(SelectionTarget::Node(id)) = hit
+        && (prev.primary == Some(SelectionTarget::Node(id)) || prev.extra.contains(&id))
+    {
+        return prev.clone();
+    }
+    click(doc, prev, hit)
+}
+
+pub fn make_group_command(doc: &Document, selected: &[NodeId]) -> (Command, Group) {
+    let members = chain_roots(doc, selected);
+    let group = Group {
+        id: GroupId(doc.next_free_id()),
+        name: next_group_name(doc),
+        members,
+    };
+    (Command::AddGroup { group: group.clone(), index: None }, group)
 }
 
 pub fn is_whole_group(doc: &Document, sel: &Sel) -> Option<GroupId> {
@@ -64,7 +113,11 @@ pub fn range(rows: &[(i32, i32)], prev: &Sel, node: NodeId) -> Sel {
         rows.iter().position(|&(kind, id)| kind == 0 && u64::try_from(id).ok() == Some(target.0))
     };
     let (Some(a), Some(b)) = (row_pos(primary), row_pos(node)) else {
-        return Sel { primary: Some(SelectionTarget::Node(node)), extra: Vec::new() };
+        let mut extra = prev.extra.clone();
+        if node != primary && !extra.contains(&node) {
+            extra.push(node);
+        }
+        return Sel { primary: Some(SelectionTarget::Node(primary)), extra };
     };
     let (lo, hi) = (a.min(b), a.max(b));
     let mut extra = Vec::new();
@@ -277,6 +330,67 @@ mod tests {
         assert_eq!(
             range(&rows, &plat, NodeId(6)),
             Sel { primary: Some(SelectionTarget::Node(NodeId(6))), extra: vec![] }
+        );
+    }
+
+    #[test]
+    fn range_fallback_keeps_primary_and_extras_when_row_hidden() {
+        let rows = [(2, 0), (1, 1), (0, 3), (0, 5)];
+        // Primary is hidden inside a collapsed folder; keep primary and existing extras, add clicked node.
+        let prev = Sel { primary: Some(SelectionTarget::Node(NodeId(1))), extra: vec![NodeId(2)] };
+        assert_eq!(
+            range(&rows, &prev, NodeId(3)),
+            Sel { primary: Some(SelectionTarget::Node(NodeId(1))), extra: vec![NodeId(2), NodeId(3)] }
+        );
+        // Clicking an already-selected extra or primary does not duplicate it.
+        let prev2 = Sel { primary: Some(SelectionTarget::Node(NodeId(1))), extra: vec![NodeId(3)] };
+        assert_eq!(range(&rows, &prev2, NodeId(3)), prev2);
+        assert_eq!(range(&rows, &prev2, NodeId(1)), prev2);
+
+        // Clicked row not in visible rows keeps primary and extras and adds the clicked node.
+        let prev_vis = Sel { primary: Some(SelectionTarget::Node(NodeId(5))), extra: vec![NodeId(3)] };
+        assert_eq!(
+            range(&rows, &prev_vis, NodeId(9)),
+            Sel { primary: Some(SelectionTarget::Node(NodeId(5))), extra: vec![NodeId(3), NodeId(9)] }
+        );
+    }
+
+    #[test]
+    fn group_action_names_group_n() {
+        let mut doc = doc_with_group(); // already contains "Group 1"
+        doc.nodes.push(make_node(6, Parent::Platform(PlatformId(1))));
+        let (cmd, group) = make_group_command(&doc, &[NodeId(5), NodeId(6)]);
+        assert_eq!(group.name, "Group 2");
+        assert!(matches!(cmd, Command::AddGroup { ref group, index: None } if group.name == "Group 2"));
+
+        // Lowest unused n >= 1 wins even when a higher number exists.
+        doc.groups.push(Group {
+            id: GroupId(20),
+            name: "Group 3".into(),
+            members: vec![NodeId(5), NodeId(6)],
+        });
+        assert_eq!(next_group_name(&doc), "Group 2");
+    }
+
+    #[test]
+    fn right_click_keeps_selected_and_clears_outside() {
+        let doc = doc_with_group();
+        let multi = Sel { primary: Some(SelectionTarget::Node(NodeId(1))), extra: vec![NodeId(5)] };
+        // Right-clicking primary or an extra keeps the selection unchanged.
+        assert_eq!(right_click(&doc, &multi, Some(SelectionTarget::Node(NodeId(1)))), multi);
+        assert_eq!(right_click(&doc, &multi, Some(SelectionTarget::Node(NodeId(5)))), multi);
+        // Right-clicking an ungrouped node outside the selection clears stale extras.
+        let mut doc2 = doc.clone();
+        doc2.nodes.push(make_node(6, Parent::Platform(PlatformId(1))));
+        assert_eq!(
+            right_click(&doc2, &multi, Some(SelectionTarget::Node(NodeId(6)))),
+            Sel { primary: Some(SelectionTarget::Node(NodeId(6))), extra: vec![] }
+        );
+        // Right-clicking platform/empty clears extras.
+        assert_eq!(right_click(&doc, &multi, None), Sel::default());
+        assert_eq!(
+            right_click(&doc, &multi, Some(SelectionTarget::Platform(PlatformId(1)))),
+            Sel { primary: Some(SelectionTarget::Platform(PlatformId(1))), extra: vec![] }
         );
     }
 }

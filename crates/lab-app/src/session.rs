@@ -114,6 +114,11 @@ impl Session {
             self.extra.clear();
             return true;
         }
+        if !matches!(self.selection, Some(SelectionTarget::Node(_))) {
+            let had = !self.extra.is_empty();
+            self.extra.clear();
+            return had;
+        }
         let before = self.extra.len();
         self.extra.retain(|&id| self.doc.node(id).is_some());
         self.extra.len() != before
