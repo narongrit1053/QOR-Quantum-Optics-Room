@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.0.9
+
+- **Thorlabs polarization optics from the catalog now work.** Polarizing beamsplitter cubes (such as PBS122) act as a PBS, and half- and quarter-wave plates (such as WPH10M and WPQ10M) turn the polarization, with a *Fast axis* angle in the inspector. Before, parts imported from the catalog split the beam 50/50 and left the polarization unchanged.
+
 ## v0.0.8
 
 - **AI agents can build your setup.** Turn on *Allow AI agents to control LabSetup* in Settings, and an agent on this PC can place parts, stack posts and mounts at a beam height, and add constraints through `labsetup-cli live`. You watch each step appear, and Ctrl+Z undoes it.
