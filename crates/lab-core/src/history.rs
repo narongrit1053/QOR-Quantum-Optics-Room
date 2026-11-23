@@ -78,13 +78,19 @@ impl History {
         command: Command,
         label: impl Into<String>,
     ) -> Result<ChangeSet, CommandError> {
-        let (inverse, changes) = command.apply(doc)?;
+        let (inverse, mut fixup_inverses, changes) = crate::command::apply_and_prune_groups(command, doc)?;
         if changes.is_empty() {
             return Ok(changes);
         }
+        let undo_cmd = if fixup_inverses.is_empty() {
+            inverse
+        } else {
+            fixup_inverses.push(inverse);
+            Command::Batch(fixup_inverses)
+        };
         let after = self.take_state();
         let entry = Entry {
-            command: inverse,
+            command: undo_cmd,
             label: label.into(),
             coalesce: None,
             state_before: self.current,
@@ -107,7 +113,7 @@ impl History {
         label: impl Into<String>,
         key: &str,
     ) -> Result<ChangeSet, CommandError> {
-        let (inverse, changes) = command.apply(doc)?;
+        let (inverse, mut fixup_inverses, changes) = crate::command::apply_and_prune_groups(command, doc)?;
         if changes.is_empty() {
             return Ok(changes);
         }
@@ -115,11 +121,25 @@ impl History {
         let joins = self.open_gesture.as_deref() == Some(key)
             && self.undo.last().is_some_and(|top| top.coalesce.as_deref() == Some(key));
         match self.undo.last_mut() {
-            // The open gesture's entry already restores the state before the gesture.
-            Some(top) if joins => top.state_after = after,
+            // The open gesture's entry already restores the pre-gesture nodes; prepend any group
+            // fix-up inverses triggered by a later tick (e.g. dragging onto another platform).
+            Some(top) if joins => {
+                if !fixup_inverses.is_empty() {
+                    let prev = std::mem::replace(&mut top.command, Command::Batch(Vec::new()));
+                    fixup_inverses.push(prev);
+                    top.command = Command::Batch(fixup_inverses);
+                }
+                top.state_after = after;
+            }
             _ => {
+                let undo_cmd = if fixup_inverses.is_empty() {
+                    inverse
+                } else {
+                    fixup_inverses.push(inverse);
+                    Command::Batch(fixup_inverses)
+                };
                 let entry = Entry {
-                    command: inverse,
+                    command: undo_cmd,
                     label: label.into(),
                     coalesce: Some(key.to_string()),
                     state_before: self.current,

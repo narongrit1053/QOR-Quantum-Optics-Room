@@ -87,7 +87,17 @@ pub enum Command {
         index: Option<usize>,
     },
     RemoveGroup(GroupId),
+    /// Inverse of `RemoveGroup`: restores `group` at `index` without re-validating members.
+    RestoreGroup {
+        group: Group,
+        index: usize,
+    },
     SetGroupMembers {
+        id: GroupId,
+        members: Vec<NodeId>,
+    },
+    /// Inverse of `SetGroupMembers` and group cleanup: replaces members without re-validating them.
+    RestoreGroupMembers {
         id: GroupId,
         members: Vec<NodeId>,
     },
@@ -649,9 +659,19 @@ impl Command {
                 let index = doc.groups.iter().position(|g| g.id == id).ok_or(CommandError::NoSuchGroup(id))?;
                 let group = doc.groups.remove(index);
                 Ok((
-                    Command::AddGroup { group, index: Some(index) },
+                    Command::RestoreGroup { group, index },
                     ChangeSet { groups_changed: true, ..Default::default() },
                 ))
+            }
+            Command::RestoreGroup { group, index } => {
+                let id = group.id;
+                check_new_id(doc, id.0)?;
+                if index > doc.groups.len() {
+                    return Err(CommandError::BadIndex);
+                }
+                doc.groups.insert(index, group);
+                doc.bump_next_id(id.0);
+                Ok((Command::RemoveGroup(id), ChangeSet { groups_changed: true, ..Default::default() }))
             }
             Command::SetGroupMembers { id, members } => {
                 let index = doc.groups.iter().position(|g| g.id == id).ok_or(CommandError::NoSuchGroup(id))?;
@@ -659,7 +679,16 @@ impl Command {
                 let changed = doc.groups[index].members != members;
                 let old = std::mem::replace(&mut doc.groups[index].members, members);
                 Ok((
-                    Command::SetGroupMembers { id, members: old },
+                    Command::RestoreGroupMembers { id, members: old },
+                    ChangeSet { groups_changed: changed, ..Default::default() },
+                ))
+            }
+            Command::RestoreGroupMembers { id, members } => {
+                let index = doc.groups.iter().position(|g| g.id == id).ok_or(CommandError::NoSuchGroup(id))?;
+                let changed = doc.groups[index].members != members;
+                let old = std::mem::replace(&mut doc.groups[index].members, members);
+                Ok((
+                    Command::RestoreGroupMembers { id, members: old },
                     ChangeSet { groups_changed: changed, ..Default::default() },
                 ))
             }
@@ -750,7 +779,8 @@ impl Command {
             Command::SetRoom(_) => "Edit Room".into(),
             Command::AddGroup { group, .. } => format!("Group {}", group.name),
             Command::RemoveGroup(id) => format!("Ungroup {}", doc.group(*id).map_or("Group", |g| g.name.as_str())),
-            Command::SetGroupMembers { id, .. } => {
+            Command::RestoreGroup { group, .. } => format!("Restore {}", group.name),
+            Command::SetGroupMembers { id, .. } | Command::RestoreGroupMembers { id, .. } => {
                 doc.group(*id).map_or_else(|| "Edit Group".into(), |g| format!("Edit Group {}", g.name))
             }
             Command::RenameGroup { .. } => "Rename Group".into(),
@@ -761,6 +791,79 @@ impl Command {
                 .map_or_else(String::new, |c| c.label(doc)),
         }
     }
+}
+
+/// Applies `command` and prunes any groups left invalid (missing nodes, non-roots, or split
+/// across top parents). Returns `(inverse, group_fixup_inverses, changes)`.
+pub(crate) fn apply_and_prune_groups(
+    command: Command,
+    doc: &mut Document,
+) -> Result<(Command, Vec<Command>, ChangeSet), CommandError> {
+    // Remember each group's top parent before the edit so moving one member (even the first)
+    // drops that member instead of the rest of the group.
+    let pre_parents: Vec<(GroupId, Parent)> = doc
+        .groups
+        .iter()
+        .filter_map(|g| g.members.first().map(|&m| (g.id, doc.top_parent(m))))
+        .collect();
+    let (inverse, mut changes) = command.apply(doc)?;
+    if changes.is_empty() || doc.groups.is_empty() {
+        return Ok((inverse, Vec::new(), changes));
+    }
+    let fixups = group_cleanup_commands(doc, &pre_parents);
+    if fixups.is_empty() {
+        return Ok((inverse, Vec::new(), changes));
+    }
+    let mut fixup_inverses = Vec::with_capacity(fixups.len());
+    for fixup in fixups {
+        match fixup.apply(doc) {
+            Ok((inv, c)) => {
+                fixup_inverses.push(inv);
+                changes.merge(c);
+            }
+            Err(e) => {
+                for inv in fixup_inverses.into_iter().rev() {
+                    let _ = inv.apply(doc);
+                }
+                let _ = inverse.apply(doc);
+                return Err(e);
+            }
+        }
+    }
+    fixup_inverses.reverse();
+    Ok((inverse, fixup_inverses, changes))
+}
+
+fn group_cleanup_commands(doc: &Document, pre_parents: &[(GroupId, Parent)]) -> Vec<Command> {
+    let mut cmds = Vec::new();
+    for g in &doc.groups {
+        let mut roots: Vec<NodeId> = Vec::with_capacity(g.members.len());
+        for &m in &g.members {
+            if doc.node(m).is_some() && doc.chain_root(m) == m && !roots.contains(&m) {
+                roots.push(m);
+            }
+        }
+        let kept = if let Some(&first) = roots.first() {
+            let first_parent = doc.top_parent(first);
+            if roots.iter().all(|&m| doc.top_parent(m) == first_parent) {
+                roots
+            } else {
+                let target = pre_parents
+                    .iter()
+                    .find_map(|&(id, p)| (id == g.id).then_some(p))
+                    .unwrap_or(first_parent);
+                roots.into_iter().filter(|&m| doc.top_parent(m) == target).collect()
+            }
+        } else {
+            roots
+        };
+        if kept.len() < 2 {
+            cmds.push(Command::RemoveGroup(g.id));
+        } else if kept != g.members {
+            cmds.push(Command::RestoreGroupMembers { id: g.id, members: kept });
+        }
+    }
+    cmds
 }
 
 /// Builds a delete command that keeps groups consistent; plain `RemoveNodes` when no group is affected.
@@ -1605,5 +1708,154 @@ mod tests {
         let doc = demo_document();
         let table = doc.platforms[0].id;
         assert_eq!(remove_platform_command(&doc, table), Command::RemovePlatform(table));
+    }
+
+    #[test]
+    fn c1_mate_member_onto_other_then_delete_and_undo() {
+        let mut doc = demo_document();
+        let (a, b) = (doc.nodes[0].id, doc.nodes[1].id);
+        let gid = GroupId(doc.next_free_id());
+        Command::AddGroup { group: Group { id: gid, name: "Pair".into(), members: vec![a, b] }, index: None }
+            .apply(&mut doc)
+            .unwrap();
+        let original = doc.clone();
+        let mut history = History::default();
+
+        // Mate A onto B: A stops being a chain root, so the 2-member group drops in the same step.
+        let mate_cmd = Command::SetAttach {
+            id: a,
+            parent: Parent::Node(b),
+            attach: mate("bottom", "top", 0.0),
+            position: DVec3::ZERO,
+            rotation: DQuat::IDENTITY,
+        };
+        let changes = history.execute(&mut doc, mate_cmd).unwrap();
+        assert!(changes.groups_changed);
+        assert!(doc.groups.is_empty());
+
+        // Delete B (taking A with it), then undo twice back to the original document.
+        let del = remove_nodes_command(&doc, vec![b]);
+        history.execute(&mut doc, del).unwrap();
+        let after_del = doc.clone();
+        assert!(doc.node(a).is_none() && doc.node(b).is_none());
+
+        history.undo(&mut doc).unwrap().unwrap();
+        assert!(doc.node(a).is_some() && doc.node(b).is_some());
+        assert!(doc.groups.is_empty());
+
+        history.undo(&mut doc).unwrap().unwrap();
+        assert!(doc.content_eq(&original));
+
+        history.redo(&mut doc).unwrap().unwrap();
+        assert!(doc.groups.is_empty());
+        history.redo(&mut doc).unwrap().unwrap();
+        assert!(doc.content_eq(&after_del));
+    }
+
+    #[test]
+    fn c1_constrain_member_then_delete_third_succeeds() {
+        let mut doc = demo_document();
+        let (a, b, c) = (doc.nodes[0].id, doc.nodes[1].id, doc.nodes[2].id);
+        let gid = GroupId(doc.next_free_id());
+        Command::AddGroup { group: Group { id: gid, name: "Trio".into(), members: vec![a, b, c] }, index: None }
+            .apply(&mut doc)
+            .unwrap();
+        let original = doc.clone();
+        let mut history = History::default();
+
+        // Scenario A: constrain A onto B, then delete C.
+        let constrain_cmd = Command::SetAttach {
+            id: a,
+            parent: Parent::Node(b),
+            attach: Attach::Constrained { constraints: Vec::new() },
+            position: DVec3::ZERO,
+            rotation: DQuat::IDENTITY,
+        };
+        let changes = history.execute(&mut doc, constrain_cmd).unwrap();
+        assert!(changes.groups_changed);
+        assert_eq!(doc.group(gid).unwrap().members, vec![b, c]);
+
+        let del = remove_nodes_command(&doc, vec![c]);
+        history.execute(&mut doc, del).unwrap();
+        assert!(doc.node(c).is_none());
+        assert!(doc.groups.is_empty());
+
+        history.undo(&mut doc).unwrap().unwrap();
+        assert_eq!(doc.group(gid).unwrap().members, vec![b, c]);
+        history.undo(&mut doc).unwrap().unwrap();
+        assert!(doc.content_eq(&original));
+    }
+
+    #[test]
+    fn c1_reparent_first_member_to_other_platform_in_coalesced_drag() {
+        let mut doc = demo_document();
+        let table = doc.platforms[0].id;
+        let bb = breadboard(&doc, None);
+        let bb_id = bb.id;
+        Command::AddPlatform { platform: Box::new(bb), index: None }.apply(&mut doc).unwrap();
+        let (a, b, c) = (doc.nodes[0].id, doc.nodes[1].id, doc.nodes[2].id);
+        let gid = GroupId(doc.next_free_id());
+        Command::AddGroup { group: Group { id: gid, name: "Trio".into(), members: vec![a, b, c] }, index: None }
+            .apply(&mut doc)
+            .unwrap();
+        let original = doc.clone();
+        let mut history = History::default();
+
+        // Tick 1: move A on the same platform (group still valid).
+        let tick1 = Command::SetAttach {
+            id: a,
+            parent: Parent::Platform(table),
+            attach: Attach::Free,
+            position: DVec3::new(10.0, 0.0, 0.0),
+            rotation: DQuat::IDENTITY,
+        };
+        history.execute_coalescing(&mut doc, tick1, "Move A", "gizmo").unwrap();
+        assert_eq!(doc.group(gid).unwrap().members, vec![a, b, c]);
+
+        // Tick 2: drag A onto the second platform — drops A, keeps [B, C], in the same undo step.
+        let tick2 = Command::SetAttach {
+            id: a,
+            parent: Parent::Platform(bb_id),
+            attach: Attach::Free,
+            position: DVec3::new(5.0, 5.0, 0.0),
+            rotation: DQuat::IDENTITY,
+        };
+        let changes = history.execute_coalescing(&mut doc, tick2, "Move A", "gizmo").unwrap();
+        history.end_gesture();
+        assert!(changes.groups_changed);
+        assert_eq!(doc.group(gid).unwrap().members, vec![b, c]);
+        let after = doc.clone();
+
+        // One undo restores both A's original placement/platform and the full [A, B, C] group.
+        history.undo(&mut doc).unwrap().unwrap();
+        assert!(!history.can_undo());
+        assert!(doc.content_eq(&original));
+
+        history.redo(&mut doc).unwrap().unwrap();
+        assert!(doc.content_eq(&after));
+    }
+
+    #[test]
+    fn c1_group_inverses_do_not_revalidate_members() {
+        let mut doc = demo_document();
+        let (a, b, c) = (doc.nodes[0].id, doc.nodes[1].id, doc.nodes[2].id);
+        let gid = GroupId(doc.next_free_id());
+        Command::AddGroup { group: Group { id: gid, name: "Trio".into(), members: vec![a, b, c] }, index: None }
+            .apply(&mut doc)
+            .unwrap();
+
+        // RemoveGroup inverse must succeed even if a member is no longer a chain root.
+        let mut d1 = doc.clone();
+        d1.node_mut(a).unwrap().parent = Parent::Node(b);
+        let (inv_remove, _) = Command::RemoveGroup(gid).apply(&mut d1).unwrap();
+        assert!(inv_remove.apply(&mut d1).is_ok());
+        assert_eq!(d1.group(gid).unwrap().members, vec![a, b, c]);
+
+        // SetGroupMembers inverse must succeed even if an old member is no longer a chain root.
+        let mut d2 = doc.clone();
+        let (inv_set, _) = Command::SetGroupMembers { id: gid, members: vec![b, c] }.apply(&mut d2).unwrap();
+        d2.node_mut(a).unwrap().parent = Parent::Node(b);
+        assert!(inv_set.apply(&mut d2).is_ok());
+        assert_eq!(d2.group(gid).unwrap().members, vec![a, b, c]);
     }
 }
