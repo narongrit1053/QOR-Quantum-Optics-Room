@@ -219,6 +219,9 @@ fn apply_scene_requests(
                 if selection.selected.take().is_some() {
                     events.send(ViewportEvent::SelectionChanged(None));
                 }
+                if !selection.extra.is_empty() {
+                    selection.extra.clear();
+                }
                 if selection.hovered.take().is_some() {
                     events.send(ViewportEvent::HoverChanged(None));
                 }
@@ -255,6 +258,9 @@ fn apply_scene_requests(
     {
         selection.selected = None;
         events.send(ViewportEvent::SelectionChanged(None));
+    }
+    if selection.extra.iter().any(|&id| !SelectionTarget::Node(id).exists_in(doc)) {
+        selection.extra.retain(|&id| SelectionTarget::Node(id).exists_in(doc));
     }
     if let Some(t) = selection.hovered
         && !t.exists_in(doc)

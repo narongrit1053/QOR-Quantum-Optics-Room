@@ -89,6 +89,7 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 ViewportEvent::SelectionChanged(target) => {
                     controller::on_viewport_selection(&ui, &app, &models, target);
                 }
+                ViewportEvent::SelectionToggled(_) => {} // wired in Task 6
                 ViewportEvent::HoverChanged(_) => {}
                 ViewportEvent::ContextMenu { target, pos } => crate::context_menu::open(&ui, &app.borrow(), target, pos),
                 ViewportEvent::DragStarted { unit, .. } => controller::on_drag_started(&ui, unit),

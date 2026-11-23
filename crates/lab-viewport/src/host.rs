@@ -439,6 +439,7 @@ fn run_on_demand(
                 ViewportRequest::SetViewMode(mode) => pending.push(FrameRequest::SetViewMode(mode)),
                 ViewportRequest::Frame(target) => pending.push(FrameRequest::Frame(target)),
                 ViewportRequest::Select(target) => pending.push(FrameRequest::Select(target)),
+                ViewportRequest::SelectExtra(ids) => pending.push(FrameRequest::SelectExtra(ids)),
                 ViewportRequest::LoadDocument(doc) => pending.push(FrameRequest::LoadDocument(doc)),
                 ViewportRequest::ApplyChanges { snapshot, changes } => {
                     pending.push(FrameRequest::ApplyChanges(snapshot, changes))

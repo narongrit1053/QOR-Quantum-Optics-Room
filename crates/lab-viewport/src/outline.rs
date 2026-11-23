@@ -84,10 +84,13 @@ fn rebuild_outline(
         ids.push(id);
         ids
     };
-    let selected = match selection.selected {
+    let mut selected = match selection.selected {
         Some(SelectionTarget::Node(id)) => with_below(id),
         _ => Vec::new(),
     };
+    for &id in &selection.extra {
+        selected.extend(with_below(id));
+    }
     let mut hovered: Vec<_> = highlighted.0.iter().flat_map(|&id| with_below(id)).collect();
     if let Some(SelectionTarget::Node(id)) = selection.hovered {
         hovered.extend(with_below(id));

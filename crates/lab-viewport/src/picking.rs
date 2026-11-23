@@ -7,14 +7,14 @@ use bevy::{
     picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
     prelude::*,
 };
-use lab_core::SelectionTarget;
+use lab_core::{NodeId, SelectionTarget};
 
 use crate::camera::{Clicks, OrbitCamera, RightClicks, PointerState, camera_at, handle_input};
 use crate::hole_material::HoleTopMaterial;
 use crate::host::{EventSender, PendingRequests, ViewportSize};
 use crate::room::WallState;
 use crate::scene::SceneIndex;
-use crate::{FrameRequest, ViewportEvent, ViewportInput};
+use crate::{FrameRequest, Modifiers, ViewportEvent, ViewportInput};
 
 pub(crate) const ACCENT: Color = Color::srgb(10.0 / 255.0, 132.0 / 255.0, 1.0);
 
@@ -37,7 +37,34 @@ pub(crate) struct SharedMaterial;
 #[derive(Resource, Default)]
 pub(crate) struct Selection {
     pub selected: Option<SelectionTarget>,
+    pub extra: Vec<NodeId>,
     pub hovered: Option<SelectionTarget>,
+}
+
+impl Selection {
+    pub(crate) fn is_selected(&self, target: SelectionTarget) -> bool {
+        self.selected == Some(target)
+            || matches!(target, SelectionTarget::Node(id) if self.extra.contains(&id))
+    }
+}
+
+fn resolve_left_click(
+    selected: Option<SelectionTarget>,
+    extra: &[NodeId],
+    hit: Option<SelectionTarget>,
+    ctrl: bool,
+) -> (Option<SelectionTarget>, Option<ViewportEvent>) {
+    if ctrl {
+        return (selected, hit.map(ViewportEvent::SelectionToggled));
+    }
+    if !extra.is_empty() {
+        // With extras active, clicking a selected item narrows instead of clearing.
+        return (hit, Some(ViewportEvent::SelectionChanged(hit)));
+    }
+    // Clicking the selected item again clears the selection.
+    let next = if hit.is_some() && hit == selected { None } else { hit };
+    let event = (next != selected).then_some(ViewportEvent::SelectionChanged(next));
+    (next, event)
 }
 
 pub(crate) struct PickingPlugin;
@@ -61,14 +88,16 @@ pub(crate) fn pick(
     mut ray_cast: MeshRayCast,
     mut selection: ResMut<Selection>,
     (index, events, full): (Res<SceneIndex>, Res<EventSender>, Res<ViewportSize>),
-    mut shift: Local<bool>,
+    mut mods: Local<Modifiers>,
 ) {
     for request in &pending.0 {
         if let FrameRequest::Input(
-            ViewportInput::PointerDown { mods, .. } | ViewportInput::PointerUp { mods, .. } | ViewportInput::PointerMove { mods, .. },
+            ViewportInput::PointerDown { mods: m, .. }
+            | ViewportInput::PointerUp { mods: m, .. }
+            | ViewportInput::PointerMove { mods: m, .. },
         ) = request
         {
-            *shift = mods.shift;
+            *mods = *m;
         }
     }
     let select_locked = |t: SelectionTarget| {
@@ -95,15 +124,33 @@ pub(crate) fn pick(
     let exists = |t: SelectionTarget| index.snapshot.as_ref().is_some_and(|doc| t.exists_in(doc));
 
     let mut selected = selection.selected;
+    let mut extra = selection.extra.clone();
+    let mut extra_changed = false;
     for request in &pending.0 {
-        if let FrameRequest::Select(target) = request {
-            selected = target.filter(|&t| exists(t));
+        match request {
+            FrameRequest::Select(target) => selected = target.filter(|&t| exists(t)),
+            FrameRequest::SelectExtra(ids) => {
+                let filtered: Vec<_> =
+                    ids.iter().copied().filter(|&id| exists(SelectionTarget::Node(id))).collect();
+                if filtered != extra {
+                    extra = filtered;
+                    extra_changed = true;
+                }
+            }
+            _ => {}
         }
     }
+    let mut force_select_event = false;
+    let mut toggles = Vec::new();
     for &click in &clicks.0 {
-        // Clicking the selected item again clears the selection.
-        let hit = target_at(click, !*shift);
-        selected = if hit.is_some() && hit == selected { None } else { hit };
+        let hit = target_at(click, !mods.shift);
+        let (next, event) = resolve_left_click(selected, &extra, hit, mods.ctrl);
+        selected = next;
+        match event {
+            Some(ViewportEvent::SelectionToggled(t)) => toggles.push(t),
+            Some(ViewportEvent::SelectionChanged(_)) => force_select_event = true,
+            _ => {}
+        }
     }
     let mut menu = None;
     for &click in &right_clicks.0 {
@@ -118,14 +165,20 @@ pub(crate) fn pick(
     let mut hovered = selection.hovered;
     if pointer_moved || !clicks.0.is_empty() {
         hovered = match pointer.position {
-            Some(pos) if !pointer.is_dragging() => target_at(pos, !*shift).filter(|t| matches!(t, SelectionTarget::Node(_))),
+            Some(pos) if !pointer.is_dragging() => target_at(pos, !mods.shift).filter(|t| matches!(t, SelectionTarget::Node(_))),
             _ => None,
         };
     }
 
-    if selected != selection.selected {
+    if extra_changed {
+        selection.extra = extra;
+    }
+    if selected != selection.selected || force_select_event {
         selection.selected = selected;
         events.send(ViewportEvent::SelectionChanged(selected));
+    }
+    for target in toggles {
+        events.send(ViewportEvent::SelectionToggled(target));
     }
     if let Some(pos) = menu {
         events.send(ViewportEvent::ContextMenu { target: selected, pos });
@@ -162,7 +215,8 @@ fn apply_highlight(
     for (entity, look, shared, shown) in &looks {
         match look {
             HighlightLook::Standard { material, base_color, owner } => {
-                let color = if selection.selected == Some(*owner) {
+                let is_selected = selection.is_selected(*owner);
+                let color = if is_selected {
                     let t = if matches!(owner, SelectionTarget::Node(_)) { 0.65 } else { 0.25 };
                     mix(*base_color, ACCENT, t)
                 } else if selection.hovered == Some(*owner) {
@@ -171,7 +225,7 @@ fn apply_highlight(
                     *base_color
                 };
                 // Hover also lifts emission, so it shows on dark parts where a white mix barely does.
-                let hovered = selection.hovered == Some(*owner) && selection.selected != Some(*owner);
+                let hovered = selection.hovered == Some(*owner) && !is_selected;
                 let lift = LinearRgba::rgb(0.12, 0.12, 0.12);
                 let Some(current) = materials.get(material) else { continue };
                 // The alpha belongs to the material (walls fade it); highlights only change colour.
@@ -208,7 +262,7 @@ fn apply_highlight(
                 }
             }
             HighlightLook::HoleTop { material, owner } => {
-                let on = if selection.selected == Some(*owner) { 1.0 } else { 0.0 };
+                let on = if selection.is_selected(*owner) { 1.0 } else { 0.0 };
                 let Some(current) = hole_materials.get(material) else { continue };
                 let params = &current.extension.params;
                 if (params.highlight != on || params.show_zones != on)
@@ -235,4 +289,82 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
         a.blue + (b.blue - a.blue) * t,
         a.alpha,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lab_core::{NodeId, PlatformId};
+
+    #[test]
+    fn is_selected_matches_primary_or_extra_node() {
+        let sel = Selection {
+            selected: Some(SelectionTarget::Node(NodeId(1))),
+            extra: vec![NodeId(2), NodeId(3)],
+            hovered: None,
+        };
+        assert!(sel.is_selected(SelectionTarget::Node(NodeId(1))));
+        assert!(sel.is_selected(SelectionTarget::Node(NodeId(2))));
+        assert!(sel.is_selected(SelectionTarget::Node(NodeId(3))));
+        assert!(!sel.is_selected(SelectionTarget::Node(NodeId(4))));
+        assert!(!sel.is_selected(SelectionTarget::Platform(PlatformId(1))));
+        assert!(!sel.is_selected(SelectionTarget::Room));
+
+        let plat = Selection {
+            selected: Some(SelectionTarget::Platform(PlatformId(2))),
+            extra: vec![],
+            hovered: None,
+        };
+        assert!(plat.is_selected(SelectionTarget::Platform(PlatformId(2))));
+        assert!(!plat.is_selected(SelectionTarget::Node(NodeId(2))));
+    }
+
+    #[test]
+    fn ctrl_click_emits_toggle_without_changing_local_selection() {
+        let primary = Some(SelectionTarget::Node(NodeId(1)));
+        let hit = SelectionTarget::Node(NodeId(2));
+        assert_eq!(
+            resolve_left_click(primary, &[], Some(hit), true),
+            (primary, Some(ViewportEvent::SelectionToggled(hit)))
+        );
+        // Ctrl+click on empty space changes nothing and emits no event.
+        assert_eq!(resolve_left_click(primary, &[NodeId(2)], None, true), (primary, None));
+    }
+
+    #[test]
+    fn plain_click_without_extra_clears_when_reclicking_primary() {
+        let primary = Some(SelectionTarget::Node(NodeId(1)));
+        assert_eq!(
+            resolve_left_click(primary, &[], primary, false),
+            (None, Some(ViewportEvent::SelectionChanged(None)))
+        );
+        assert_eq!(resolve_left_click(None, &[], None, false), (None, None));
+        let other = Some(SelectionTarget::Node(NodeId(2)));
+        assert_eq!(
+            resolve_left_click(primary, &[], other, false),
+            (other, Some(ViewportEvent::SelectionChanged(other)))
+        );
+    }
+
+    #[test]
+    fn plain_click_with_extra_reports_hit_without_clearing() {
+        let primary = Some(SelectionTarget::Node(NodeId(1)));
+        let extra = [NodeId(2), NodeId(3)];
+        // Clicking primary while extras are active reports it even though `selected` is unchanged.
+        assert_eq!(
+            resolve_left_click(primary, &extra, primary, false),
+            (primary, Some(ViewportEvent::SelectionChanged(primary)))
+        );
+        // Clicking an extra node reports it.
+        let hit_extra = Some(SelectionTarget::Node(NodeId(2)));
+        assert_eq!(
+            resolve_left_click(primary, &extra, hit_extra, false),
+            (hit_extra, Some(ViewportEvent::SelectionChanged(hit_extra)))
+        );
+        // Clicking empty space clears.
+        assert_eq!(
+            resolve_left_click(primary, &extra, None, false),
+            (None, Some(ViewportEvent::SelectionChanged(None)))
+        );
+    }
 }
