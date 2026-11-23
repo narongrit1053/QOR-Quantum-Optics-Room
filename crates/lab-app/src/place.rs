@@ -7,7 +7,7 @@ use std::rc::Rc;
 use lab_core::part::{Frame, ParamValue};
 use lab_catalog::Catalog;
 use lab_app::live::resolve::new_part_node;
-use lab_core::{Attach, Command, Node, NodeId, Parent, SelectionTarget, Shape};
+use lab_core::{Attach, Command, Group, GroupId, Node, NodeId, Parent, SelectionTarget, Shape};
 use lab_ui::AppWindow;
 use lab_core::glam::{DQuat, DVec3};
 use lab_viewport::{DragItem, PlaceRequest, stack_chain};
@@ -70,7 +70,30 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
     }
 }
 
-/// POLA-203: a library bundle dropped where its ghost (anchor) part would go: one `PlaceAssembly`.
+/// Builds the command for placing a bundle: `PlaceAssembly`, wrapped in a `Batch` with `AddGroup`
+/// when the bundle carries a group name and at least two document chain roots were placed.
+fn bundle_place_command(bundle: &lab_file::Bundle, nodes: Vec<Node>, next: u64) -> Command {
+    if let Some(group_name) = &bundle.group {
+        // Placed roots on a platform or the room are document chain roots; dropping onto a part
+        // parents them under that part, where they cannot form a group.
+        let roots: Vec<NodeId> = nodes.iter().filter(|n| !matches!(n.parent, Parent::Node(_))).map(|n| n.id).collect();
+        if roots.len() >= 2 {
+            let group = Group {
+                id: GroupId(next + nodes.len() as u64),
+                name: group_name.clone(),
+                members: roots,
+            };
+            return Command::Batch(vec![
+                Command::PlaceAssembly { nodes },
+                Command::AddGroup { group, index: None },
+            ]);
+        }
+    }
+    Command::PlaceAssembly { nodes }
+}
+
+/// POLA-203: a library bundle dropped where its ghost (anchor) part would go: one `PlaceAssembly`
+/// (plus `AddGroup` in a `Batch` when the bundle was saved from a group).
 fn place_bundle(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, name: &str, request: &PlaceRequest) {
     let (command, root, skipped) = {
         let a = app.borrow();
@@ -81,7 +104,7 @@ fn place_bundle(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModel
         let (nodes, skipped) =
             crate::clipboard::place_bundle(&bundle.nodes, next, request.parent, &request.attach, request.position, keep);
         let Some(root) = nodes.first().map(|n| n.id) else { return };
-        (Command::PlaceAssembly { nodes }, root, skipped)
+        (bundle_place_command(bundle, nodes, next), root, skipped)
     };
     controller::execute(ui, app, models, "place", command, format!("Add bundle {name}"), Some(SelectionTarget::Node(root)), Vec::new());
     if skipped > 0 {
@@ -126,4 +149,83 @@ fn riser_for(catalog: &Catalog, part: &str, lift: f64, head: &Node) -> Option<No
         riser.params.insert(k.into(), ParamValue::Number(v));
     }
     Some(riser)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lab_core::History;
+    use lab_file::Bundle;
+
+    #[test]
+    fn grouped_bundle_places_as_batch_with_group_and_undoes_in_one_step() {
+        let mut doc = lab_core::sample::demo_document();
+        let plat = doc.platforms[0].id;
+        let template = doc.nodes.iter().find(|n| n.parent == Parent::Platform(plat)).unwrap().clone();
+        let r1 = Node { id: NodeId(doc.allocate_id()), parent: Parent::Platform(plat), attach: Attach::Free, ..template.clone() };
+        let c1 = Node {
+            id: NodeId(doc.allocate_id()),
+            parent: Parent::Node(r1.id),
+            attach: Attach::Constrained { constraints: Vec::new() },
+            ..template.clone()
+        };
+        let r2 = Node { id: NodeId(doc.allocate_id()), parent: Parent::Platform(plat), attach: Attach::Free, ..template };
+        doc.nodes.extend([r1.clone(), c1.clone(), r2.clone()]);
+
+        let saved_nodes = crate::clipboard::bundle_nodes(crate::clipboard::copy(&doc, &[c1.id, r2.id]));
+        let bundle = Bundle { name: "Pair".into(), nodes: saved_nodes, group: Some("Optic Pair".into()) };
+
+        let before = doc.clone();
+        let next = doc.next_free_id();
+        let (placed, skipped) = crate::clipboard::place_bundle(
+            &bundle.nodes,
+            next,
+            Parent::Platform(plat),
+            &Attach::Free,
+            DVec3::new(100.0, 50.0, 0.0),
+            |_| true,
+        );
+        assert_eq!((placed.len(), skipped), (3, 0));
+        let expected_members = vec![placed[0].id, placed[2].id];
+        let expected_gid = GroupId(next + 3);
+        let cmd = bundle_place_command(&bundle, placed, next);
+        assert!(matches!(cmd, Command::Batch(ref cmds) if cmds.len() == 2));
+
+        let mut history = History::default();
+        let changes = history.execute(&mut doc, cmd).unwrap();
+        assert!(changes.groups_changed);
+        let g = doc.group(expected_gid).expect("group created with id after placed nodes");
+        assert_eq!(g.name, "Optic Pair");
+        assert_eq!(g.members, expected_members);
+
+        history.undo(&mut doc).unwrap().unwrap();
+        assert!(doc.content_eq(&before));
+
+        // Plain bundle without a group stays a single PlaceAssembly.
+        let plain = Bundle { group: None, ..bundle.clone() };
+        let (placed, _) = crate::clipboard::place_bundle(&plain.nodes, next, Parent::Platform(plat), &Attach::Free, DVec3::ZERO, |_| true);
+        assert!(matches!(bundle_place_command(&plain, placed, next), Command::PlaceAssembly { .. }));
+
+        // Grouped bundle with only 1 placed root (second filtered out) stays a single PlaceAssembly.
+        let (placed, _) = crate::clipboard::place_bundle(
+            &bundle.nodes,
+            next,
+            Parent::Platform(plat),
+            &Attach::Free,
+            DVec3::ZERO,
+            |n| n.id != bundle.nodes[2].id,
+        );
+        assert!(matches!(bundle_place_command(&bundle, placed, next), Command::PlaceAssembly { .. }));
+
+        // Grouped bundle dropped onto an existing part cannot group children -> stays PlaceAssembly.
+        let (placed, _) = crate::clipboard::place_bundle(
+            &bundle.nodes,
+            next,
+            Parent::Node(r1.id),
+            &Attach::Free,
+            DVec3::ZERO,
+            |_| true,
+        );
+        assert!(matches!(bundle_place_command(&bundle, placed, next), Command::PlaceAssembly { .. }));
+    }
 }

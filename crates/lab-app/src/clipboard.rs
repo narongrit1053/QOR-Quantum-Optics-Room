@@ -1,22 +1,25 @@
 //! M7 A: copy, cut, paste and duplicate of whole sets (docs/M7-PLAN.md).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use lab_core::{Attach, Command, Document, Node, NodeId, Parent, compute_holes};
 
 /// Fallback paste offset when the root's parent has no hole grid.
 const FREE_STEP: f64 = 25.0;
 
-/// The selected set roots and all their descendants, in document order (parents first).
+/// The selected chain roots and all their descendants, in selection order (parents first within each chain).
 pub fn copy(doc: &Document, selection: &[NodeId]) -> Vec<Node> {
+    let mut seen: HashSet<NodeId> = HashSet::new();
     let mut out: Vec<Node> = Vec::new();
     for &id in selection {
-        let root = lab_app::set_root(doc, id);
-        if out.iter().any(|n| n.id == root) {
+        let root = doc.chain_root(id);
+        if seen.contains(&root) {
             continue;
         }
         for nid in std::iter::once(root).chain(doc.descendants(root)) {
-            if let Some(n) = doc.node(nid) {
+            if seen.insert(nid)
+                && let Some(n) = doc.node(nid)
+            {
                 out.push(n.clone());
             }
         }
@@ -209,5 +212,47 @@ mod tests {
         // A missing middle part drops it and its child.
         let (nodes, skipped) = place_bundle(&saved, next, Parent::Platform(target), &drop, at, |n| n.id != saved[1].id);
         assert_eq!((nodes.len(), skipped), (1, 2));
+    }
+
+    fn test_node(template: &Node, id: u64, parent: Parent, attach: Attach) -> Node {
+        Node { id: NodeId(id), parent, attach, ..template.clone() }
+    }
+
+    #[test]
+    fn copy_constrained_child_before_root_no_duplicates() {
+        let demo = lab_core::sample::demo_document();
+        let template = demo.nodes.first().expect("demo has a node");
+        let mut doc = Document::new("Copy");
+        doc.nodes.push(test_node(template, 1, Parent::Room, Attach::Free));
+        doc.nodes.push(test_node(template, 2, Parent::Node(NodeId(1)), Attach::Constrained { constraints: Vec::new() }));
+        doc.nodes.push(test_node(template, 3, Parent::Node(NodeId(2)), Attach::Constrained { constraints: Vec::new() }));
+        doc.nodes.push(test_node(template, 9, Parent::Room, Attach::Free));
+
+        let copied = copy(&doc, &[NodeId(3), NodeId(1), NodeId(9)]);
+        let ids: Vec<NodeId> = copied.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![NodeId(1), NodeId(2), NodeId(3), NodeId(9)]);
+    }
+
+    #[test]
+    fn bundle_of_whole_chain_from_bottom_part() {
+        use lab_core::LatticeIndex;
+        let demo = lab_core::sample::demo_document();
+        let template = demo.nodes.iter().find(|n| matches!(n.parent, Parent::Platform(_))).expect("demo has a part on a platform");
+        let plat = template.parent;
+        let mut doc = Document::new("Chain");
+        doc.nodes.push(test_node(template, 1, plat, Attach::Hole { hole: LatticeIndex { i: 2, j: 3 } }));
+        doc.nodes.push(test_node(
+            template,
+            2,
+            Parent::Node(NodeId(1)),
+            Attach::Mate { self_conn: "a".into(), parent_conn: "b".into(), slide: 0.0, twist: 0.0 },
+        ));
+        doc.nodes.push(test_node(template, 3, Parent::Node(NodeId(2)), Attach::Constrained { constraints: Vec::new() }));
+        doc.nodes.push(test_node(template, 4, Parent::Node(NodeId(3)), Attach::Constrained { constraints: Vec::new() }));
+        doc.nodes.push(test_node(template, 5, Parent::Node(NodeId(4)), Attach::Constrained { constraints: Vec::new() }));
+
+        let copied = copy(&doc, &[NodeId(5)]);
+        assert_eq!(copied.len(), 5);
+        assert_eq!(copied.iter().map(|n| n.id).collect::<Vec<_>>(), vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)]);
     }
 }

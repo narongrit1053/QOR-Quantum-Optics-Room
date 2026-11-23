@@ -448,7 +448,14 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             }
         }
         "library.open" => ui.set_library_open(!ui.get_library_open()),
-        "library.save_bundle" => crate::library::save_bundle_prompt(ui, &app.borrow()),
+        "library.save_bundle" => {
+            let a = app.borrow();
+            let selected = match &a.session.selection {
+                Some(SelectionTarget::Node(id)) => std::slice::from_ref(id),
+                _ => &[],
+            };
+            crate::library::save_bundle_prompt(ui, &a, selected);
+        }
         "library.find" => {
             ui.set_library_open(true);
             ui.invoke_find_part();
