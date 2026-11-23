@@ -697,7 +697,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 (command, label, sel)
             };
             if let Err(error) = execute_sel_raw(ui, app, models, command, label, Some(sel), Vec::new()) {
-                show_toast(ui, &app.borrow(), &error.to_string(), false);
+                show_toast(ui, &app.borrow(), &multi_select::group_error_message(&error), false);
             }
         }
         "edit.ungroup" => {
