@@ -1,7 +1,7 @@
 //! Validation rules and their user-facing errors (M1-SPEC §3.6), plus the non-fatal repairs run
 //! on load.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use glam::{DQuat, DVec2};
 
@@ -10,7 +10,7 @@ use crate::limits::{
     LEG_SIZE, MARGIN_MAX, MAX_COORD, MAX_ID, MAX_LATTICE_AXIS, MAX_LATTICE_POINTS, MAX_ZONES, NAME_MAX_CHARS, PITCH,
     PITCH_CLEARANCE, THICKNESS, TOP_HEIGHT_MAX,
 };
-use crate::model::{Document, Node, Parent, Platform, PlatformId, Support};
+use crate::model::{Document, GroupId, Node, NodeId, Parent, Platform, PlatformId, Support};
 use crate::outline::OutlineError;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -263,7 +263,8 @@ impl Document {
             .iter()
             .map(|p| p.id.0)
             .chain(self.room.openings.iter().map(|o| o.id.0))
-            .chain(self.nodes.iter().map(|n| n.id.0));
+            .chain(self.nodes.iter().map(|n| n.id.0))
+            .chain(self.groups.iter().map(|g| g.id.0));
         for id in ids {
             *seen.entry(id).or_default() += 1;
         }
@@ -305,15 +306,26 @@ impl Document {
         if problems.is_empty() { Ok(()) } else { Err(problems) }
     }
 
-    /// Non-fatal fixes, returned as notes: `next_id` above every id, unit node rotations, and
-    /// edge margins at least the hole radius.
+    /// Non-fatal fixes, returned as notes: valid groups, `next_id` above every id, unit node
+    /// rotations, and edge margins at least the hole radius.
     pub(crate) fn repair(&mut self) -> Vec<String> {
         let mut notes = Vec::new();
-        let max = self.max_id();
-        if self.next_free_id() <= max {
-            self.set_next_id(max.saturating_add(1));
-            notes.push(format!("The next free id was raised to {}.", max.saturating_add(1)));
+        self.repair_group_members(&mut notes);
+        let max_valid = self
+            .platforms
+            .iter()
+            .map(|p| p.id.0)
+            .chain(self.room.openings.iter().map(|o| o.id.0))
+            .chain(self.nodes.iter().map(|n| n.id.0))
+            .chain(self.groups.iter().map(|g| g.id.0))
+            .filter(|&id| id <= MAX_ID)
+            .max()
+            .unwrap_or(0);
+        if self.next_free_id() <= max_valid {
+            self.set_next_id(max_valid.saturating_add(1));
+            notes.push(format!("The next free id was raised to {}.", max_valid.saturating_add(1)));
         }
+        self.repair_group_ids(&mut notes, max_valid);
         for n in &mut self.nodes {
             let length = n.rotation.length();
             if (length - 1.0).abs() > 1e-6 {
@@ -335,6 +347,96 @@ impl Document {
             }
         }
         notes
+    }
+
+    fn repair_group_members(&mut self, notes: &mut Vec<String>) {
+        if self.groups.is_empty() {
+            return;
+        }
+        let groups = std::mem::take(&mut self.groups);
+        let mut kept_groups = Vec::with_capacity(groups.len());
+        let mut claimed: BTreeSet<NodeId> = BTreeSet::new();
+        for mut g in groups {
+            let mut roots = Vec::with_capacity(g.members.len());
+            for m in g.members {
+                if self.node(m).is_none() {
+                    notes.push(format!("Removed missing member {} from group “{}”.", m.0, g.name));
+                    continue;
+                }
+                let root = self.chain_root(m);
+                if root != m {
+                    notes.push(format!(
+                        "Replaced member {} with its chain root {} in group “{}”.",
+                        m.0, root.0, g.name
+                    ));
+                }
+                if roots.contains(&root) {
+                    notes.push(format!("Removed duplicate member {} from group “{}”.", root.0, g.name));
+                } else {
+                    roots.push(root);
+                }
+            }
+            let mut unclaimed = Vec::with_capacity(roots.len());
+            for m in roots {
+                if claimed.contains(&m) {
+                    notes.push(format!(
+                        "Removed member {} from group “{}” because it is already in another group.",
+                        m.0, g.name
+                    ));
+                } else {
+                    unclaimed.push(m);
+                }
+            }
+            let mut kept = Vec::with_capacity(unclaimed.len());
+            if let Some(&first) = unclaimed.first() {
+                let expected = self.top_parent(first);
+                for m in unclaimed {
+                    if self.top_parent(m) == expected {
+                        kept.push(m);
+                    } else {
+                        notes.push(format!(
+                            "Removed member {} from group “{}” because it is on a different platform.",
+                            m.0, g.name
+                        ));
+                    }
+                }
+            }
+            if kept.len() < 2 {
+                notes.push(format!("Removed group “{}” because it had fewer than two valid members.", g.name));
+                continue;
+            }
+            claimed.extend(kept.iter().copied());
+            g.members = kept;
+            kept_groups.push(g);
+        }
+        self.groups = kept_groups;
+    }
+
+    fn repair_group_ids(&mut self, notes: &mut Vec<String>, max_valid: u64) {
+        if self.groups.is_empty() {
+            return;
+        }
+        let mut used: BTreeSet<u64> = self
+            .platforms
+            .iter()
+            .map(|p| p.id.0)
+            .chain(self.room.openings.iter().map(|o| o.id.0))
+            .chain(self.nodes.iter().map(|n| n.id.0))
+            .collect();
+        for i in 0..self.groups.len() {
+            let id = self.groups[i].id.0;
+            if id > MAX_ID || !used.insert(id) {
+                if self.next_free_id() > MAX_ID {
+                    let base = used.iter().copied().filter(|&x| x <= MAX_ID).max().unwrap_or(max_valid).max(max_valid);
+                    self.set_next_id(base.saturating_add(1));
+                }
+                let fresh = self.allocate_id();
+                used.insert(fresh);
+                let name = self.groups[i].name.clone();
+                self.groups[i].id = GroupId(fresh);
+                notes.push(format!("Group “{name}” was given a new id ({fresh})."));
+            }
+        }
     }
 }
 
@@ -492,5 +594,134 @@ mod tests {
         assert_eq!(doc.platforms[0].hole_grid.as_ref().unwrap().margin, 3.0);
         assert!(doc.repair().is_empty());
         assert_eq!(doc.validate(), Ok(()));
+    }
+
+    #[test]
+    fn group_validate_and_repair() {
+        use crate::model::{Attach, Finish, Group, GroupId, Shape};
+        use crate::part::Params;
+        use glam::DVec3;
+
+        let mut doc = demo_document();
+        let table_id = doc.platforms[0].id;
+        let roots: Vec<NodeId> = doc.children(Parent::Platform(table_id)).map(|n| n.id).collect();
+        assert!(roots.len() >= 8, "need at least 8 root nodes on demo table, got {}", roots.len());
+        let (n0, n1, n2, n3, n4, n5, n6, n7) =
+            (roots[0], roots[1], roots[2], roots[3], roots[4], roots[5], roots[6], roots[7]);
+
+        // Second platform with one node on it, plus a constrained child of n0.
+        let mut bb = table();
+        bb.id = PlatformId(doc.allocate_id());
+        bb.name = "Breadboard".into();
+        let bb_id = bb.id;
+        doc.platforms.push(bb);
+
+        let make_node = |id: u64, parent: Parent, attach: Attach| Node {
+            id: NodeId(id),
+            name: format!("N{id}"),
+            part: "generic:box".into(),
+            parent,
+            attach,
+            position: DVec3::ZERO,
+            rotation: DQuat::IDENTITY,
+            shape: Shape::Part,
+            finish: Finish::Stainless,
+            params: Params::new(),
+            pickable: true,
+            locked: false,
+            select_lock: false,
+            note: String::new(),
+        };
+        let on_bb = NodeId(doc.allocate_id());
+        doc.nodes.push(make_node(on_bb.0, Parent::Platform(bb_id), Attach::Free));
+        let child_of_n0 = NodeId(doc.allocate_id());
+        doc.nodes.push(make_node(
+            child_of_n0.0,
+            Parent::Node(n0),
+            Attach::Constrained { constraints: Vec::new() },
+        ));
+        let extra_a = NodeId(doc.allocate_id());
+        doc.nodes.push(make_node(extra_a.0, Parent::Platform(table_id), Attach::Free));
+        let extra_b = NodeId(doc.allocate_id());
+        doc.nodes.push(make_node(extra_b.0, Parent::Platform(table_id), Attach::Free));
+        let shared_gid = GroupId(doc.allocate_id());
+
+        doc.groups = vec![
+            // Collides with platform id; has missing node, non-root -> dedup, and cross-platform member.
+            Group {
+                id: GroupId(table_id.0),
+                name: "A".into(),
+                members: vec![NodeId(999_999), child_of_n0, n0, n1, on_bb],
+            },
+            // Exceeds MAX_ID; contains n0 already claimed by A.
+            Group {
+                id: GroupId(MAX_ID + 7),
+                name: "B".into(),
+                members: vec![n0, n2, n3],
+            },
+            // Cross-platform pair leaves < 2 members -> dropped (must not claim n4).
+            Group {
+                id: GroupId(doc.allocate_id()),
+                name: "C".into(),
+                members: vec![n4, on_bb],
+            },
+            // Valid id shared with E; keeps n4 and n5.
+            Group {
+                id: shared_gid,
+                name: "D".into(),
+                members: vec![n4, n5],
+            },
+            // Duplicate group id (same as D) -> reassigned a fresh id.
+            Group {
+                id: shared_gid,
+                name: "E".into(),
+                members: vec![n6, n7],
+            },
+            // Collides with a node id -> reassigned a fresh id.
+            Group {
+                id: GroupId(n0.0),
+                name: "F".into(),
+                members: vec![extra_a, extra_b],
+            },
+        ];
+
+        // validate() catches colliding and oversized group ids before repair.
+        let problems = doc.validate().unwrap_err();
+        assert!(problems.contains(&format!("Id {} is used by 2 items", table_id.0)), "{problems:?}");
+        assert!(problems.contains(&format!("Id {} is used by 2 items", shared_gid.0)), "{problems:?}");
+        assert!(problems.contains(&format!("Id {} is used by 2 items", n0.0)), "{problems:?}");
+        assert!(problems.contains(&format!("Id {} is too large", MAX_ID + 7)), "{problems:?}");
+
+        // Loading via from_json runs repair() then validate(), producing a clean valid document.
+        let json = doc.to_json().unwrap();
+        let (mut repaired, report) = Document::from_json(&json).unwrap();
+        assert_eq!(repaired.validate(), Ok(()));
+        assert!(report.repairs.len() >= 10, "expected a note per change: {:?}", report.repairs);
+
+        assert_eq!(repaired.groups.len(), 5, "{:?}", repaired.groups);
+        assert_eq!(repaired.groups[0].name, "A");
+        assert_eq!(repaired.groups[0].members, vec![n0, n1]);
+        assert_ne!(repaired.groups[0].id.0, table_id.0);
+
+        assert_eq!(repaired.groups[1].name, "B");
+        assert_eq!(repaired.groups[1].members, vec![n2, n3]);
+        assert!(repaired.groups[1].id.0 <= MAX_ID);
+
+        assert_eq!(repaired.groups[2].name, "D");
+        assert_eq!(repaired.groups[2].members, vec![n4, n5]);
+        assert_eq!(repaired.groups[2].id, shared_gid);
+
+        assert_eq!(repaired.groups[3].name, "E");
+        assert_eq!(repaired.groups[3].members, vec![n6, n7]);
+        assert_ne!(repaired.groups[3].id, shared_gid);
+        assert!(repaired.groups[3].id.0 <= MAX_ID);
+
+        assert_eq!(repaired.groups[4].name, "F");
+        assert_eq!(repaired.groups[4].members, vec![extra_a, extra_b]);
+        assert_ne!(repaired.groups[4].id.0, n0.0);
+        assert!(repaired.groups[4].id.0 <= MAX_ID);
+
+        assert!(repaired.next_free_id() > repaired.max_id());
+        assert!(repaired.repair().is_empty(), "repair must be idempotent");
     }
 }
