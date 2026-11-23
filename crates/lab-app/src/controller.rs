@@ -15,8 +15,8 @@ use lab_app::{
 };
 use lab_core::glam::DVec2;
 use lab_core::{
-    ChangeSet, Command, CommandError, GroupId, LengthUnit, NodeId, OpeningFix, Outline, OutlineCorner, PlatformId,
-    SelectionTarget, WallDisplay, remove_nodes_command,
+    ChangeSet, Command, CommandError, LengthUnit, NodeId, OpeningFix, Outline, OutlineCorner, SelectionTarget,
+    WallDisplay, remove_nodes_command,
 };
 use lab_ui::AppWindow;
 use lab_viewport::{DragUnit, FrameTarget, Tool, ViewMode, ViewportRequest};
@@ -95,42 +95,14 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
     ui.on_scene_row_clicked(move |kind, id, ctrl, shift| {
         let Some(ui) = w.upgrade() else { return };
-        let next = {
+        let Some(next) = ({
             let a = a.borrow();
-            let doc = &a.session.doc;
             let prev = current_sel(&a.session);
-            match kind {
-                3 if id >= 0 => {
-                    let Some(group) = doc.group(GroupId(id as u64)) else { return };
-                    Sel::from_nodes(&group.members)
-                }
-                0 if id >= 0 => {
-                    let nid = NodeId(id as u64);
-                    if ctrl {
-                        multi_select::toggle(&prev, nid)
-                    } else if shift {
-                        let rows: Vec<(i32, i32)> =
-                            (0..m.scene.row_count()).filter_map(|i| m.scene.row_data(i)).map(|r| (r.kind, r.id)).collect();
-                        multi_select::range(&rows, &prev, nid)
-                    } else if prev.primary == Some(SelectionTarget::Node(nid)) && prev.extra.is_empty() {
-                        // Clicking the sole selected row again clears the selection.
-                        Sel::default()
-                    } else {
-                        multi_select::click(doc, &prev, Some(SelectionTarget::Node(nid)))
-                    }
-                }
-                1 if id >= 0 => {
-                    let target = SelectionTarget::Platform(PlatformId(id as u64));
-                    let hit = (prev.primary != Some(target) || !prev.extra.is_empty()).then_some(target);
-                    multi_select::click(doc, &prev, hit)
-                }
-                2 => {
-                    let target = SelectionTarget::Room;
-                    let hit = (prev.primary != Some(target) || !prev.extra.is_empty()).then_some(target);
-                    multi_select::click(doc, &prev, hit)
-                }
-                _ => return,
-            }
+            multi_select::scene_row_click(&a.session.doc, &prev, kind, id, ctrl, shift, || {
+                (0..m.scene.row_count()).filter_map(|i| m.scene.row_data(i)).map(|r| (r.kind, r.id)).collect()
+            })
+        }) else {
+            return;
         };
         select_sel(&ui, &a, &m, next);
     });

@@ -1,7 +1,7 @@
 //! Pure multi-selection transitions: plain click, Ctrl+click toggle, Shift+click range,
 //! and whole-group matching.
 
-use lab_core::{Command, Document, Group, GroupId, NodeId, SelectionTarget};
+use lab_core::{Command, Document, Group, GroupId, NodeId, PlatformId, SelectionTarget};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Sel {
@@ -132,6 +132,45 @@ pub fn range(rows: &[(i32, i32)], prev: &Sel, node: NodeId) -> Sel {
         }
     }
     Sel { primary: Some(SelectionTarget::Node(primary)), extra }
+}
+
+/// Scene-tree row click (and relation-chip selection via kind 0): plain click on a node row
+/// selects just that node; clicking a group folder row (kind 3) selects the whole group.
+pub fn scene_row_click(
+    doc: &Document,
+    prev: &Sel,
+    kind: i32,
+    id: i32,
+    ctrl: bool,
+    shift: bool,
+    visible_rows: impl FnOnce() -> Vec<(i32, i32)>,
+) -> Option<Sel> {
+    match kind {
+        3 if id >= 0 => doc.group(GroupId(id as u64)).map(|g| Sel::from_nodes(&g.members)),
+        0 if id >= 0 => {
+            let nid = NodeId(id as u64);
+            Some(if ctrl {
+                toggle(prev, nid)
+            } else if shift {
+                range(&visible_rows(), prev, nid)
+            } else if prev.primary == Some(SelectionTarget::Node(nid)) && prev.extra.is_empty() {
+                Sel::default()
+            } else {
+                Sel { primary: Some(SelectionTarget::Node(nid)), extra: Vec::new() }
+            })
+        }
+        1 if id >= 0 => {
+            let target = SelectionTarget::Platform(PlatformId(id as u64));
+            let hit = (prev.primary != Some(target) || !prev.extra.is_empty()).then_some(target);
+            Some(Sel { primary: hit, extra: Vec::new() })
+        }
+        2 => {
+            let target = SelectionTarget::Room;
+            let hit = (prev.primary != Some(target) || !prev.extra.is_empty()).then_some(target);
+            Some(Sel { primary: hit, extra: Vec::new() })
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -392,5 +431,33 @@ mod tests {
             right_click(&doc, &multi, Some(SelectionTarget::Platform(PlatformId(1)))),
             Sel { primary: Some(SelectionTarget::Platform(PlatformId(1))), extra: vec![] }
         );
+    }
+
+    #[test]
+    fn scene_row_plain_click_selects_single_node_not_group() {
+        let doc = doc_with_group();
+        let empty = Sel::default();
+
+        // Plain click on a grouped member's own tree row (kind 0) selects just that part.
+        assert_eq!(
+            scene_row_click(&doc, &empty, 0, 2, false, false, Vec::new),
+            Some(Sel { primary: Some(SelectionTarget::Node(NodeId(2))), extra: vec![] })
+        );
+        // Plain click on a child of a grouped member (e.g. from tree or relation chip) selects just that child.
+        assert_eq!(
+            scene_row_click(&doc, &empty, 0, 4, false, false, Vec::new),
+            Some(Sel { primary: Some(SelectionTarget::Node(NodeId(4))), extra: vec![] })
+        );
+        // Clicking the folder row (kind 3) selects the whole group.
+        let group_sel = scene_row_click(&doc, &empty, 3, 10, false, false, Vec::new).unwrap();
+        assert_eq!(group_sel, Sel { primary: Some(SelectionTarget::Node(NodeId(1))), extra: vec![NodeId(2), NodeId(3)] });
+        // Clicking a member's row while the whole group is selected narrows to just that member.
+        assert_eq!(
+            scene_row_click(&doc, &group_sel, 0, 1, false, false, Vec::new),
+            Some(Sel { primary: Some(SelectionTarget::Node(NodeId(1))), extra: vec![] })
+        );
+        // Clicking the sole selected row again clears the selection.
+        let sole = Sel { primary: Some(SelectionTarget::Node(NodeId(2))), extra: vec![] };
+        assert_eq!(scene_row_click(&doc, &sole, 0, 2, false, false, Vec::new), Some(Sel::default()));
     }
 }
