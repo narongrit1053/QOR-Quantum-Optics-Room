@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.0.10
+
+- **Version and updates in Settings.** Settings shows which LabSetup you have, with a *Check for Updates* button. When a newer version is out, the button turns into *Update*, which downloads and installs it.
+- **Orbiting a selected part keeps it in view.** The camera now turns around the middle of the whole part, and *Frame Selection* fits all of it. Before, some imported parts swung out of view when you orbited them.
+
 ## v0.0.9
 
 - **Thorlabs polarization optics from the catalog now work.** Polarizing beamsplitter cubes (such as PBS122) act as a PBS, and half- and quarter-wave plates (such as WPH10M and WPQ10M) turn the polarization, with a *Fast axis* angle in the inspector. Before, parts imported from the catalog split the beam 50/50 and left the polarization unchanged.
