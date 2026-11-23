@@ -6,6 +6,7 @@
 pub mod bom_rows;
 pub mod edit;
 pub mod live;
+pub mod multi_select;
 pub mod session;
 pub mod views;
 
