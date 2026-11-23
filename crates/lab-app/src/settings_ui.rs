@@ -56,6 +56,7 @@ pub fn open(ui: &AppWindow, app: &AppState) {
     ui.set_settings_shadows(SHADOWS.iter().position(|v| *v == s.shadows).unwrap_or(0) as i32);
     ui.set_settings_gpu(gpu);
     ui.set_settings_allow_agents(s.allow_agents);
+    ui.set_app_version(env!("CARGO_PKG_VERSION").into());
     ui.set_settings_open(true);
 }
 

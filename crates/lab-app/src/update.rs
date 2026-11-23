@@ -166,6 +166,9 @@ fn download_path(version: &str) -> Option<PathBuf> {
 pub fn install(ui: &AppWindow) {
     let Some(release) = PENDING.with(|p| p.borrow().clone()) else { return };
     let Some(path) = download_path(&release.version) else { return };
+    if !ui.get_changelog_open() {
+        show_update(ui); // from Settings' Update button: show the sheet so the download is visible
+    }
     ui.set_changelog_busy(true);
     let w = ui.as_weak();
     std::thread::spawn(move || {
