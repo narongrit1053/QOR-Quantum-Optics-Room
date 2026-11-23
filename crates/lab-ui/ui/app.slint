@@ -391,6 +391,7 @@ export component AppWindow inherits Window {
     in property <int> settings-gpu;
     in property <[string]> settings-gpus;
     in property <bool> settings-allow-agents;
+    in property <string> app-version;
     callback settings-apply(int, int, int, int, bool);
     // "" ok, else error text (the sheet stays open).
     callback paste-corners(string /* target */, string /* text */) -> string;
@@ -1736,18 +1737,6 @@ export component AppWindow inherits Window {
             close => { root.shortcuts-open = false; }
         }
 
-        ChangelogSheet {
-            width: root.width;
-            height: root.height;
-            open: root.changelog-open;
-            title: root.changelog-title;
-            lines: root.changelog-lines;
-            button: root.changelog-button;
-            busy: root.changelog-busy;
-            close => { root.changelog-open = false; }
-            confirm => { root.action("update.install"); }
-        }
-
         SettingsSheet {
             width: root.width;
             height: root.height;
@@ -1759,8 +1748,24 @@ export component AppWindow inherits Window {
             gpus: root.settings-gpus;
             allow-agents: root.settings-allow-agents;
             in-use: root.gpu;
+            version: root.app-version;
+            update-version: root.update-version;
             apply(q, m, s, g, ag) => { root.settings-apply(q, m, s, g, ag); }
             cancel => { root.settings-open = false; }
+            action(id) => { root.action(id); }
+        }
+
+        // After Settings so update results and download progress show on top of it.
+        ChangelogSheet {
+            width: root.width;
+            height: root.height;
+            open: root.changelog-open;
+            title: root.changelog-title;
+            lines: root.changelog-lines;
+            button: root.changelog-button;
+            busy: root.changelog-busy;
+            close => { root.changelog-open = false; }
+            confirm => { root.action("update.install"); }
         }
 
         StartPage {

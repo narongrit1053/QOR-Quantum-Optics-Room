@@ -20,8 +20,12 @@ export component SettingsSheet inherits Rectangle {
     in property <bool> allow-agents;
     // "<adapter> · <backend> · …" from the viewport's Ready event.
     in property <string> in-use;
+    in property <string> version;
+    // A newer release found by the last check, "" if none.
+    in property <string> update-version;
     callback apply(int, int, int, int, bool);
     callback cancel();
+    callback action(string);
 
     property <int> q;
     property <int> m;
@@ -133,6 +137,21 @@ export component SettingsSheet inherits Rectangle {
                     selected(i) => { ag = i == 1; }
                 }
                 Label { text: "Agents on this PC can read and edit the open project through labsetup-cli."; wrap: word-wrap; }
+                Text { text: "Updates"; color: Theme.text; font-size: Theme.font-body; font-weight: 700; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Label {
+                        text: "LabSetup " + root.version + (root.update-version != "" ? " · v" + root.update-version + " is available" : "");
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    PillButton {
+                        label: root.update-version != "" ? "Update" : "Check for Updates";
+                        primary: root.update-version != "";
+                        enabled: root.open;
+                        clicked => { root.action(root.update-version != "" ? "update.install" : "app.check_updates"); }
+                    }
+                }
                 HorizontalLayout {
                     padding-top: 4px;
                     spacing: 8px;
