@@ -777,7 +777,13 @@ impl Command {
                 format!("Edit {}", doc.platform(platform.id).map_or(platform.name.as_str(), |p| p.name.as_str()))
             }
             Command::SetRoom(_) => "Edit Room".into(),
-            Command::AddGroup { group, .. } => format!("Group {}", group.name),
+            Command::AddGroup { group, .. } => {
+                if group.name == "Group" || group.name.starts_with("Group ") {
+                    group.name.clone()
+                } else {
+                    format!("Group {}", group.name)
+                }
+            }
             Command::RemoveGroup(id) => format!("Ungroup {}", doc.group(*id).map_or("Group", |g| g.name.as_str())),
             Command::RestoreGroup { group, .. } => format!("Restore {}", group.name),
             Command::SetGroupMembers { id, .. } | Command::RestoreGroupMembers { id, .. } => {
@@ -1508,6 +1514,11 @@ mod tests {
 
         let add = Command::AddGroup { group: group.clone(), index: None };
         assert_eq!(add.label(&doc), "Group Optics");
+        let default_named = Command::AddGroup {
+            group: Group { id: gid, name: "Group 1".into(), members: vec![n0, n1] },
+            index: None,
+        };
+        assert_eq!(default_named.label(&doc), "Group 1");
         let changes = round_trip(&doc, add.clone());
         assert!(changes.groups_changed);
         assert!(!changes.is_empty());

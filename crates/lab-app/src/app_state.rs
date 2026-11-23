@@ -120,6 +120,8 @@ pub struct AppState {
     pub agent: Option<crate::agent::Agent>,
     /// A gizmo drag is between its first move and its end (agent writes are refused).
     pub dragging: bool,
+    /// Current gizmo drag already showed a block-move refusal toast (reset on `done`).
+    pub drag_refusal_shown: bool,
     /// Default agent snapshot names count up per process, across agent restarts.
     pub agent_snapshots: u32,
 }
@@ -169,6 +171,7 @@ impl AppState {
             doc_token: token_seed(std::process::id(), now_nanos()),
             agent: None,
             dragging: false,
+            drag_refusal_shown: false,
             agent_snapshots: 0,
         }
     }

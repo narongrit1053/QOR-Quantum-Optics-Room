@@ -59,16 +59,8 @@ pub fn block_move(
     let delta = new_root_pos - cur_root_pos;
 
     if !members.iter().any(|n| matches!(n.attach, Attach::Hole { .. })) {
-        let cmds = members
-            .iter()
-            .map(|n| Command::SetAttach {
-                id: n.id,
-                parent: n.parent,
-                attach: n.attach.clone(),
-                position: n.position + local_shift(doc, n, delta),
-                rotation: n.rotation,
-            })
-            .collect();
+        // Primary already arrives solved; non-primary constrained members are re-solved after shifting.
+        let cmds = members.iter().map(|n| shift_non_hole(doc, n, delta, n.id != primary)).collect();
         return Ok(Command::Batch(cmds));
     }
 
@@ -110,17 +102,20 @@ pub fn block_move(
                 });
             }
             _ => {
-                cmds.push(Command::SetAttach {
-                    id: n.id,
-                    parent: n.parent,
-                    attach: n.attach.clone(),
-                    position: n.position + local_shift(doc, n, free_shift),
-                    rotation: n.rotation,
-                });
+                cmds.push(shift_non_hole(doc, n, free_shift, true));
             }
         }
     }
     Ok(Command::Batch(cmds))
+}
+
+fn shift_non_hole(doc: &Document, node: &Node, root_delta: DVec3, solve_constrained: bool) -> Command {
+    let mut position = node.position + local_shift(doc, node, root_delta);
+    let mut rotation = node.rotation;
+    if solve_constrained && let Attach::Constrained { constraints } = &node.attach {
+        (position, rotation) = lab_mates::constraints::solve((position, rotation), constraints);
+    }
+    Command::SetAttach { id: node.id, parent: node.parent, attach: node.attach.clone(), position, rotation }
 }
 
 fn to_step(v: f64) -> Result<i32, BlockMoveError> {
@@ -450,5 +445,73 @@ mod tests {
             block_move(&doc, NodeId(1), primary_cmd, &[NodeId(3)]),
             Err(BlockMoveError::MixedParents)
         );
+    }
+
+    #[test]
+    fn block_move_resolves_constrained_non_primary() {
+        use lab_core::model::{Constraint, ConstraintKind};
+        use lab_core::part::Feature;
+
+        let (mut doc, holes) = table_doc();
+        let pitch = holes.pitch.x;
+        let axis = |origin| Feature::Axis { origin, dir: DVec3::Z, radius: 6.35, hole: false };
+        let constraints = vec![Constraint {
+            kind: ConstraintKind::Concentric,
+            child: axis(DVec3::new(3.0, 0.0, 0.0)),
+            parent: axis(DVec3::new(10.0, 5.0, 0.0)),
+            offset: 0.0,
+            angle: 0.0,
+            flip: false,
+            lock_rotation: false,
+        }];
+        let start_b = DVec3::new(7.0, 5.0, 20.0);
+
+        // Path 1: free primary + constrained non-primary (no-hole branch).
+        let a = make_node(1, Attach::Free, DVec3::ZERO);
+        let b = make_node(2, Attach::Constrained { constraints: constraints.clone() }, start_b);
+        let delta = DVec3::new(25.0, 10.0, 7.0);
+        let primary_cmd = drag_cmd(&a, Attach::Free, delta);
+        doc.nodes.extend([a, b]);
+
+        let Command::Batch(cmds) = block_move(&doc, NodeId(1), primary_cmd, &[NodeId(2)]).unwrap() else {
+            panic!("expected Batch");
+        };
+        let (want_p, want_q) = lab_mates::constraints::solve((start_b + delta, DQuat::IDENTITY), &constraints);
+        match &cmds[1] {
+            Command::SetAttach { id, attach: Attach::Constrained { constraints: c }, position, rotation, .. } => {
+                assert_eq!(*id, NodeId(2));
+                assert_eq!(c, &constraints);
+                assert!((*position - want_p).length() < 1e-9, "got {position:?}, want {want_p:?}");
+                assert!(rotation.angle_between(want_q) < 1e-9);
+                assert!((position.x - 7.0).abs() < 1e-6 && (position.y - 5.0).abs() < 1e-6);
+                assert!((position.z - 27.0).abs() < 1e-6);
+            }
+            other => panic!("expected Constrained SetAttach, got {other:?}"),
+        }
+
+        // Path 2: hole primary + constrained non-primary (hole-snapped branch).
+        let h = LatticeIndex { i: 10, j: 10 };
+        doc.nodes[0].attach = Attach::Hole { hole: h };
+        doc.nodes[0].position = holes.position(h).extend(0.0);
+        let primary_cmd = drag_cmd(
+            &doc.nodes[0],
+            Attach::Hole { hole: LatticeIndex { i: 11, j: 10 } },
+            DVec3::new(pitch, 0.0, 0.0),
+        );
+        let Command::Batch(cmds) = block_move(&doc, NodeId(1), primary_cmd, &[NodeId(2)]).unwrap() else {
+            panic!("expected Batch");
+        };
+        let (want_p2, want_q2) =
+            lab_mates::constraints::solve((start_b + DVec3::new(pitch, 0.0, 0.0), DQuat::IDENTITY), &constraints);
+        match &cmds[1] {
+            Command::SetAttach { id, attach: Attach::Constrained { constraints: c }, position, rotation, .. } => {
+                assert_eq!(*id, NodeId(2));
+                assert_eq!(c, &constraints);
+                assert!((*position - want_p2).length() < 1e-9, "got {position:?}, want {want_p2:?}");
+                assert!(rotation.angle_between(want_q2) < 1e-9);
+                assert!((position.x - 7.0).abs() < 1e-6 && (position.y - 5.0).abs() < 1e-6);
+            }
+            other => panic!("expected Constrained SetAttach, got {other:?}"),
+        }
     }
 }

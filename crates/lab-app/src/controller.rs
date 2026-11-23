@@ -276,6 +276,7 @@ pub fn replace_document(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc
         a.session = session;
         a.doc_token += 1;
         a.dragging = false;
+        a.drag_refusal_shown = false;
         a.session.selection = None;
         a.session.extra.clear();
         a.hole_cache.clear();
