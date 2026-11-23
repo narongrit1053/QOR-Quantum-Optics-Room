@@ -462,7 +462,7 @@ pub(crate) fn handle_input(
     }
 }
 
-/// M8: what orbiting turns around: the selected node's origin, a selected platform's top-surface
+/// M8: what orbiting turns around: the selected node's bounds centre, a selected platform's top-surface
 /// centre, else the room centre (render space). `None` without a document or a spawned node.
 fn orbit_pivot(selected: Option<SelectionTarget>, sources: &FrameSources) -> Option<Vec3> {
     let doc = sources.index.snapshot.as_ref()?;
@@ -471,7 +471,8 @@ fn orbit_pivot(selected: Option<SelectionTarget>, sources: &FrameSources) -> Opt
         (lo + hi) / 2.0
     };
     match selected {
-        Some(SelectionTarget::Node(id)) => sources.nodes.iter().find(|(n, ..)| n.0 == id).map(|(_, _, t)| t.translation()),
+        // The centre of what is drawn: a GLB piece's own origin can lie far from its geometry.
+        Some(SelectionTarget::Node(id)) => node_box(sources, id).map(|(lo, hi)| (lo + hi) / 2.0),
         Some(SelectionTarget::Platform(id)) => platform_box(doc, id).map(|(lo, hi)| Vec3::new((lo.x + hi.x) / 2.0, hi.y, (lo.z + hi.z) / 2.0)),
         _ => Some(room()),
     }
@@ -620,10 +621,10 @@ fn room_box(doc: &Document) -> (Vec3, Vec3) {
     render_box(lo.extend(0.0), hi.extend(doc.room.wall_height))
 }
 
-/// World-space box of a spawned node (needs its `Aabb`, computed the frame after it spawns).
+/// World-space box of a spawned node, over all its mesh pieces (needs their `Aabb`, computed the
+/// frame after they spawn).
 fn node_box(sources: &FrameSources, id: lab_core::NodeId) -> Option<(Vec3, Vec3)> {
-    let (_, aabb, transform) = sources.nodes.iter().find(|(node, ..)| node.0 == id)?;
-    Some(aabb_box(aabb, transform))
+    sources.nodes.iter().filter(|(node, ..)| node.0 == id).map(|(_, aabb, t)| aabb_box(aabb, t)).reduce(|(a0, a1), (b0, b1)| (a0.min(b0), a1.max(b1)))
 }
 
 fn aabb_box(aabb: &Aabb, transform: &GlobalTransform) -> (Vec3, Vec3) {
