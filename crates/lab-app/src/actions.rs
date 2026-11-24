@@ -36,6 +36,8 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("edit.cut", "Cut", "Edit", "clipboard remove", "Ctrl+X"),
     a("edit.paste", "Paste", "Edit", "clipboard insert", "Ctrl+V"),
     a("edit.duplicate", "Duplicate", "Edit", "copy clone repeat", "Ctrl+D"),
+    a("edit.group", "Group", "Edit", "group folder block", "Ctrl+G"),
+    a("edit.ungroup", "Ungroup", "Edit", "ungroup folder block", "Ctrl+Shift+G"),
     a("view.3d", "3D view", "View", "perspective orbit", "P"),
     a("view.top", "Top view", "View", "plan orthographic 2d", "T"),
     a("view.split", "Split view", "View", "side by side 3d top", ""),

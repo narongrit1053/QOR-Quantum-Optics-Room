@@ -133,6 +133,8 @@ pub enum ViewportRequest {
     Frame(FrameTarget),
     /// Select something from outside the viewport (e.g. the scene list).
     Select(Option<SelectionTarget>),
+    /// Additional selected nodes (multi-select / group); replaces the previous extra set.
+    SelectExtra(Vec<lab_core::NodeId>),
     /// Replace the rendered scene with this document snapshot (full rebuild). Clears the
     /// selection and hover.
     LoadDocument(Box<Document>),
@@ -288,6 +290,8 @@ pub enum ViewportEvent {
     /// since start, which makes on-demand rendering easy to verify.
     FrameReady { frames_rendered: u64 },
     SelectionChanged(Option<SelectionTarget>),
+    /// Ctrl+click on a target; local selection is unchanged until the app updates it.
+    SelectionToggled(SelectionTarget),
     /// Nodes only in M1.
     HoverChanged(Option<SelectionTarget>),
     /// An item could not be built and was skipped. The text is a complete sentence.
@@ -367,6 +371,7 @@ pub(crate) enum FrameRequest {
     SetViewMode(ViewMode),
     Frame(FrameTarget),
     Select(Option<SelectionTarget>),
+    SelectExtra(Vec<lab_core::NodeId>),
     LoadDocument(Box<Document>),
     ApplyChanges(Box<Document>, ChangeSet),
     #[allow(dead_code)] // Read by the wall fade (room.rs, T4c).

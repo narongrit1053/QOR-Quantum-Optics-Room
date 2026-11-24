@@ -26,7 +26,7 @@ pub mod selection;
 pub mod units;
 pub mod validate;
 
-pub use command::{ChangeSet, Command, CommandError, PlatformAspects};
+pub use command::{ChangeSet, Command, CommandError, PlatformAspects, remove_nodes_command, remove_platform_command};
 pub use glam;
 pub use history::History;
 pub use holes::*;

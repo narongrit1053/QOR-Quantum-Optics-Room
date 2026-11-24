@@ -17,12 +17,27 @@ pub enum Nudge {
 pub enum NudgeError {
     NoHole,
     Locked,
+    MixedParents,
 }
 
 /// One SetAttach / SetPlacement per selected root, grouped as one undo step.
 pub fn nudge(doc: &Document, selection: &[NodeId], how: Nudge) -> Result<Option<Command>, NudgeError> {
-    let mut roots: Vec<NodeId> = selection.iter().map(|&id| lab_app::views::set_root(doc, id)).collect();
-    roots.dedup();
+    let roots: Vec<NodeId> = if selection.len() > 1 {
+        lab_app::multi_select::chain_roots(doc, selection)
+    } else {
+        selection.iter().map(|&id| lab_app::views::set_root(doc, id)).collect()
+    };
+    let mut first_parent = None;
+    for &id in &roots {
+        if doc.node(id).is_none() {
+            continue;
+        }
+        let parent = doc.top_parent(id);
+        if first_parent.is_some_and(|p| p != parent) {
+            return Err(NudgeError::MixedParents);
+        }
+        first_parent = Some(parent);
+    }
     let mut commands = Vec::new();
     for id in roots {
         let Some(node) = doc.node(id) else { continue };
@@ -183,5 +198,78 @@ mod tests {
 
         let fine = nudge(&doc, &[NodeId(1)], Nudge::Fine { dx: 1.0, dy: 0.0 });
         assert!(matches!(fine, Ok(Some(Command::SetAttach { attach: Attach::Constrained { .. }, .. }))));
+    }
+
+    #[test]
+    fn multi_step_uses_chain_roots_and_dedups() {
+        let mut doc = Document::new("t");
+        doc.platforms.push(Platform {
+            select_lock: false,
+            id: PlatformId(1),
+            name: "T".into(),
+            kind: PlatformKind::OpticalTable,
+            surface: Surface::Stainless,
+            outline: Outline::Rectangle { size: DVec2::new(1200.0, 900.0) },
+            thickness: 100.0,
+            top_height: 800.0,
+            position: DVec2::ZERO,
+            rotation_z: 0.0,
+            hole_grid: Some(lab_core::holes::HoleGrid::metric()),
+            support: Support::Fixed,
+        });
+        let holes = compute_holes(&doc.platforms[0]).unwrap();
+        let hole = holes.iter().nth(50).unwrap();
+        let mut r = node(1, Parent::Platform(PlatformId(1)), Attach::Hole { hole });
+        r.position = holes.position(hole).extend(0.0);
+        let x = node(2, Parent::Node(NodeId(1)), Attach::Constrained { constraints: Vec::new() });
+        let q = node(3, Parent::Platform(PlatformId(1)), Attach::Free);
+        doc.nodes.extend([r, x, q]);
+
+        // Selection [R, X(child of R, Constrained), Q] steps R and Q only (non-consecutive too).
+        for sel in [&[NodeId(1), NodeId(2), NodeId(3)][..], &[NodeId(1), NodeId(3), NodeId(2)][..]] {
+            let Ok(Some(Command::Batch(cmds))) = nudge(&doc, sel, Nudge::Step { dx: 1, dy: 0 }) else {
+                panic!("expected Batch of two commands for {sel:?}");
+            };
+            assert_eq!(cmds.len(), 2, "{cmds:?}");
+            let ids: Vec<NodeId> = cmds
+                .iter()
+                .map(|c| match c {
+                    Command::SetAttach { id, .. } | Command::SetPlacement { id, .. } => *id,
+                    other => panic!("unexpected {other:?}"),
+                })
+                .collect();
+            assert_eq!(ids, vec![NodeId(1), NodeId(3)]);
+        }
+
+        // Single-node path keeps a lone constrained child sliding along its constraints.
+        let lone = nudge(&doc, &[NodeId(2)], Nudge::Fine { dx: 1.0, dy: 0.0 });
+        assert!(matches!(lone, Ok(Some(Command::SetAttach { id: NodeId(2), attach: Attach::Constrained { .. }, .. }))));
+    }
+
+    #[test]
+    fn multi_nudge_refuses_mixed_parents() {
+        let mut doc = Document::new("t");
+        for pid in [1u64, 2] {
+            doc.platforms.push(Platform {
+                select_lock: false,
+                id: PlatformId(pid),
+                name: format!("T{pid}"),
+                kind: PlatformKind::OpticalTable,
+                surface: Surface::Stainless,
+                outline: Outline::Rectangle { size: DVec2::new(1200.0, 900.0) },
+                thickness: 100.0,
+                top_height: 800.0,
+                position: DVec2::ZERO,
+                rotation_z: 0.0,
+                hole_grid: Some(lab_core::holes::HoleGrid::metric()),
+                support: Support::Fixed,
+            });
+        }
+        doc.nodes.push(node(1, Parent::Platform(PlatformId(1)), Attach::Free));
+        doc.nodes.push(node(2, Parent::Platform(PlatformId(2)), Attach::Free));
+        doc.nodes.push(node(3, Parent::Room, Attach::Free));
+
+        assert_eq!(nudge(&doc, &[NodeId(1), NodeId(2)], Nudge::Step { dx: 1, dy: 0 }), Err(NudgeError::MixedParents));
+        assert_eq!(nudge(&doc, &[NodeId(1), NodeId(3)], Nudge::Fine { dx: 5.0, dy: 0.0 }), Err(NudgeError::MixedParents));
     }
 }

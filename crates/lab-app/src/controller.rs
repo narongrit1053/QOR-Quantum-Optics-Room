@@ -8,18 +8,19 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use lab_app::multi_select::{self, Sel};
 use lab_app::{
     EditContext, EditError, EditOutcome, PreferenceChange, PreviewTarget, Session, corner_labels, edit, node_view,
     outline_preview, platform_view, preset_rows, project_detail, room_view, scene_rows, wall_labels, window_title,
 };
 use lab_core::glam::DVec2;
 use lab_core::{
-    ChangeSet, Command, LengthUnit, NodeId, OpeningFix, Outline, OutlineCorner, PlatformId, SelectionTarget,
-    WallDisplay,
+    ChangeSet, Command, CommandError, LengthUnit, NodeId, OpeningFix, Outline, OutlineCorner, SelectionTarget,
+    WallDisplay, remove_nodes_command,
 };
 use lab_ui::AppWindow;
 use lab_viewport::{DragUnit, FrameTarget, Tool, ViewMode, ViewportRequest};
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, Model, SharedString};
 
 use crate::app_state::{AppState, SheetKind};
 use crate::files;
@@ -92,17 +93,18 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
     });
 
     let (w, a, m) = (ui.as_weak(), app.clone(), models.clone());
-    ui.on_scene_row_clicked(move |kind, id| {
+    ui.on_scene_row_clicked(move |kind, id, ctrl, shift| {
         let Some(ui) = w.upgrade() else { return };
-        let target = match kind {
-            0 if id >= 0 => SelectionTarget::Node(NodeId(id as u64)),
-            1 if id >= 0 => SelectionTarget::Platform(PlatformId(id as u64)),
-            2 => SelectionTarget::Room,
-            _ => return,
+        let Some(next) = ({
+            let a = a.borrow();
+            let prev = current_sel(&a.session);
+            multi_select::scene_row_click(&a.session.doc, &prev, kind, id, ctrl, shift, || {
+                (0..m.scene.row_count()).filter_map(|i| m.scene.row_data(i)).map(|r| (r.kind, r.id)).collect()
+            })
+        }) else {
+            return;
         };
-        // Clicking the selected row again clears the selection.
-        let target = (a.borrow().session.selection != Some(target)).then_some(target);
-        select(&ui, &a, &m, target);
+        select_sel(&ui, &a, &m, next);
     });
 
     // M9 E2: typed value during a drag; Enter applies it exactly and ends the drag.
@@ -222,7 +224,7 @@ fn refresh_document(ui: &AppWindow, app: &AppState, models: &UiModels) {
     ui.set_show_beams(app.settings.show_beams);
     ui.set_show_builtin_parts(app.settings.show_builtin_parts);
     ui_models::fill_presets(models, preset_rows(app.units()));
-    ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &app.scene_collapsed));
+    ui_models::fill_scene(models, scene_rows(&session.doc, session.selection, &session.extra, &app.scene_collapsed));
     crate::relations::fill(ui, &session.doc, session.selection);
 }
 
@@ -274,7 +276,9 @@ pub fn replace_document(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc
         a.session = session;
         a.doc_token += 1;
         a.dragging = false;
+        a.drag_refusal_shown = false;
         a.session.selection = None;
+        a.session.extra.clear();
         a.hole_cache.clear();
         a.toast_undo = false;
         a.timers.autosave.stop();
@@ -284,6 +288,7 @@ pub fn replace_document(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc
         let a = app.borrow();
         a.send(ViewportRequest::LoadDocument(snapshot));
         a.send(ViewportRequest::Select(None));
+        a.send(ViewportRequest::SelectExtra(Vec::new()));
         a.send(ViewportRequest::Frame(FrameTarget::All));
     }
     ui.set_inspector_error("".into());
@@ -448,21 +453,59 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             }
         }
         "library.open" => ui.set_library_open(!ui.get_library_open()),
-        "library.save_bundle" => crate::library::save_bundle_prompt(ui, &app.borrow()),
+        "library.save_bundle" => {
+            let a = app.borrow();
+            let selected = a.session.selected_nodes();
+            crate::library::save_bundle_prompt(ui, &a, &selected);
+        }
         "library.find" => {
             ui.set_library_open(true);
             ui.invoke_find_part();
         }
-        "selection.lock" | "selection.unlock" => {
-            let target = app.borrow().session.selection;
-            let outcome = match target {
-                Some(t @ (SelectionTarget::Node(_) | SelectionTarget::Platform(_))) => {
-                    let on = id == "selection.lock";
-                    let command = Command::SetSelectLock { target: t, on };
-                    let label = command.label(&app.borrow().session.doc);
+        "selection.delete" => {
+            let outcome = {
+                let a = app.borrow();
+                let nodes = a.session.selected_nodes();
+                if !nodes.is_empty() {
+                    let command = remove_nodes_command(&a.session.doc, nodes);
+                    let label = command.label(&a.session.doc);
                     Ok(EditOutcome::Command { command, label, select: None, fixes: Vec::new() })
+                } else {
+                    edit::action_edit(&context(&a), id)
                 }
-                _ => Ok(EditOutcome::Nothing),
+            };
+            apply_outcome(ui, app, models, id, outcome);
+        }
+        "selection.lock" | "selection.unlock" => {
+            let outcome = {
+                let a = app.borrow();
+                let on = id == "selection.lock";
+                let nodes = a.session.selected_nodes();
+                if !nodes.is_empty() {
+                    let count = nodes.len();
+                    let command = if count == 1 {
+                        Command::SetSelectLock { target: SelectionTarget::Node(nodes[0]), on }
+                    } else {
+                        Command::Batch(
+                            nodes
+                                .into_iter()
+                                .map(|n| Command::SetSelectLock { target: SelectionTarget::Node(n), on })
+                                .collect(),
+                        )
+                    };
+                    let label = if count == 1 {
+                        command.label(&a.session.doc)
+                    } else {
+                        format!("{} {count} parts", if on { "Lock" } else { "Unlock" })
+                    };
+                    Ok(EditOutcome::Command { command, label, select: None, fixes: Vec::new() })
+                } else if let Some(t @ SelectionTarget::Platform(_)) = a.session.selection {
+                    let command = Command::SetSelectLock { target: t, on };
+                    let label = command.label(&a.session.doc);
+                    Ok(EditOutcome::Command { command, label, select: None, fixes: Vec::new() })
+                } else {
+                    Ok(EditOutcome::Nothing)
+                }
             };
             apply_outcome(ui, app, models, id, outcome);
         }
@@ -512,23 +555,31 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         }
         "view.hide" => {
             let mut a = app.borrow_mut();
-            match a.session.selection {
-                Some(SelectionTarget::Node(n)) => {
-                    if !a.hidden.remove(&n) {
+            let nodes = a.session.selected_nodes();
+            if nodes.is_empty() {
+                a.hidden.clear();
+            } else {
+                let hide = nodes.iter().any(|n| !a.hidden.contains(n));
+                for n in nodes {
+                    if hide {
                         a.hidden.insert(n);
+                    } else {
+                        a.hidden.remove(&n);
                     }
                 }
-                _ => a.hidden.clear(),
             }
             let ids = a.hidden.iter().copied().collect();
             a.send(ViewportRequest::SetHidden(ids));
         }
         "view.isolate_selection" => {
-            let Some(SelectionTarget::Node(n)) = app.borrow().session.selection else { return };
+            let nodes = app.borrow().session.selected_nodes();
+            if nodes.is_empty() {
+                return;
+            }
             {
                 let mut a = app.borrow_mut();
                 a.isolated_nodes = true;
-                a.send(ViewportRequest::IsolateNodes(Some(vec![n])));
+                a.send(ViewportRequest::IsolateNodes(Some(nodes)));
             }
             refresh_isolated(ui, &app.borrow());
         }
@@ -636,31 +687,60 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
             }
             app.borrow().send(ViewportRequest::SetTool(tool));
         }
+        "edit.group" => {
+            let (command, label, sel) = {
+                let a = app.borrow();
+                let nodes = a.session.selected_nodes();
+                let (command, group) = multi_select::make_group_command(&a.session.doc, &nodes);
+                let label = command.label(&a.session.doc);
+                let sel = Sel::from_nodes(&group.members);
+                (command, label, sel)
+            };
+            if let Err(error) = execute_sel_raw(ui, app, models, command, label, Some(sel), Vec::new()) {
+                show_toast(ui, &app.borrow(), &multi_select::group_error_message(&error), false);
+            }
+        }
+        "edit.ungroup" => {
+            let found = {
+                let a = app.borrow();
+                let doc = &a.session.doc;
+                a.session
+                    .selected_nodes()
+                    .into_iter()
+                    .find_map(|nid| doc.group_of(doc.chain_root(nid)).map(|g| (g.id, format!("Ungroup {}", g.name))))
+            };
+            if let Some((gid, label)) = found {
+                execute(ui, app, models, id, Command::RemoveGroup(gid), label, None, Vec::new());
+            }
+        }
         "edit.copy" | "edit.cut" | "edit.paste" | "edit.duplicate" => {
-            let pasted = {
+            let (cut_cmd, pasted) = {
                 let mut a = app.borrow_mut();
-                let selected = match a.session.selection {
-                    Some(SelectionTarget::Node(n)) => vec![n],
-                    _ => Vec::new(),
-                };
+                let selected = a.session.selected_nodes();
                 if id != "edit.paste" && selected.is_empty() {
                     return;
                 }
                 let copied = crate::clipboard::copy(&a.session.doc, &selected);
                 if id == "edit.duplicate" {
-                    crate::clipboard::paste(&a.session.doc, &copied)
+                    (None, crate::clipboard::paste(&a.session.doc, &copied))
+                } else if id == "edit.cut" {
+                    let cut_roots = multi_select::chain_roots(&a.session.doc, &selected);
+                    let cmd = remove_nodes_command(&a.session.doc, cut_roots);
+                    a.clipboard = copied;
+                    (Some(cmd), None)
                 } else {
-                    if id != "edit.paste" {
+                    if id == "edit.copy" {
                         a.clipboard = copied;
                     }
-                    if id == "edit.paste" { crate::clipboard::paste(&a.session.doc, &a.clipboard) } else { None }
+                    (None, if id == "edit.paste" { crate::clipboard::paste(&a.session.doc, &a.clipboard) } else { None })
                 }
             };
-            if id == "edit.cut" {
-                run_action(ui, app, models, "selection.delete");
+            if let Some(command) = cut_cmd {
+                execute(ui, app, models, id, command, "Cut".into(), None, Vec::new());
             } else if let Some((command, roots)) = pasted {
                 let label = if id == "edit.paste" { "Paste" } else { "Duplicate" };
-                execute(ui, app, models, id, command, label.into(), roots.first().map(|r| SelectionTarget::Node(*r)), Vec::new());
+                let sel = (!roots.is_empty()).then(|| Sel::from_nodes(&roots));
+                execute_sel(ui, app, models, id, command, label.into(), sel, Vec::new());
             }
         }
         _ if id.starts_with("nudge.") || id == "tool.rotate_left" || id == "tool.rotate_right" || id == "edit.rotate_90" => {
@@ -681,16 +761,31 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                     }
                 }
             };
-            let Some(SelectionTarget::Node(node)) = app.borrow().session.selection else { return };
+            let nodes = if matches!(how, crate::nudge::Nudge::Turn { .. }) {
+                match app.borrow().session.selection {
+                    Some(SelectionTarget::Node(node)) => vec![node],
+                    _ => return,
+                }
+            } else {
+                let nodes = app.borrow().session.selected_nodes();
+                if nodes.is_empty() {
+                    return;
+                }
+                nodes
+            };
             let label = if matches!(how, crate::nudge::Nudge::Turn { .. }) { "Rotate" } else { "Nudge" };
-            let result = crate::nudge::nudge(&app.borrow().session.doc, &[node], how);
+            let result = crate::nudge::nudge(&app.borrow().session.doc, &nodes, how);
             match result {
                 Ok(Some(command)) => {
                     execute(ui, app, models, id, command, label.into(), None, Vec::new());
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    let text = if error == crate::nudge::NudgeError::Locked { "Part is locked" } else { "No hole there" };
+                    let text = match error {
+                        crate::nudge::NudgeError::Locked => "Part is locked",
+                        crate::nudge::NudgeError::NoHole => "No hole there",
+                        crate::nudge::NudgeError::MixedParents => "Can't move parts on different platforms together",
+                    };
                     show_toast(ui, &app.borrow(), text, false);
                 }
             }
@@ -804,55 +899,93 @@ pub(crate) fn execute(
     select: Option<SelectionTarget>,
     fixes: Vec<OpeningFix>,
 ) -> bool {
-    let result = {
-        let mut a = app.borrow_mut();
-        // Captured before the command removes it, for the toast.
-        let deleted = match &command {
-            Command::RemovePlatform(pid) => {
-                a.session.doc.platform(*pid).map(|p| (p.name.clone(), a.session.doc.nodes_on(*pid).count()))
-            }
-            _ => None,
-        };
-        let before = a.session.selection;
-        match a.session.execute(command, Some(label)) {
-            Ok(changes) => {
-                if let Some(target) = select.filter(|t| t.exists_in(&a.session.doc)) {
-                    a.session.selection = Some(target);
-                }
-                a.session.fix_selection();
-                let selection = a.session.selection;
-                let snapshot = (!changes.is_empty()).then(|| Box::new(a.session.doc.clone()));
-                let toast = toast_for(&fixes, deleted);
-                a.toast_undo = toast.is_some();
-                Ok((snapshot, changes, (selection != before || select.is_some()).then_some(selection), toast))
-            }
-            Err(error) => Err(error),
-        }
-    };
-    match result {
-        Ok((snapshot, changes, selection, toast)) => {
-            ui.set_inspector_error("".into());
-            {
-                let a = app.borrow();
-                if let Some(snapshot) = snapshot {
-                    a.send(ViewportRequest::ApplyChanges { snapshot, changes });
-                }
-                if let Some(selection) = selection {
-                    a.send(ViewportRequest::Select(selection));
-                }
-            }
-            refresh(ui, app, models);
-            if let Some(text) = toast {
-                show_toast(ui, &app.borrow(), &text, true);
-            }
-            files::arm_autosave(app);
-            true
-        }
+    let sel = select.map(|t| Sel { primary: Some(t), extra: Vec::new() });
+    execute_sel(ui, app, models, id, command, label, sel, fixes)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_sel(
+    ui: &AppWindow,
+    app: &Rc<RefCell<AppState>>,
+    models: &Rc<UiModels>,
+    id: &str,
+    command: Command,
+    label: String,
+    select: Option<Sel>,
+    fixes: Vec<OpeningFix>,
+) -> bool {
+    match execute_sel_raw(ui, app, models, command, label, select, fixes) {
+        Ok(()) => true,
         Err(error) => {
             refuse(ui, app, models, id, &error.to_string(), None);
             false
         }
     }
+}
+
+fn execute_sel_raw(
+    ui: &AppWindow,
+    app: &Rc<RefCell<AppState>>,
+    models: &Rc<UiModels>,
+    command: Command,
+    label: String,
+    select: Option<Sel>,
+    fixes: Vec<OpeningFix>,
+) -> Result<(), CommandError> {
+    let result = {
+        let mut a = app.borrow_mut();
+        // Captured before the command removes it, for the toast.
+        let removed_platform = match &command {
+            Command::RemovePlatform(pid) => Some(*pid),
+            Command::Batch(cmds) => cmds.iter().find_map(|c| match c {
+                Command::RemovePlatform(pid) => Some(*pid),
+                _ => None,
+            }),
+            _ => None,
+        };
+        let deleted = removed_platform.and_then(|pid| {
+            a.session.doc.platform(pid).map(|p| (p.name.clone(), a.session.doc.nodes_on(pid).count()))
+        });
+        let before = current_sel(&a.session);
+        let select_requested = select.is_some();
+        match a.session.execute(command, Some(label)) {
+            Ok(changes) => {
+                if let Some(sel) = select {
+                    let norm = normalize_sel(&a.session.doc, sel);
+                    if norm.primary.is_some() {
+                        a.session.selection = norm.primary;
+                        a.session.extra = norm.extra;
+                    }
+                }
+                a.session.fix_selection();
+                let after = current_sel(&a.session);
+                let snapshot = (!changes.is_empty()).then(|| Box::new(a.session.doc.clone()));
+                let toast = toast_for(&fixes, deleted);
+                a.toast_undo = toast.is_some();
+                Ok((snapshot, changes, (after != before || select_requested).then_some(after), toast))
+            }
+            Err(error) => Err(error),
+        }
+    };
+    let (snapshot, changes, selection, toast) = result?;
+    ui.set_inspector_error("".into());
+    {
+        let a = app.borrow();
+        if let Some(snapshot) = snapshot {
+            a.send(ViewportRequest::ApplyChanges { snapshot, changes });
+        }
+        // Send selection after ApplyChanges so the viewport filters extras against the new snapshot.
+        if let Some(sel) = selection {
+            a.send(ViewportRequest::Select(sel.primary));
+            a.send(ViewportRequest::SelectExtra(sel.extra));
+        }
+    }
+    refresh(ui, app, models);
+    if let Some(text) = toast {
+        show_toast(ui, &app.borrow(), &text, true);
+    }
+    files::arm_autosave(app);
+    Ok(())
 }
 
 /// The Undo toast for door refits or a platform deletion, if any.
@@ -879,21 +1012,22 @@ pub(crate) fn undo_redo(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc
         let mut a = app.borrow_mut();
         let history = &a.session.history;
         let label = if redo { history.redo_label() } else { history.undo_label() }.map(str::to_owned);
+        let before = current_sel(&a.session);
         let result = if redo { a.session.redo() } else { a.session.undo() };
         match result {
             None => return,
             Some(Ok(changes)) => {
-                let before = a.session.selection;
                 if let Some(target) = changes.single_target()
                     && Some(target) != a.session.selection
                     && target.exists_in(&a.session.doc)
                 {
                     a.session.selection = Some(target);
+                    a.session.extra.clear();
                 }
                 a.session.fix_selection();
-                let selection = a.session.selection;
+                let after = current_sel(&a.session);
                 a.toast_undo = false;
-                Ok((Box::new(a.session.doc.clone()), changes, (selection != before).then_some(selection), label))
+                Ok((Box::new(a.session.doc.clone()), changes, (after != before).then_some(after), label))
             }
             Some(Err(error)) => {
                 // The document is whatever the failed step left; drop the history and resync.
@@ -909,8 +1043,9 @@ pub(crate) fn undo_redo(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc
             {
                 let a = app.borrow();
                 send_changes(&a, snapshot, changes);
-                if let Some(selection) = selection {
-                    a.send(ViewportRequest::Select(selection));
+                if let Some(sel) = selection {
+                    a.send(ViewportRequest::Select(sel.primary));
+                    a.send(ViewportRequest::SelectExtra(sel.extra));
                 }
             }
             refresh(ui, app, models);
@@ -1044,23 +1179,50 @@ fn build_paste(a: &AppState, target: &str, text: &str) -> Result<(Command, Strin
 
 // ── Selection ──────────────────────────────────────────────────────────────────────────────
 
-/// Selection set from the UI (scene row click, clear): stored locally, sent, refreshed.
-fn select(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels, target: Option<SelectionTarget>) {
-    let changed = {
-        let mut a = app.borrow_mut();
-        let target = target.filter(|t| t.exists_in(&a.session.doc));
-        let changed = a.session.selection != target;
-        a.session.selection = target;
-        a.send(ViewportRequest::Select(target));
-        changed
+fn current_sel(session: &Session) -> Sel {
+    Sel { primary: session.selection, extra: session.extra.clone() }
+}
+
+fn normalize_sel(doc: &lab_core::Document, sel: Sel) -> Sel {
+    let primary = sel.primary.filter(|t| t.exists_in(doc));
+    let Some(SelectionTarget::Node(pid)) = primary else {
+        return Sel { primary, extra: Vec::new() };
     };
+    let mut extra = Vec::new();
+    for id in sel.extra {
+        if id != pid && doc.node(id).is_some() && !extra.contains(&id) {
+            extra.push(id);
+        }
+    }
+    Sel { primary, extra }
+}
+
+/// Stores `sel` (clearing extras whenever the primary is not a node) and syncs both primary and
+/// extras to the viewport. Returns true if the stored selection changed.
+pub(crate) fn store_sel(a: &mut AppState, sel: Sel) -> bool {
+    let before = current_sel(&a.session);
+    let next = normalize_sel(&a.session.doc, sel);
+    a.session.selection = next.primary;
+    a.session.extra = next.extra.clone();
+    a.send(ViewportRequest::Select(next.primary));
+    a.send(ViewportRequest::SelectExtra(next.extra));
+    before != current_sel(&a.session)
+}
+
+/// Selection set from the UI (scene row click, clear, folder actions): stored locally, sent, refreshed.
+pub(crate) fn select_sel(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels, sel: Sel) {
+    let changed = store_sel(&mut app.borrow_mut(), sel);
     if changed {
         ui.set_inspector_error("".into());
     }
     refresh(ui, app, models);
 }
 
-/// `ViewportEvent::SelectionChanged`: validated against the document, then stored.
+fn select(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &UiModels, target: Option<SelectionTarget>) {
+    select_sel(ui, app, models, Sel { primary: target, extra: Vec::new() });
+}
+
+/// `ViewportEvent::SelectionChanged`: validated against the document, passed through group click rules.
 pub fn on_viewport_selection(
     ui: &AppWindow,
     app: &Rc<RefCell<AppState>>,
@@ -1072,18 +1234,68 @@ pub fn on_viewport_selection(
         if let Some(t) = target
             && !t.exists_in(&a.session.doc)
         {
-            a.send(ViewportRequest::Select(None));
+            let cur = current_sel(&a.session);
+            store_sel(&mut a, cur);
             return;
         }
-        let changed = a.session.selection != target;
-        a.session.selection = target;
-        changed
+        let prev = current_sel(&a.session);
+        let next = multi_select::click(&a.session.doc, &prev, target);
+        store_sel(&mut a, next)
     };
     if !changed {
         return;
     }
     ui.set_inspector_error("".into());
     refresh(ui, app, models);
+}
+
+/// `ViewportEvent::SelectionToggled`: Ctrl+click in the viewport.
+pub fn on_viewport_toggle(
+    ui: &AppWindow,
+    app: &Rc<RefCell<AppState>>,
+    models: &UiModels,
+    target: SelectionTarget,
+) {
+    let changed = {
+        let mut a = app.borrow_mut();
+        if !target.exists_in(&a.session.doc) {
+            return;
+        }
+        let prev = current_sel(&a.session);
+        let next = match target {
+            SelectionTarget::Node(id) => multi_select::toggle(&prev, id),
+            _ => Sel { primary: Some(target), extra: Vec::new() },
+        };
+        store_sel(&mut a, next)
+    };
+    if !changed {
+        return;
+    }
+    ui.set_inspector_error("".into());
+    refresh(ui, app, models);
+}
+
+/// `ViewportEvent::ContextMenu`: right-click on a selected node keeps the multi-selection;
+/// right-click outside clears stale extras before opening the menu.
+pub fn on_viewport_context_menu(
+    ui: &AppWindow,
+    app: &Rc<RefCell<AppState>>,
+    models: &UiModels,
+    target: Option<SelectionTarget>,
+    pos: lab_viewport::Vec2,
+) {
+    let (valid, changed) = {
+        let mut a = app.borrow_mut();
+        let valid = target.filter(|t| t.exists_in(&a.session.doc));
+        let prev = current_sel(&a.session);
+        let next = multi_select::right_click(&a.session.doc, &prev, valid);
+        (valid, store_sel(&mut a, next))
+    };
+    if changed {
+        ui.set_inspector_error("".into());
+        refresh(ui, app, models);
+    }
+    crate::context_menu::open(ui, &app.borrow(), valid, pos);
 }
 
 fn unit_index(unit: LengthUnit) -> i32 {

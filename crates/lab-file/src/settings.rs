@@ -75,6 +75,8 @@ pub struct Settings {
 pub struct Bundle {
     pub name: String,
     pub nodes: Vec<lab_core::Node>,
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 /// A user part collection: part ids in insertion order, no duplicates.
@@ -236,12 +238,19 @@ mod recent_tests {
 
     #[test]
     fn old_settings_load_and_libraries_round_trip() {
-        let old: Settings = serde_json::from_str(r#"{"show_beams":true}"#).unwrap();
+        let old: Settings =
+            serde_json::from_str(r#"{"show_beams":true,"bundles":[{"name":"Mount","nodes":[]}]}"#).unwrap();
         assert!(old.libraries.is_empty() && old.hidden_parts.is_empty() && old.active_library.is_empty());
+        assert_eq!(old.bundles.len(), 1);
+        assert_eq!(old.bundles[0].group, None);
         let new = Settings {
             libraries: vec![UserLibrary { name: "MOT".into(), parts: vec!["a".into(), "b".into()] }],
             hidden_parts: BTreeSet::from(["thorlabs:KM100".to_string()]),
             active_library: "MOT".into(),
+            bundles: vec![
+                Bundle { name: "Mount".into(), nodes: Vec::new(), group: None },
+                Bundle { name: "Laser".into(), nodes: Vec::new(), group: Some("Laser".into()) },
+            ],
             ..old
         };
         let back: Settings = serde_json::from_slice(&serde_json::to_vec(&new).unwrap()).unwrap();

@@ -250,7 +250,8 @@ export component IconButton inherits Rectangle {
     property <string> icon-name: root.icon == "+" ? "plus" : root.icon == "✕" || root.icon == "×" ? "x"
         : root.icon == "↶" ? "undo" : root.icon == "↷" ? "redo" : root.icon == "‹" ? "chevron-left"
         : root.icon == "›" ? "chevron-right" : root.icon == "🔒" ? "lock" : root.icon == "🔓" ? "unlock"
-        : root.icon == "◎" ? "target" : root.icon == "▾" ? "chevron-down" : "";
+        : root.icon == "◎" ? "target" : root.icon == "▾" ? "chevron-down"
+        : root.icon == "⊟" ? "ungroup" : "";
     if root.icon-name != "": Icon {
         name: root.icon-name;
         x: (parent.width - self.width) / 2;

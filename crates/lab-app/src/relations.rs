@@ -107,10 +107,13 @@ fn chip(app: &Rc<RefCell<AppState>>, i: i32) -> Option<Chip> {
 /// Selects the node; a no-op when it is already selected (a row click there does not toggle it off).
 fn select(ui: &AppWindow, app: &Rc<RefCell<AppState>>, target: SelectionTarget) {
     let SelectionTarget::Node(id) = target else { return };
-    if app.borrow().session.selection == Some(target) {
-        return;
+    {
+        let a = app.borrow();
+        if a.session.selection == Some(target) && a.session.extra.is_empty() {
+            return;
+        }
     }
-    ui.invoke_scene_row_clicked(0, id.0 as i32);
+    ui.invoke_scene_row_clicked(0, id.0 as i32, false, false);
 }
 
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>) {

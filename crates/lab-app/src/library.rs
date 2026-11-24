@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use lab_catalog::{Catalog, Source};
 use lab_core::part::{ConnectorKind, PartDef};
-use lab_core::SelectionTarget;
+use lab_core::{Document, NodeId};
 use lab_file::{Bundle, UserLibrary};
 use lab_ui::{AppWindow, LibraryRow};
 use lab_viewport::{DragItem, Modifiers, PartDrag, Vec2, ViewportRequest};
@@ -331,14 +331,44 @@ fn bundle_rows(app: &AppState) -> Vec<LibraryRow> {
     out
 }
 
-/// `library.save_bundle`: asks for a name (default: the set root's name) in the library menu.
-pub fn save_bundle_prompt(ui: &AppWindow, app: &AppState) {
-    let doc = &app.session.doc;
-    let Some(SelectionTarget::Node(id)) = app.session.selection else {
+/// The group whose member set equals the deduplicated chain roots of `selected`, if any.
+fn whole_group<'a>(doc: &'a Document, selected: &[NodeId]) -> Option<&'a lab_core::Group> {
+    let mut roots: Vec<NodeId> = Vec::new();
+    for &id in selected {
+        let root = doc.chain_root(id);
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    let &first = roots.first()?;
+    let group = doc.group_of(first)?;
+    (group.members.len() == roots.len() && roots.iter().all(|r| group.members.contains(r))).then_some(group)
+}
+
+fn bundle_default_name(doc: &Document, selected: &[NodeId]) -> String {
+    if let Some(group) = whole_group(doc, selected) {
+        return group.name.clone();
+    }
+    selected.first().and_then(|&id| doc.node(doc.chain_root(id))).map(|n| n.name.clone()).unwrap_or_default()
+}
+
+fn build_bundle(doc: &Document, selected: &[NodeId], name: String) -> Option<Bundle> {
+    let nodes = crate::clipboard::bundle_nodes(crate::clipboard::copy(doc, selected));
+    if nodes.is_empty() {
+        return None;
+    }
+    let group = whole_group(doc, selected).map(|g| g.name.clone());
+    Some(Bundle { name, nodes, group })
+}
+
+/// `library.save_bundle`: asks for a name (default: group name if one whole group is selected,
+/// else the primary's chain root name) in the library menu.
+pub fn save_bundle_prompt(ui: &AppWindow, app: &AppState, selected: &[NodeId]) {
+    if selected.is_empty() {
         crate::controller::show_toast(ui, app, "Select a part to save as a bundle", false);
         return;
-    };
-    let name = doc.node(lab_app::set_root(doc, id)).map(|n| n.name.clone()).unwrap_or_default();
+    }
+    let name = bundle_default_name(&app.session.doc, selected);
     ui.set_library_name_verb("bundle_save".into());
     ui.set_library_name_default(name.into());
     ui.set_library_open(true);
@@ -405,15 +435,12 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
         // POLA-203 bundles.
         "bundle_save" => {
             let a = &*app;
-            let Some(SelectionTarget::Node(id)) = a.session.selection else { return };
+            let selected = a.session.selected_nodes();
             let bundles = &a.settings.bundles;
             let Some(name) = unique_name(|n| bundles.iter().any(|b| b.name == n), arg) else { return };
-            let nodes = crate::clipboard::bundle_nodes(crate::clipboard::copy(&a.session.doc, &[id]));
-            if nodes.is_empty() {
-                return;
-            }
-            crate::controller::show_toast(ui, a, &format!("Saved bundle {name}"), false);
-            app.settings.bundles.push(Bundle { name, nodes });
+            let Some(bundle) = build_bundle(&a.session.doc, &selected, name) else { return };
+            crate::controller::show_toast(ui, a, &format!("Saved bundle {}", bundle.name), false);
+            app.settings.bundles.push(bundle);
         }
         "bundle_rename" => {
             let Some(b) = bundle else { return };
@@ -719,5 +746,49 @@ mod tests {
         assert!(!ids(&rows(&catalog, &filt("", true, &hidden), &c)).contains(&"thorlabs:KM100".to_string()));
         let shown = rows(&catalog, &LibraryFilter { show_hidden: true, ..filt("", true, &hidden) }, &c);
         assert!(shown.iter().any(|r| r.id == "thorlabs:KM100" && r.hidden));
+    }
+
+    #[test]
+    fn bundle_save_detects_exact_group_and_default_name() {
+        use lab_core::{Attach, GroupId, Node, Parent};
+        let demo = lab_core::sample::demo_document();
+        let template = demo.nodes.first().expect("demo has a node");
+        let mut doc = Document::new("BundleTest");
+        let mk = |id: u64, name: &str, parent: Parent, attach: Attach| Node {
+            id: NodeId(id),
+            name: name.into(),
+            parent,
+            attach,
+            ..template.clone()
+        };
+        doc.nodes.push(mk(1, "Base A", Parent::Room, Attach::Free));
+        doc.nodes.push(mk(2, "Mirror A", Parent::Node(NodeId(1)), Attach::Constrained { constraints: Vec::new() }));
+        doc.nodes.push(mk(3, "Base B", Parent::Room, Attach::Free));
+        doc.nodes.push(mk(4, "Extra", Parent::Room, Attach::Free));
+        doc.groups.push(lab_core::Group {
+            id: GroupId(10),
+            name: "Relay".into(),
+            members: vec![NodeId(1), NodeId(3)],
+        });
+
+        // Whole group (selected via a constrained child + other root, reversed order, with duplicate root).
+        let whole = [NodeId(3), NodeId(2), NodeId(1)];
+        assert_eq!(bundle_default_name(&doc, &whole), "Relay");
+        let b = build_bundle(&doc, &whole, "My Bundle".into()).unwrap();
+        assert_eq!(b.group.as_deref(), Some("Relay"));
+        assert_eq!(b.nodes.len(), 3);
+
+        // Partial group -> not a group bundle, default name is primary's chain root name.
+        assert_eq!(bundle_default_name(&doc, &[NodeId(2)]), "Base A");
+        let partial = build_bundle(&doc, &[NodeId(2)], "Single".into()).unwrap();
+        assert_eq!(partial.group, None);
+        assert_eq!(partial.nodes.len(), 2);
+
+        // Whole group plus an extra node -> not a single group.
+        let superset = [NodeId(1), NodeId(3), NodeId(4)];
+        assert_eq!(bundle_default_name(&doc, &superset), "Base A");
+        let sup = build_bundle(&doc, &superset, "More".into()).unwrap();
+        assert_eq!(sup.group, None);
+        assert_eq!(sup.nodes.len(), 4);
     }
 }

@@ -175,7 +175,7 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
                 node(ctx, *id)?;
             }
             let ids = nodes.iter().map(|i| NodeId(*i)).collect();
-            (Command::RemoveNodes(ids), format!("Agent: remove {} parts", nodes.len()), None)
+            (lab_core::remove_nodes_command(ctx.doc, ids), format!("Agent: remove {} parts", nodes.len()), None)
         }
         WriteRequest::Undo | WriteRequest::Redo => {
             return Err(err(ErrorCode::BadRequest, "undo and redo are handled by the app"));
@@ -708,6 +708,21 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         let r = w.run(WriteRequest::Remove { nodes: vec![holder] }).unwrap();
         assert_eq!(r.label, "Agent: remove 1 parts");
         assert_eq!(r.select, None);
+    }
+
+    #[test]
+    fn remove_grouped_node_updates_groups() {
+        let (w, a) = World::new().with_holder();
+        let (mut w, b) = w.with_holder();
+        let gid = lab_core::GroupId(w.doc.allocate_id());
+        w.doc.groups.push(lab_core::Group {
+            id: gid,
+            name: "Group 1".into(),
+            members: vec![NodeId(a), NodeId(b)],
+        });
+        let r = w.run(WriteRequest::Remove { nodes: vec![a] }).unwrap();
+        r.command.apply(&mut w.doc).unwrap();
+        assert!(w.doc.groups.is_empty(), "removing a member of a 2-node group must drop the group");
     }
 
     #[test]

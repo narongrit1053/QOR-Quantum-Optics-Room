@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Select several parts.** Ctrl+click parts in the view or in the left panel to add or remove them; Shift+click in the left panel selects a range. Delete, Lock, Hide, Isolate, Copy, Cut, Duplicate and the arrow keys act on all of them. The inspector shows the first one.
+- **Groups.** Select parts and press Ctrl+G (or right-click → Group) to keep them together. A group shows as a folder in the left panel, and clicking any of its parts in the view selects the whole group; click again to pick just that part. Dragging or nudging moves the group as one rigid block, and one Ctrl+Z puts it back. Ctrl+Shift+G ungroups.
+- **Save a whole assembly as a bundle.** *Save as Bundle…* now saves everything selected, or the whole group, including parts held by constraints, so a stack like base → post holder → post → mount → mirror is saved complete from any of its parts. A bundle saved from a group comes back as a group when you drop it in.
+
 ## v0.0.10
 
 - **Version and updates in Settings.** Settings shows which LabSetup you have, with a *Check for Updates* button. When a newer version is out, the button turns into *Update*, which downloads and installs it.

@@ -22,7 +22,7 @@ use crate::edit::{EditError, node_mate, node_yaw};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneRowData {
-    pub kind: i32, // 0 node, 1 platform, 2 room
+    pub kind: i32, // 0 node, 1 platform, 2 room, 3 group
     pub id: i32,
     pub label: String,
     pub detail: String,
@@ -233,6 +233,7 @@ fn set_rows(doc: &Document, catalog: &Catalog, node: &Node, units: LengthUnit) -
 pub fn scene_rows(
     doc: &Document,
     selection: Option<SelectionTarget>,
+    extra: &[NodeId],
     collapsed: &HashSet<(i32, i32)>,
 ) -> Vec<SceneRowData> {
     let mut rows = Vec::new();
@@ -253,10 +254,12 @@ pub fn scene_rows(
     if !room_open {
         return rows;
     }
-    let cx = SceneCx { doc, selection, collapsed };
-    for n in doc.children(Parent::Room) {
-        cx.node_rows(n, 1, &mut rows);
-    }
+    let whole_group = crate::multi_select::is_whole_group(
+        doc,
+        &crate::multi_select::Sel { primary: selection, extra: extra.to_vec() },
+    );
+    let cx = SceneCx { doc, selection, extra, whole_group, collapsed };
+    cx.children_rows(Parent::Room, 1, &mut rows);
     // Roots: platforms not stacked on another existing platform.
     for p in &doc.platforms {
         let stacked = matches!(p.support, Support::OnPlatform { parent, .. } if doc.platform(parent).is_some());
@@ -270,6 +273,8 @@ pub fn scene_rows(
 struct SceneCx<'a> {
     doc: &'a Document,
     selection: Option<SelectionTarget>,
+    extra: &'a [NodeId],
+    whole_group: Option<lab_core::GroupId>,
     collapsed: &'a HashSet<(i32, i32)>,
 }
 
@@ -300,8 +305,39 @@ impl SceneCx<'_> {
             for q in stacked() {
                 self.platform_rows(q, depth + 1, rows);
             }
-            for n in nodes() {
-                self.node_rows(n, depth + 1, rows);
+            self.children_rows(Parent::Platform(p.id), depth + 1, rows);
+        }
+    }
+
+    fn children_rows(&self, parent: Parent, depth: i32, rows: &mut Vec<SceneRowData>) {
+        let mut seen_groups: Vec<lab_core::GroupId> = Vec::new();
+        for n in self.doc.children(parent) {
+            if let Some(group) = self.doc.group_of(n.id) {
+                if seen_groups.contains(&group.id) {
+                    continue;
+                }
+                seen_groups.push(group.id);
+                let members: Vec<&Node> = group.members.iter().filter_map(|&m| self.doc.node(m)).collect();
+                let open = !self.collapsed.contains(&(3, group.id.0 as i32));
+                rows.push(SceneRowData {
+                    kind: 3,
+                    id: group.id.0 as i32,
+                    label: group.name.clone(),
+                    detail: members.len().to_string(),
+                    depth,
+                    selected: self.whole_group == Some(group.id),
+                    is_beam: false,
+                    locked: false,
+                    expandable: !members.is_empty(),
+                    expanded: open,
+                });
+                if open {
+                    for m in members {
+                        self.node_rows(m, depth + 1, rows);
+                    }
+                }
+            } else {
+                self.node_rows(n, depth, rows);
             }
         }
     }
@@ -318,7 +354,7 @@ impl SceneCx<'_> {
             label: n.name.clone(),
             detail: "".into(),
             depth,
-            selected: self.selection == Some(SelectionTarget::Node(n.id)),
+            selected: self.selection == Some(SelectionTarget::Node(n.id)) || self.extra.contains(&n.id),
             is_beam: matches!(n.finish, Finish::Beam { .. }),
             locked: n.locked,
             expandable: kids().next().is_some(),
@@ -1296,7 +1332,7 @@ mod tests {
             rotation: DQuat::IDENTITY,
             pickable: true,
         });
-        let rows = scene_rows(&doc, None, &HashSet::new());
+        let rows = scene_rows(&doc, None, &[], &HashSet::new());
         assert_eq!(rows[0].kind, 2); // Room first
         assert_eq!(rows[0].label, "Room");
         assert_eq!(rows[1].kind, 1); // Platform next
@@ -1304,6 +1340,79 @@ mod tests {
         assert_eq!(rows[2].kind, 0); // Nested node
         assert_eq!(rows[1].depth, 1);
         assert_eq!(rows[2].depth, 2);
+    }
+
+    fn test_node(id: u64, parent: Parent) -> Node {
+        Node {
+            select_lock: false,
+            note: String::new(),
+            id: NodeId(id),
+            name: format!("Part {id}"),
+            parent,
+            attach: Attach::Free,
+            params: Default::default(),
+            locked: false,
+            part: "Part A".into(),
+            shape: Shape::Box { size: DVec3::ONE },
+            finish: Finish::Stainless,
+            position: DVec3::ZERO,
+            rotation: DQuat::IDENTITY,
+            pickable: true,
+        }
+    }
+
+    #[test]
+    fn group_folder_row_holds_members() {
+        let mut doc = test_doc();
+        let plat = Parent::Platform(PlatformId(1));
+        doc.nodes.push(test_node(1, plat));
+        doc.nodes.push(test_node(2, plat));
+        doc.nodes.push(test_node(3, plat));
+        doc.groups.push(lab_core::Group {
+            id: lab_core::GroupId(10),
+            name: "Group 1".into(),
+            members: vec![NodeId(1), NodeId(3)],
+        });
+
+        // Expanded: Room, Platform, Folder(10, detail "2"), 1, 3 (depth+1), then 2.
+        let rows = scene_rows(
+            &doc,
+            Some(SelectionTarget::Node(NodeId(1))),
+            &[NodeId(3)],
+            &HashSet::new(),
+        );
+        let summary: Vec<(i32, i32, i32)> = rows.iter().map(|r| (r.kind, r.id, r.depth)).collect();
+        assert_eq!(summary, vec![(2, 0, 0), (1, 1, 1), (3, 10, 2), (0, 1, 3), (0, 3, 3), (0, 2, 2)]);
+        assert_eq!(rows[2].label, "Group 1");
+        assert_eq!(rows[2].detail, "2");
+        assert!(rows[2].expandable && rows[2].expanded);
+        assert!(rows[2].selected, "folder selected when whole group is selected");
+        assert!(rows[3].selected && rows[4].selected && !rows[5].selected);
+
+        // Collapsed folder hides its members; node 2 stays visible.
+        let collapsed = HashSet::from([(3, 10)]);
+        let rows = scene_rows(&doc, None, &[], &collapsed);
+        let summary: Vec<(i32, i32, i32)> = rows.iter().map(|r| (r.kind, r.id, r.depth)).collect();
+        assert_eq!(summary, vec![(2, 0, 0), (1, 1, 1), (3, 10, 2), (0, 2, 2)]);
+        assert!(!rows[2].expanded && !rows[2].selected);
+    }
+
+    #[test]
+    fn extras_marked_selected() {
+        let mut doc = test_doc();
+        let plat = Parent::Platform(PlatformId(1));
+        doc.nodes.push(test_node(1, plat));
+        doc.nodes.push(test_node(2, plat));
+        doc.nodes.push(test_node(3, plat));
+
+        let rows = scene_rows(
+            &doc,
+            Some(SelectionTarget::Node(NodeId(1))),
+            &[NodeId(2)],
+            &HashSet::new(),
+        );
+        let selected: Vec<i32> = rows.iter().filter(|r| r.selected).map(|r| r.id).collect();
+        assert_eq!(selected, vec![1, 2]);
     }
 
     // V4: wall_choice_label compass.

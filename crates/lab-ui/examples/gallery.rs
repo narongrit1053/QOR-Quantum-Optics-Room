@@ -761,8 +761,8 @@ fn wire(ui: &AppWindow, m: &Rc<Models>, log: &Log) {
     }
     {
         let (w, m, log) = (weak.clone(), m.clone(), log.clone());
-        ui.on_scene_row_clicked(move |kind, id| {
-            record(&log, format!("scene-row-clicked({kind}, {id})"));
+        ui.on_scene_row_clicked(move |kind, id, ctrl, shift| {
+            record(&log, format!("scene-row-clicked({kind}, {id}, {ctrl}, {shift})"));
             if let Some(ui) = w.upgrade() {
                 match kind {
                     0 => apply_state(&ui, &m, 1),

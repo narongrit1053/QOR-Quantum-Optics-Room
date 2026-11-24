@@ -57,7 +57,9 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
     let models = models.clone();
     let handler = move || {
         let Some(ui) = ui_weak.upgrade() else { return };
-        while let Ok(event) = handle.events.try_recv() {
+        let events: Vec<_> = std::iter::from_fn(|| handle.events.try_recv().ok()).collect();
+        let mut iter = events.into_iter().peekable();
+        while let Some(event) = iter.next() {
             match event {
                 ViewportEvent::Ready { adapter, backend, quality, msaa_samples } => {
                     app.borrow_mut().viewport_ready = true;
@@ -87,10 +89,18 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     );
                 }
                 ViewportEvent::SelectionChanged(target) => {
+                    if matches!(iter.peek(), Some(ViewportEvent::ContextMenu { target: mt, .. }) if *mt == target) {
+                        continue;
+                    }
                     controller::on_viewport_selection(&ui, &app, &models, target);
                 }
+                ViewportEvent::SelectionToggled(target) => {
+                    controller::on_viewport_toggle(&ui, &app, &models, target);
+                }
                 ViewportEvent::HoverChanged(_) => {}
-                ViewportEvent::ContextMenu { target, pos } => crate::context_menu::open(&ui, &app.borrow(), target, pos),
+                ViewportEvent::ContextMenu { target, pos } => {
+                    controller::on_viewport_context_menu(&ui, &app, &models, target, pos);
+                }
                 ViewportEvent::DragStarted { unit, .. } => controller::on_drag_started(&ui, unit),
                 ViewportEvent::IsolationChanged(id) => {
                     app.borrow_mut().isolated = id;

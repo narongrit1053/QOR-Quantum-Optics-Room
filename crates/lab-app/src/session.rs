@@ -1,6 +1,6 @@
 //! Application session: document, history, location, dirty state and autosave tracking (M1-SPEC §7.2).
 
-use lab_core::{ChangeSet, Command, CommandError, Document, History, SelectionTarget};
+use lab_core::{ChangeSet, Command, CommandError, Document, History, NodeId, SelectionTarget};
 use lab_file::{LoadedProject, ProjectLocation};
 
 pub struct Session {
@@ -12,6 +12,7 @@ pub struct Session {
     pub migrated_from: Option<u32>, // older schema loaded and not yet saved → SaveOptions.backup_schema
     pub recovered: bool,
     pub selection: Option<SelectionTarget>,
+    pub extra: Vec<NodeId>,
 }
 
 impl Session {
@@ -25,6 +26,7 @@ impl Session {
             migrated_from: None,
             recovered: false,
             selection: None,
+            extra: Vec::new(),
         }
     }
 
@@ -39,6 +41,7 @@ impl Session {
             migrated_from: p.report.migrated_from,
             recovered: false,
             selection: None,
+            extra: Vec::new(),
         }
     }
 
@@ -52,6 +55,7 @@ impl Session {
             migrated_from: p.report.migrated_from,
             recovered: true,
             selection: None,
+            extra: Vec::new(),
         }
     }
 
@@ -95,12 +99,29 @@ impl Session {
         self.location.as_ref().map_or_else(|| self.doc.name.clone(), |loc| loc.display_name())
     }
 
+    pub fn selected_nodes(&self) -> Vec<NodeId> {
+        let mut out = Vec::with_capacity(self.extra.len() + 1);
+        if let Some(SelectionTarget::Node(id)) = self.selection {
+            out.push(id);
+        }
+        out.extend_from_slice(&self.extra);
+        out
+    }
+
     pub fn fix_selection(&mut self) -> bool {
         if self.selection.is_some_and(|target| !target.exists_in(&self.doc)) {
             self.selection = None;
+            self.extra.clear();
             return true;
         }
-        false
+        if !matches!(self.selection, Some(SelectionTarget::Node(_))) {
+            let had = !self.extra.is_empty();
+            self.extra.clear();
+            return had;
+        }
+        let before = self.extra.len();
+        self.extra.retain(|&id| self.doc.node(id).is_some());
+        self.extra.len() != before
     }
 }
 
@@ -242,5 +263,29 @@ mod tests {
         session.doc.platforms.clear();
         assert!(session.fix_selection());
         assert_eq!(session.selection, None);
+    }
+
+    #[test]
+    fn session_selected_nodes_and_extra_clear() {
+        let mut session = Session::new_clean(sample_doc(), None);
+        assert!(session.extra.is_empty());
+        assert!(session.selected_nodes().is_empty());
+
+        session.selection = Some(SelectionTarget::Node(NodeId(1)));
+        session.extra = vec![NodeId(2), NodeId(3)];
+        assert_eq!(session.selected_nodes(), vec![NodeId(1), NodeId(2), NodeId(3)]);
+
+        // Deleted extras are pruned while a valid primary remains.
+        assert!(session.fix_selection());
+        assert_eq!(session.selection, Some(SelectionTarget::Node(NodeId(1))));
+        assert!(session.extra.is_empty());
+
+        // Removing the primary clears both primary and extra.
+        session.extra = vec![NodeId(1)];
+        session.doc.nodes.clear();
+        assert!(session.fix_selection());
+        assert_eq!(session.selection, None);
+        assert!(session.extra.is_empty());
+        assert!(session.selected_nodes().is_empty());
     }
 }
