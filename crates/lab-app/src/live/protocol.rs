@@ -33,6 +33,7 @@ pub enum ReadRequest {
     Catalog { search: String, limit: Option<usize> },
     Features { node: u64 },
     Beams,
+    Bundles,
     Snapshot { path: Option<PathBuf>, width: Option<u32>, height: Option<u32> },
 }
 
@@ -41,6 +42,7 @@ pub enum ReadRequest {
 pub enum WriteRequest {
     Place(PlaceArgs),
     Stack(StackArgs),
+    PlaceBundle(PlaceBundleArgs),
     Constrain(ConstrainArgs),
     Move { node: u64, position: Option<[f64; 3]>, rotation: Option<[f64; 3]> },
     SetParams { node: u64, params: Map<String, Value> },
@@ -116,6 +118,15 @@ pub struct StackArgs {
     pub optic: Option<String>,
     pub axis_height: Option<f64>,
     pub slide: Option<f64>,
+    pub rotate_z: Option<f64>,
+}
+
+/// A saved library bundle with its anchor on a platform hole, turned about the hole by `rotate_z`.
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct PlaceBundleArgs {
+    pub name: String,
+    pub platform: u64,
+    pub hole: HoleArg,
     pub rotate_z: Option<f64>,
 }
 

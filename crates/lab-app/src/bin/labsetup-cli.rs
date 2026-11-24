@@ -42,6 +42,7 @@ Reads:
   catalog    --search TEXT [--limit N]                parts in the library: live catalog --search "post holder" --limit 10
   features   --node ID                                live features --node 5
   beams                                               live beams
+  bundles                                             saved library bundles (name, group, parts): live bundles
   snapshot   [--path FILE] [--width N] [--height N]   live snapshot --path view.png
 
 Writes (each is one undo step, labelled "Agent: ..."):
@@ -50,6 +51,9 @@ Writes (each is one undo step, labelled "Agent: ..."):
              live place --part thorlabs:KM100 --platform 1 --hole C14 --rotate-z 90 --doc TOKEN
   stack      --platform ID --hole C14 --holder ID --post ID --mount ID [--base ID] [--optic ID] (--axis-height MM | --slide MM) [--rotate-z DEG]
              live stack --platform 1 --hole C14 --holder H --post P --mount M --axis-height 75 --doc TOKEN
+  place-bundle --name NAME --platform ID --hole C14 [--rotate-z DEG]
+             a saved bundle, its first part on the hole as when dropped, turned about the hole
+             live place-bundle --name "QWP set" --platform 1 --hole C14 --rotate-z 90 --doc TOKEN
   constrain  --node ID, --to room | {"platform":ID} | {"node":ID}, --constraints [{child,parent,kind?,offset?,angle?,flip?,lock_rotation?}]
              live constrain --node 5 --json '{"to":{"node":4},"constraints":[{"child":"bottom","parent":"top","kind":"mate"}]}' --doc TOKEN
   move       --node ID [--position "[x,y,z]"] [--rotation "[z,y,x]"]

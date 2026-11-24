@@ -4,6 +4,7 @@
 //! and UI view-models. Free of Slint runtime types, windowing and GPU dependencies.
 
 pub mod block_move;
+pub mod bundle;
 pub mod bom_rows;
 pub mod edit;
 pub mod live;
