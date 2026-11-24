@@ -339,9 +339,9 @@ fn check_new_id(doc: &Document, raw: u64) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// Validates group members: >= 2 unique existing chain roots sharing one top parent, not in another group.
+/// Validates group members: >= 1 unique existing chain roots sharing one top parent, not in another group.
 fn check_group_members(doc: &Document, members: &[NodeId], ignore: Option<GroupId>) -> Result<(), CommandError> {
-    if members.len() < 2 {
+    if members.is_empty() {
         return Err(CommandError::GroupTooSmall);
     }
     let mut seen = Vec::with_capacity(members.len());
@@ -863,7 +863,7 @@ fn group_cleanup_commands(doc: &Document, pre_parents: &[(GroupId, Parent)]) -> 
         } else {
             roots
         };
-        if kept.len() < 2 {
+        if kept.is_empty() {
             cmds.push(Command::RemoveGroup(g.id));
         } else if kept != g.members {
             cmds.push(Command::RestoreGroupMembers { id: g.id, members: kept });
@@ -889,7 +889,7 @@ pub fn remove_nodes_command(doc: &Document, ids: Vec<NodeId>) -> Command {
         if kept.len() == g.members.len() {
             continue;
         }
-        if kept.len() < 2 {
+        if kept.is_empty() {
             cmds.push(Command::RemoveGroup(g.id));
         } else {
             cmds.push(Command::SetGroupMembers { id: g.id, members: kept });
@@ -1572,7 +1572,11 @@ mod tests {
             *e == CommandError::GroupMemberNotRoot(stack_ids[1])
         });
         assert_rejected(&doc, mk(next, vec![stack_ids[0], on_bb_id]), |e| *e == CommandError::GroupCrossPlatform);
-        assert_rejected(&doc, mk(next, vec![stack_ids[0]]), |e| *e == CommandError::GroupTooSmall);
+        assert_rejected(&doc, mk(next, vec![]), |e| *e == CommandError::GroupTooSmall);
+        // One stack (a single chain root) is a valid group, and it survives a save/load repair.
+        let mut single = doc.clone();
+        mk(next, vec![stack_ids[0]]).apply(&mut single).unwrap();
+        assert_eq!(single.groups.last().unwrap().members, vec![stack_ids[0]]);
         assert_rejected(&doc, mk(next, vec![stack_ids[0], stack_ids[0]]), |e| {
             *e == CommandError::DuplicateGroupMember(stack_ids[0])
         });
@@ -1604,7 +1608,7 @@ mod tests {
             Command::SetGroupMembers { id: g1, members: vec![stack_ids[0], on_bb_id] },
             |e| *e == CommandError::GroupCrossPlatform,
         );
-        assert_rejected(&doc, Command::SetGroupMembers { id: g1, members: vec![doc.nodes[0].id] }, |e| {
+        assert_rejected(&doc, Command::SetGroupMembers { id: g1, members: vec![] }, |e| {
             *e == CommandError::GroupTooSmall
         });
         let missing = GroupId(999_999);
@@ -1641,7 +1645,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_member_below_two_drops_group() {
+    fn remove_last_members_drops_group() {
         let mut doc = demo_document();
         let (n1, n2) = (doc.nodes[0].id, doc.nodes[1].id);
         let gid = GroupId(doc.next_free_id());
@@ -1651,7 +1655,7 @@ mod tests {
         let before = doc.clone();
         let mut history = History::default();
 
-        let cmd = remove_nodes_command(&doc, vec![n1]);
+        let cmd = remove_nodes_command(&doc, vec![n1, n2]);
         let changes = history.execute(&mut doc, cmd).unwrap();
         assert!(changes.groups_changed);
         assert!(doc.groups.is_empty());
@@ -1732,7 +1736,7 @@ mod tests {
         let original = doc.clone();
         let mut history = History::default();
 
-        // Mate A onto B: A stops being a chain root, so the 2-member group drops in the same step.
+        // Mate A onto B: A stops being a chain root, so the group keeps only B in the same step.
         let mate_cmd = Command::SetAttach {
             id: a,
             parent: Parent::Node(b),
@@ -1742,7 +1746,7 @@ mod tests {
         };
         let changes = history.execute(&mut doc, mate_cmd).unwrap();
         assert!(changes.groups_changed);
-        assert!(doc.groups.is_empty());
+        assert_eq!(doc.group(gid).unwrap().members, vec![b]);
 
         // Delete B (taking A with it), then undo twice back to the original document.
         let del = remove_nodes_command(&doc, vec![b]);
@@ -1752,13 +1756,13 @@ mod tests {
 
         history.undo(&mut doc).unwrap().unwrap();
         assert!(doc.node(a).is_some() && doc.node(b).is_some());
-        assert!(doc.groups.is_empty());
+        assert_eq!(doc.group(gid).unwrap().members, vec![b]);
 
         history.undo(&mut doc).unwrap().unwrap();
         assert!(doc.content_eq(&original));
 
         history.redo(&mut doc).unwrap().unwrap();
-        assert!(doc.groups.is_empty());
+        assert_eq!(doc.group(gid).unwrap().members, vec![b]);
         history.redo(&mut doc).unwrap().unwrap();
         assert!(doc.content_eq(&after_del));
     }
@@ -1789,7 +1793,7 @@ mod tests {
         let del = remove_nodes_command(&doc, vec![c]);
         history.execute(&mut doc, del).unwrap();
         assert!(doc.node(c).is_none());
-        assert!(doc.groups.is_empty());
+        assert_eq!(doc.group(gid).unwrap().members, vec![b]);
 
         history.undo(&mut doc).unwrap().unwrap();
         assert_eq!(doc.group(gid).unwrap().members, vec![b, c]);

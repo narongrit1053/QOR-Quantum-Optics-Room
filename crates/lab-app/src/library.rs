@@ -314,7 +314,7 @@ fn bundle_rows(app: &AppState) -> Vec<LibraryRow> {
     }];
     if expanded {
         out.extend(list.iter().map(|b| {
-            let thumb = b.nodes.first().and_then(|n| crate::thumbs::image(&n.part));
+            let thumb = crate::thumbs::image(&bundle_key(&b.name));
             LibraryRow {
                 id: format!("{BUNDLE}{}", b.name).into(),
                 label: if b.nodes.len() == 1 { "1 part".into() } else { format!("{} parts", b.nodes.len()).into() },
@@ -327,6 +327,38 @@ fn bundle_rows(app: &AppState) -> Vec<LibraryRow> {
                 ..Default::default()
             }
         }));
+    }
+    out
+}
+
+/// Thumbnail id of bundle `name`.
+pub fn bundle_key(name: &str) -> String {
+    format!("{BUNDLE}{name}")
+}
+
+/// The bundle's parts the catalog has, posed relative to its first node (the anchor).
+pub fn bundle_set(catalog: &Catalog, bundle: &Bundle) -> Vec<lab_viewport::SetPart> {
+    use lab_core::glam::{DQuat, DVec3};
+    let Some(anchor) = bundle.nodes.first() else { return Vec::new() };
+    // shortcut: roots are posed in the anchor's saved frame, so a drop that turns the anchor
+    // turns the ghost with it; place_bundle keeps saved rotations. Exact for the usual unrotated seat.
+    let to_anchor = anchor.rotation.inverse();
+    let mut poses: std::collections::HashMap<NodeId, (DVec3, DQuat)> = Default::default();
+    let mut out = Vec::new();
+    for n in &bundle.nodes {
+        let parent = match n.parent {
+            lab_core::Parent::Node(p) => poses.get(&p).copied(),
+            _ => None,
+        };
+        // Roots hold their offset from the anchor in the platform frame (bundle_nodes).
+        let pose = match parent {
+            Some((p, r)) => (p + r * n.position, r * n.rotation),
+            None => (to_anchor * n.position, to_anchor * n.rotation),
+        };
+        poses.insert(n.id, pose);
+        if n.shape == lab_core::Shape::Part && catalog.get(&n.part).is_some() {
+            out.push(lab_viewport::SetPart { part: n.part.clone(), params: n.params.clone(), position: pose.0, rotation: pose.1 });
+        }
     }
     out
 }
@@ -372,13 +404,21 @@ pub fn save_bundle_prompt(ui: &AppWindow, app: &AppState, selected: &[NodeId]) {
     ui.set_library_name_verb("bundle_save".into());
     ui.set_library_name_default(name.into());
     ui.set_library_open(true);
-    ui.set_library_naming(true);
+    // Next event-loop turn: a right-click menu that called this hands focus back as it closes,
+    // which would leave the name field unfocused and Enter doing nothing.
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_library_naming(true);
+        }
+    });
 }
 
 /// Deletes `bundle_target` (the confirm sheet's Delete button).
 pub fn delete_bundle(ui: &AppWindow, app: &mut AppState, models: &UiModels) {
     let Some(name) = app.library.bundle_target.take() else { return };
     app.settings.bundles.retain(|b| b.name != name);
+    crate::thumbs::forget(&bundle_key(&name));
     if let Err(error) = lab_file::save_settings(&app.settings) {
         eprintln!("settings not saved: {error}");
     }
@@ -440,6 +480,7 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
             let Some(name) = unique_name(|n| bundles.iter().any(|b| b.name == n), arg) else { return };
             let Some(bundle) = build_bundle(&a.session.doc, &selected, name) else { return };
             crate::controller::show_toast(ui, a, &format!("Saved bundle {}", bundle.name), false);
+            crate::thumbs::render_bundle(a, &bundle);
             app.settings.bundles.push(bundle);
         }
         "bundle_rename" => {
@@ -455,7 +496,11 @@ fn command(ui: &AppWindow, app: &mut AppState, models: &UiModels, verb: &str, pa
             let bundles = &app.settings.bundles;
             let Some(name) = unique_name(|n| n != old && bundles.iter().any(|b| b.name == n), arg) else { return };
             if let Some(b) = app.settings.bundles.iter_mut().find(|b| b.name == old) {
-                b.name = name;
+                b.name = name.clone();
+            }
+            crate::thumbs::forget(&bundle_key(&old));
+            if let Some(b) = app.settings.bundles.iter().find(|b| b.name == name) {
+                crate::thumbs::render_bundle(app, b);
             }
         }
         "bundle_delete" => {
@@ -597,19 +642,17 @@ pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels
             let bundle = id.strip_prefix(BUNDLE).filter(|_| kind != 2);
             app.library.bundle = bundle.map(str::to_string);
             match bundle {
-                // shortcut: the ghost is the first bundle part the catalog has, not the whole set;
-                // a set ghost needs its own DragItem in lab-viewport.
                 Some(name) => {
-                    let ghost = app.settings.bundles.iter().find(|b| b.name == name).and_then(|b| {
-                        b.nodes.iter().find(|n| app.catalog.get(&n.part).is_some()).map(|n| n.part.clone())
-                    });
-                    let Some(ghost) = ghost else { return };
-                    ghost
+                    let set = app.settings.bundles.iter().find(|b| b.name == name).map(|b| bundle_set(&app.catalog, b));
+                    match set {
+                        Some(set) if !set.is_empty() => DragItem::Set(set),
+                        _ => return,
+                    }
                 }
-                None => id.to_string(),
+                None => DragItem::Part(id.to_string()),
             }
         };
-        drag(&ui, &a, DragItem::Part(part), kind, x, y);
+        drag(&ui, &a, part, kind, x, y);
     });
 }
 
@@ -791,4 +834,35 @@ mod tests {
         assert_eq!(sup.group, None);
         assert_eq!(sup.nodes.len(), 4);
     }
+
+    #[test]
+    fn bundle_set_poses_every_part_from_the_anchor() {
+        use lab_core::glam::{DQuat, DVec3};
+        use lab_core::{Attach, Node, Parent};
+        let demo = lab_core::sample::demo_document();
+        let template = demo.nodes.iter().find(|n| n.shape == lab_core::Shape::Part).expect("demo has a part").clone();
+        let def = serde_json::json!({"id": template.part, "name": "x", "category": "posts/posts",
+            "geometry": {"kind": "parametric", "generator": "post"}, "connectors": []});
+        let catalog = Catalog::from_defs(vec![serde_json::from_value(def).unwrap()]);
+        let turn = DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2);
+        let mk = |id: u64, parent: Parent, position: DVec3, rotation: DQuat| Node {
+            id: NodeId(id), parent, attach: Attach::Free, position, rotation, ..template.clone()
+        };
+        let bundle = Bundle {
+            name: "Set".into(),
+            group: None,
+            nodes: vec![
+                mk(1, Parent::Room, DVec3::ZERO, turn),
+                mk(2, Parent::Node(NodeId(1)), DVec3::new(0.0, 0.0, 10.0), DQuat::IDENTITY),
+                mk(3, Parent::Room, DVec3::new(0.0, 50.0, 0.0), turn),
+            ],
+        };
+        let set = bundle_set(&catalog, &bundle);
+        assert_eq!(set.len(), 3);
+        assert!(set[0].position.length() < 1e-9 && set[0].rotation.angle_between(DQuat::IDENTITY) < 1e-9);
+        assert!((set[1].position - DVec3::new(0.0, 0.0, 10.0)).length() < 1e-9);
+        // 50 mm along platform Y is 50 mm along the anchor's -X when the anchor is turned 90°.
+        assert!((set[2].position - DVec3::new(50.0, 0.0, 0.0)).length() < 1e-9, "{:?}", set[2].position);
+    }
 }
+

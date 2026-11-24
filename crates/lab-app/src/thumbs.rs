@@ -12,7 +12,7 @@ use crate::app_state::AppState;
 
 /// `<user library>/thumbs/<id with ':' and '/' → '_'>.png`.
 pub fn path(id: &str) -> Option<PathBuf> {
-    Some(lab_catalog::user_dir()?.join("thumbs").join(format!("{}.png", id.replace([':', '/', '\\'], "_"))))
+    Some(lab_catalog::user_dir()?.join("thumbs").join(format!("{}.png", id.replace([':', '/', '\\', '*', '?', '"', '<', '>', '|'], "_"))))
 }
 
 thread_local! {
@@ -39,6 +39,27 @@ pub fn render_missing(app: &AppState) {
         if let Some(path) = path(&part.id).filter(|p| !p.is_file()) {
             app.send(ViewportRequest::RenderThumbnail { part: part.id.clone(), path });
         }
+    }
+    for b in &app.settings.bundles {
+        if path(&crate::library::bundle_key(&b.name)).is_some_and(|p| !p.is_file()) {
+            render_bundle(app, b);
+        }
+    }
+}
+
+/// Renders bundle `b`'s whole set.
+pub fn render_bundle(app: &AppState, b: &lab_file::Bundle) {
+    let key = crate::library::bundle_key(&b.name);
+    let parts = crate::library::bundle_set(&app.catalog, b);
+    if let Some(path) = path(&key).filter(|_| !parts.is_empty()) {
+        app.send(ViewportRequest::RenderSetThumbnail { key, parts, path });
+    }
+}
+
+/// Removes `id`'s thumbnail file (a deleted or renamed bundle).
+pub fn forget(id: &str) {
+    if let Some(path) = path(id) {
+        let _ = std::fs::remove_file(path);
     }
 }
 

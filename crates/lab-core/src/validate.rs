@@ -401,8 +401,8 @@ impl Document {
                     }
                 }
             }
-            if kept.len() < 2 {
-                notes.push(format!("Removed group “{}” because it had fewer than two valid members.", g.name));
+            if kept.is_empty() {
+                notes.push(format!("Removed group “{}” because it had no valid members.", g.name));
                 continue;
             }
             claimed.extend(kept.iter().copied());
@@ -659,13 +659,13 @@ mod tests {
                 name: "B".into(),
                 members: vec![n0, n2, n3],
             },
-            // Cross-platform pair leaves < 2 members -> dropped (must not claim n4).
+            // Cross-platform pair keeps n4 alone (a one-member group is valid) and claims it.
             Group {
                 id: GroupId(doc.allocate_id()),
                 name: "C".into(),
                 members: vec![n4, on_bb],
             },
-            // Valid id shared with E; keeps n4 and n5.
+            // Valid id shared with E; n4 is already claimed by C, so it keeps n5.
             Group {
                 id: shared_gid,
                 name: "D".into(),
@@ -698,7 +698,7 @@ mod tests {
         assert_eq!(repaired.validate(), Ok(()));
         assert!(report.repairs.len() >= 10, "expected a note per change: {:?}", report.repairs);
 
-        assert_eq!(repaired.groups.len(), 5, "{:?}", repaired.groups);
+        assert_eq!(repaired.groups.len(), 6, "{:?}", repaired.groups);
         assert_eq!(repaired.groups[0].name, "A");
         assert_eq!(repaired.groups[0].members, vec![n0, n1]);
         assert_ne!(repaired.groups[0].id.0, table_id.0);
@@ -707,19 +707,22 @@ mod tests {
         assert_eq!(repaired.groups[1].members, vec![n2, n3]);
         assert!(repaired.groups[1].id.0 <= MAX_ID);
 
-        assert_eq!(repaired.groups[2].name, "D");
-        assert_eq!(repaired.groups[2].members, vec![n4, n5]);
-        assert_eq!(repaired.groups[2].id, shared_gid);
+        assert_eq!(repaired.groups[2].name, "C");
+        assert_eq!(repaired.groups[2].members, vec![n4]);
 
-        assert_eq!(repaired.groups[3].name, "E");
-        assert_eq!(repaired.groups[3].members, vec![n6, n7]);
-        assert_ne!(repaired.groups[3].id, shared_gid);
-        assert!(repaired.groups[3].id.0 <= MAX_ID);
+        assert_eq!(repaired.groups[3].name, "D");
+        assert_eq!(repaired.groups[3].members, vec![n5]);
+        assert_eq!(repaired.groups[3].id, shared_gid);
 
-        assert_eq!(repaired.groups[4].name, "F");
-        assert_eq!(repaired.groups[4].members, vec![extra_a, extra_b]);
-        assert_ne!(repaired.groups[4].id.0, n0.0);
+        assert_eq!(repaired.groups[4].name, "E");
+        assert_eq!(repaired.groups[4].members, vec![n6, n7]);
+        assert_ne!(repaired.groups[4].id, shared_gid);
         assert!(repaired.groups[4].id.0 <= MAX_ID);
+
+        assert_eq!(repaired.groups[5].name, "F");
+        assert_eq!(repaired.groups[5].members, vec![extra_a, extra_b]);
+        assert_ne!(repaired.groups[5].id.0, n0.0);
+        assert!(repaired.groups[5].id.0 <= MAX_ID);
 
         assert!(repaired.next_free_id() > repaired.max_id());
         assert!(repaired.repair().is_empty(), "repair must be idempotent");

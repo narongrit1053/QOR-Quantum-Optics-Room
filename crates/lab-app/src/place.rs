@@ -18,7 +18,7 @@ use crate::ui_models::UiModels;
 
 pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>, request: PlaceRequest) {
     let bundle = app.borrow_mut().library.bundle.take();
-    if let (Some(name), DragItem::Part(_)) = (bundle, &request.item) {
+    if let (Some(name), DragItem::Set(_)) = (bundle, &request.item) {
         return place_bundle(ui, app, models, &name, &request);
     }
     let mut toast = None;
@@ -62,6 +62,8 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                 }
                 (nodes[0].id, format!("Add stack of {} parts", nodes.len()), Command::PlaceAssembly { nodes })
             }
+            // Bundles are placed above; a set without its bundle name has nothing to place.
+            DragItem::Set(_) => return,
         }
     };
     controller::execute(ui, app, models, "place", command, label, Some(SelectionTarget::Node(root)), Vec::new());
@@ -77,7 +79,7 @@ fn bundle_place_command(bundle: &lab_file::Bundle, nodes: Vec<Node>, next: u64) 
         // Placed roots on a platform or the room are document chain roots; dropping onto a part
         // parents them under that part, where they cannot form a group.
         let roots: Vec<NodeId> = nodes.iter().filter(|n| !matches!(n.parent, Parent::Node(_))).map(|n| n.id).collect();
-        if roots.len() >= 2 {
+        if !roots.is_empty() {
             let group = Group {
                 id: GroupId(next + nodes.len() as u64),
                 name: group_name.clone(),
@@ -106,13 +108,9 @@ fn place_bundle(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModel
         if nodes.is_empty() {
             return;
         }
+        // Every placed part is selected, so the whole bundle shows as what was added.
         let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
-        let roots: Vec<NodeId> = nodes
-            .iter()
-            .filter(|n| !matches!(n.parent, Parent::Node(p) if ids.contains(&p)))
-            .map(|n| n.id)
-            .collect();
-        (bundle_place_command(bundle, nodes, next), roots, skipped)
+        (bundle_place_command(bundle, nodes, next), ids, skipped)
     };
     let sel = lab_app::multi_select::Sel::from_nodes(&roots);
     controller::execute_sel(ui, app, models, "place", command, format!("Add bundle {name}"), Some(sel), Vec::new());
@@ -215,7 +213,7 @@ mod tests {
         let (placed, _) = crate::clipboard::place_bundle(&plain.nodes, next, Parent::Platform(plat), &Attach::Free, DVec3::ZERO, |_| true);
         assert!(matches!(bundle_place_command(&plain, placed, next), Command::PlaceAssembly { .. }));
 
-        // Grouped bundle with only 1 placed root (second filtered out) stays a single PlaceAssembly.
+        // Grouped bundle with only 1 placed root (second filtered out) still comes back as a group.
         let (placed, _) = crate::clipboard::place_bundle(
             &bundle.nodes,
             next,
@@ -224,7 +222,7 @@ mod tests {
             DVec3::ZERO,
             |n| n.id != bundle.nodes[2].id,
         );
-        assert!(matches!(bundle_place_command(&bundle, placed, next), Command::PlaceAssembly { .. }));
+        assert!(matches!(bundle_place_command(&bundle, placed, next), Command::Batch(_)));
 
         // Grouped bundle dropped onto an existing part cannot group children -> stays PlaceAssembly.
         let (placed, _) = crate::clipboard::place_bundle(

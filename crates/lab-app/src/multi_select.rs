@@ -137,7 +137,7 @@ pub fn range(rows: &[(i32, i32)], prev: &Sel, node: NodeId) -> Sel {
 /// Plain-sentence toast text for a refused `AddGroup` command.
 pub fn group_error_message(error: &CommandError) -> String {
     match error {
-        CommandError::GroupTooSmall => "Select at least two parts to group".into(),
+        CommandError::GroupTooSmall => "Select parts to group".into(),
         CommandError::AlreadyGrouped(_) => "A selected part is already in a group".into(),
         CommandError::GroupCrossPlatform => "Parts on different platforms can't be grouped".into(),
         CommandError::GroupMemberNotRoot(_) => "Only top-level parts or assemblies can be grouped".into(),
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn group_error_messages_are_plain_sentences() {
         let cases = [
-            (CommandError::GroupTooSmall, "Select at least two parts to group"),
+            (CommandError::GroupTooSmall, "Select parts to group"),
             (CommandError::AlreadyGrouped(NodeId(12)), "A selected part is already in a group"),
             (CommandError::GroupCrossPlatform, "Parts on different platforms can't be grouped"),
             (CommandError::GroupMemberNotRoot(NodeId(7)), "Only top-level parts or assemblies can be grouped"),

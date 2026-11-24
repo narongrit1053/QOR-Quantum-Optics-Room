@@ -168,6 +168,8 @@ pub enum ViewportRequest {
     /// POLA-61. Render catalog part `part` offscreen (256×256, transparent background, 3/4 view)
     /// and write a PNG to `path`. Queued; one at a time.
     RenderThumbnail { part: String, path: std::path::PathBuf },
+    /// Like `RenderThumbnail`, for a set of parts; `ThumbnailReady` reports it as `key`.
+    RenderSetThumbnail { key: String, parts: Vec<SetPart>, path: std::path::PathBuf },
     /// POLA-66. Render the main camera (its transform and projection, the document as shown)
     /// offscreen at `width`×`height` (clamped to 16..=8192), opaque background, MSAA 4, and
     /// write a PNG to `path`. In Split mode the 3D pane is exported.
@@ -252,6 +254,18 @@ pub enum DragItem {
     Part(String),
     /// A solved post stack (M2-PLAN POLA-46).
     Stack(StackSpec),
+    /// A saved set of parts (a library bundle), its first part standing where the drop lands.
+    Set(Vec<SetPart>),
+}
+
+/// One part of a set: catalog id, parameter overrides, and its pose relative to the set's first
+/// part (mm, +Z up).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetPart {
+    pub part: String,
+    pub params: lab_core::part::Params,
+    pub position: bevy::math::DVec3,
+    pub rotation: bevy::math::DQuat,
 }
 
 impl DragItem {
@@ -260,6 +274,7 @@ impl DragItem {
         match self {
             DragItem::Part(id) => id,
             DragItem::Stack(s) => s.base.as_deref().unwrap_or(&s.holder),
+            DragItem::Set(parts) => parts.first().map_or("", |p| &p.part),
         }
     }
 }
@@ -385,7 +400,7 @@ pub(crate) enum FrameRequest {
     SetShadows,
     InspectPart(Option<String>),
     InspectMarkers(Vec<lab_core::part::Frame>),
-    RenderThumbnail(String, std::path::PathBuf),
+    RenderThumbnail(String, std::path::PathBuf, Vec<SetPart>),
     ExportImage(std::path::PathBuf, u32, u32),
     SetBeams(bool),
     ClearProbes(Option<usize>),

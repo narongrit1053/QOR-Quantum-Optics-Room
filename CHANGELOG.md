@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.0.12
+
+- **Group a single stack.** Ctrl+G now works when everything you selected is one stack (for example base → post holder → post → mount), and makes it a group folder. Before, it said "Select at least two parts to group".
+- **Save as Bundle saves when you press Enter.** Choosing *Save as Bundle…* from the right-click menu left the name field without focus, so Enter did nothing and no bundle was saved.
+- **Bundles show the whole set.** A bundle's library picture and the preview that follows the mouse while you drag it now show every part, not just the first. A dropped bundle selects all its parts.
+
 ## v0.0.11
 
 - **Select several parts.** Ctrl+click parts in the view or in the left panel to add or remove them; Shift+click in the left panel selects a range. Delete, Lock, Hide, Isolate, Copy, Cut, Duplicate and the arrow keys act on all of them. The inspector shows the first one.

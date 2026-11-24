@@ -68,7 +68,8 @@ pub(crate) fn placement(
     match hit {
         Hit::Node(id, point) => {
             let root = doc.root_platform(id);
-            if let DragItem::Part(_) = item
+            // A set mates its first part, like a single part.
+            if !matches!(item, DragItem::Stack(_))
                 && let Some(found) = mate_on_node(doc, catalog, item, def, id, point) {
                 return Some(found);
             }
@@ -285,14 +286,20 @@ fn update_ghost(
             .clone();
         let root = commands.spawn((Transform::default(), Visibility::Hidden)).id();
         // Every part of the item with its pose relative to the root part.
-        let mut parts = vec![(item.root().to_string(), DVec3::ZERO, DQuat::IDENTITY)];
-        if let DragItem::Stack(spec) = &item {
-            for (id, _, position, rotation) in stack_chain(&catalog.0, spec).unwrap_or_default() {
-                let &(_, p, r) = parts.last().unwrap();
-                parts.push((id, p + r * position, r * rotation));
+        let mut parts = vec![(item.root().to_string(), Default::default(), DVec3::ZERO, DQuat::IDENTITY)];
+        match &item {
+            DragItem::Stack(spec) => {
+                for (id, _, position, rotation) in stack_chain(&catalog.0, spec).unwrap_or_default() {
+                    let &(_, _, p, r) = parts.last().unwrap();
+                    parts.push((id, Default::default(), p + r * position, r * rotation));
+                }
             }
+            DragItem::Set(set) => {
+                parts = set.iter().map(|p| (p.part.clone(), p.params.clone(), p.position, p.rotation)).collect();
+            }
+            DragItem::Part(_) => {}
         }
-        for (id, position, rotation) in parts {
+        for (id, params, position, rotation) in parts {
             let transform = Transform { translation: to_render(position), rotation: rotation_to_render(rotation), ..default() };
             // Imported parts: the GLB, tinted once it has spawned.
             if let Some(Geometry::Mesh { asset }) = catalog.0.get(&id).map(|d| &d.geometry) {
@@ -301,7 +308,7 @@ fn update_ghost(
                 }
                 continue;
             }
-            match part_mesh(&catalog.0, &id, &Default::default()) {
+            match part_mesh(&catalog.0, &id, &params) {
                 Ok(part) => {
                     for (_, mesh) in part_meshes.pieces(&mut meshes, &part) {
                         commands.spawn((
