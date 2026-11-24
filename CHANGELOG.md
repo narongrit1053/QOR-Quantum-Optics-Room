@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.11
 
 - **Select several parts.** Ctrl+click parts in the view or in the left panel to add or remove them; Shift+click in the left panel selects a range. Delete, Lock, Hide, Isolate, Copy, Cut, Duplicate and the arrow keys act on all of them. The inspector shows the first one.
 - **Groups.** Select parts and press Ctrl+G (or right-click → Group) to keep them together. A group shows as a folder in the left panel, and clicking any of its parts in the view selects the whole group; click again to pick just that part. Dragging or nudging moves the group as one rigid block, and one Ctrl+Z puts it back. Ctrl+Shift+G ungroups.
