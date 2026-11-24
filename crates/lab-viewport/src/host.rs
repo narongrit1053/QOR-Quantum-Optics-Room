@@ -26,7 +26,7 @@ use bevy::{
 };
 use lab_core::Document;
 
-use crate::{FrameRequest, Quality, ViewportEvent, ViewportInput, ViewportRequest};
+use crate::{FrameRequest, Quality, SetPart, ViewportEvent, ViewportInput, ViewportRequest};
 
 /// The UI side of a running viewport.
 pub struct ViewportHandle {
@@ -470,7 +470,11 @@ fn run_on_demand(
                 ViewportRequest::HighlightSnap(h) => pending.push(FrameRequest::HighlightSnap(h)),
                 ViewportRequest::DragValue(v) => pending.push(FrameRequest::DragValue(v)),
                 ViewportRequest::RenderThumbnail { part, path } => {
-                    pending.push(FrameRequest::RenderThumbnail(part, path))
+                    let parts = vec![SetPart { part: part.clone(), params: Default::default(), position: Default::default(), rotation: Default::default() }];
+                    pending.push(FrameRequest::RenderThumbnail(part, path, parts))
+                }
+                ViewportRequest::RenderSetThumbnail { key, parts, path } => {
+                    pending.push(FrameRequest::RenderThumbnail(key, path, parts))
                 }
                 ViewportRequest::ExportImage { path, width, height } => {
                     pending.push(FrameRequest::ExportImage(path, width, height))

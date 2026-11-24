@@ -20,8 +20,8 @@ use lab_catalog::Source;
 use lab_core::part::Geometry;
 
 use crate::host::{EventSender, PendingRequests, RedrawState};
-use crate::scene::{MM, PartMeshes, finish_material, part_mesh};
-use crate::{CatalogRes, FrameRequest, ViewportEvent};
+use crate::scene::{MM, PartMeshes, finish_material, part_mesh, rotation_to_render, to_render};
+use crate::{CatalogRes, FrameRequest, SetPart, ViewportEvent};
 
 const SIZE: u32 = 256;
 const LAYER: usize = 7;
@@ -45,17 +45,17 @@ struct InFlight {
     /// Root, camera and light: despawned when done.
     entities: Vec<Entity>,
     image: Handle<Image>,
-    /// False until a GLB's scene has spawned.
-    ready: bool,
-    /// The GLB file, to notice a failed load.
-    glb: Option<Handle<bevy::gltf::Gltf>>,
+    /// GLB scenes not spawned yet; framing waits for 0.
+    loading: usize,
+    /// The GLB files, to notice a failed load.
+    glbs: Vec<Handle<bevy::gltf::Gltf>>,
     frames: u32,
     shot: bool,
 }
 
 #[derive(Resource, Default)]
 struct Thumbs {
-    queue: VecDeque<(String, PathBuf)>,
+    queue: VecDeque<(String, PathBuf, Vec<SetPart>)>,
     current: Option<InFlight>,
 }
 
@@ -90,16 +90,16 @@ fn step(
     capturing: Res<crate::export::Capturing>,
 ) {
     for request in &pending.0 {
-        if let FrameRequest::RenderThumbnail(part, path) = request {
-            thumbs.queue.push_back((part.clone(), path.clone()));
+        if let FrameRequest::RenderThumbnail(part, path, parts) = request {
+            thumbs.queue.push_back((part.clone(), path.clone(), parts.clone()));
         }
     }
     // One offscreen render at a time: wait while an export renders.
     if thumbs.current.is_none()
         && !capturing.0
-        && let Some((part, path)) = thumbs.queue.pop_front()
+        && let Some((part, path, parts)) = thumbs.queue.pop_front()
     {
-        match start(&mut commands, &mut spawner, &part) {
+        match start(&mut commands, &mut spawner, &parts) {
             Ok(job) => thumbs.current = Some(InFlight { part, path, frames: 0, shot: false, ..job }),
             Err(e) => {
                 warn!("no thumbnail for {part}: {e}");
@@ -110,9 +110,9 @@ fn step(
     // Keep the on-demand loop running while thumbnails are pending.
     redraw.keep_alive |= thumbs.current.is_some() || !thumbs.queue.is_empty();
     let Some(job) = thumbs.current.as_mut() else { return };
-    if !job.ready {
+    if job.loading > 0 {
         job.frames += 1;
-        let failed = job.glb.as_ref().is_some_and(|h| spawner.server.load_state(h).is_failed());
+        let failed = job.glbs.iter().any(|h| spawner.server.load_state(h).is_failed());
         if failed || job.frames >= LOAD_TIMEOUT {
             let job = thumbs.current.take().unwrap();
             warn!("no thumbnail for {}: its GLB did not load", job.part);
@@ -162,35 +162,17 @@ fn step(
     }
 }
 
-/// Spawns the part, a camera and a light on [`LAYER`].
-fn start(commands: &mut Commands, s: &mut Spawner, part: &str) -> Result<InFlight, String> {
-    let def = s.catalog.0.get(part).ok_or_else(|| format!("{part} is not in the library"))?;
+/// Spawns the parts, a camera and a light on [`LAYER`].
+fn start(commands: &mut Commands, s: &mut Spawner, parts: &[SetPart]) -> Result<InFlight, String> {
     let layer = RenderLayers::layer(LAYER);
     let root = commands.spawn((Transform::default(), Visibility::default(), layer.clone())).id();
-    let mut ready = true;
-    let mut glb = None;
-    if let Geometry::Mesh { asset } = &def.geometry {
-        let (source, _) = lab_catalog::mesh_path(asset).ok_or_else(|| format!("its mesh file {asset} is missing"))?;
-        let src = match source {
-            Source::User => "user",
-            Source::BuiltIn => "builtin",
-        };
-        let path = format!("{src}://meshes/{}.glb", &asset["blake3:".len()..]);
-        commands.spawn((
-            ChildOf(root),
-            ThumbGlb,
-            WorldAssetRoot(s.server.load(GltfAssetLabel::Scene(0).from_asset(path.clone()))),
-            // Same conversion as glb.rs: part space (mm, +Z up).
-            Transform { rotation: Quat::from_rotation_x(-FRAC_PI_2), scale: Vec3::splat(MM), ..default() },
-            layer.clone(),
-        ));
-        glb = Some(s.server.load(path));
-        ready = false;
-    } else {
-        let mesh = part_mesh(&s.catalog.0, part, &Default::default())?;
-        for (finish, handle) in s.part_meshes.pieces(&mut s.meshes, &mesh) {
-            let material = s.materials.add(finish_material(&finish));
-            commands.spawn((ChildOf(root), Mesh3d(handle), MeshMaterial3d(material), Transform::default(), layer.clone()));
+    let mut glbs = Vec::new();
+    for p in parts {
+        let transform = Transform { translation: to_render(p.position), rotation: rotation_to_render(p.rotation), ..default() };
+        let pivot = commands.spawn((ChildOf(root), transform, Visibility::default(), layer.clone())).id();
+        if let Err(e) = spawn_part(commands, s, pivot, p, &mut glbs) {
+            commands.entity(root).despawn();
+            return Err(e);
         }
     }
     let image = s.images.add(Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8UnormSrgb, None));
@@ -218,11 +200,41 @@ fn start(commands: &mut Commands, s: &mut Spawner, part: &str) -> Result<InFligh
         path: PathBuf::new(),
         entities: vec![root, camera, light],
         image,
-        ready,
-        glb,
+        loading: glbs.len(),
+        glbs,
         frames: 0,
         shot: false,
     })
+}
+
+/// One part of a thumbnail under `pivot`; a GLB's handle goes to `glbs`.
+fn spawn_part(commands: &mut Commands, s: &mut Spawner, pivot: Entity, p: &SetPart, glbs: &mut Vec<Handle<bevy::gltf::Gltf>>) -> Result<(), String> {
+    let layer = RenderLayers::layer(LAYER);
+    let def = s.catalog.0.get(&p.part).ok_or_else(|| format!("{} is not in the library", p.part))?;
+    if let Geometry::Mesh { asset } = &def.geometry {
+        let (source, _) = lab_catalog::mesh_path(asset).ok_or_else(|| format!("its mesh file {asset} is missing"))?;
+        let src = match source {
+            Source::User => "user",
+            Source::BuiltIn => "builtin",
+        };
+        let path = format!("{src}://meshes/{}.glb", &asset["blake3:".len()..]);
+        commands.spawn((
+            ChildOf(pivot),
+            ThumbGlb,
+            WorldAssetRoot(s.server.load(GltfAssetLabel::Scene(0).from_asset(path.clone()))),
+            // Same conversion as glb.rs: part space (mm, +Z up).
+            Transform { rotation: Quat::from_rotation_x(-FRAC_PI_2), scale: Vec3::splat(MM), ..default() },
+            layer.clone(),
+        ));
+        glbs.push(s.server.load(path));
+    } else {
+        let mesh = part_mesh(&s.catalog.0, &p.part, &p.params)?;
+        for (finish, handle) in s.part_meshes.pieces(&mut s.meshes, &mesh) {
+            let material = s.materials.add(finish_material(&finish));
+            commands.spawn((ChildOf(pivot), Mesh3d(handle), MeshMaterial3d(material), Transform::default(), layer.clone()));
+        }
+    }
+    Ok(())
 }
 
 /// Puts a spawned GLB's meshes on the thumbnail layer and starts the countdown.
@@ -240,7 +252,7 @@ fn glb_ready(
         commands.entity(entity).insert(RenderLayers::layer(LAYER));
     }
     if let Some(job) = thumbs.current.as_mut() {
-        job.ready = true;
+        job.loading = job.loading.saturating_sub(1);
         job.frames = 0;
     }
 }

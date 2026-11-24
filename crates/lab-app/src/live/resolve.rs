@@ -722,7 +722,10 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         });
         let r = w.run(WriteRequest::Remove { nodes: vec![a] }).unwrap();
         r.command.apply(&mut w.doc).unwrap();
-        assert!(w.doc.groups.is_empty(), "removing a member of a 2-node group must drop the group");
+        assert_eq!(w.doc.groups[0].members, vec![NodeId(b)], "removing a member must drop it from the group");
+        let r = w.run(WriteRequest::Remove { nodes: vec![b] }).unwrap();
+        r.command.apply(&mut w.doc).unwrap();
+        assert!(w.doc.groups.is_empty(), "removing the last member must drop the group");
     }
 
     #[test]
