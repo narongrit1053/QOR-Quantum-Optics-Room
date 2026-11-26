@@ -4,3 +4,4 @@ pub mod pipe;
 pub mod protocol;
 pub mod read;
 pub mod resolve;
+pub mod tools;

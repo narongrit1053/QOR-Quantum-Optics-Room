@@ -66,6 +66,48 @@ pub enum AppRequest {
     Reload,
 }
 
+impl Request {
+    /// The wire command name. Exhaustive on purpose: a new command must get a name here and a
+    /// row in `live::tools`.
+    pub fn cmd_name(&self) -> &'static str {
+        match self {
+            Self::Read(r) => match r {
+                ReadRequest::Status => "status",
+                ReadRequest::List { .. } => "list",
+                ReadRequest::Platforms => "platforms",
+                ReadRequest::Holes { .. } => "holes",
+                ReadRequest::Part { .. } => "part",
+                ReadRequest::Catalog { .. } => "catalog",
+                ReadRequest::Features { .. } => "features",
+                ReadRequest::Beams => "beams",
+                ReadRequest::Bundles => "bundles",
+                ReadRequest::Snapshot { .. } => "snapshot",
+            },
+            Self::Write(w) => match w {
+                WriteRequest::Place(_) => "place",
+                WriteRequest::Stack(_) => "stack",
+                WriteRequest::PlaceBundle(_) => "place_bundle",
+                WriteRequest::Constrain(_) => "constrain",
+                WriteRequest::Move { .. } => "move",
+                WriteRequest::SetParams { .. } => "set_params",
+                WriteRequest::Rename { .. } => "rename",
+                WriteRequest::Note { .. } => "note",
+                WriteRequest::Remove { .. } => "remove",
+                WriteRequest::Undo => "undo",
+                WriteRequest::Redo => "redo",
+            },
+            Self::App(a) => match a {
+                AppRequest::Book { .. } => "book",
+                AppRequest::BookList => "book_list",
+                AppRequest::BookAdd { .. } => "book_add",
+                AppRequest::BookRemove { .. } => "book_remove",
+                AppRequest::BookImport => "book_import",
+                AppRequest::Reload => "reload",
+            },
+        }
+    }
+}
+
 impl AppRequest {
     /// False for the reads, which are answered even while LabSetup is busy.
     pub fn mutates(&self) -> bool {

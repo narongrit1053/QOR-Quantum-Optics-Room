@@ -298,6 +298,22 @@ fn wait_reply(rx: &Receiver<String>, shared: &Shared) -> Option<String> {
     }
 }
 
+pub const NOT_RUNNING: &str = "LabSetup isn't running, or 'Allow AI agents' is off in Settings.";
+
+/// The pipe to talk to: the given pid's, else the only one running.
+pub fn pick(pid: Option<u32>) -> Result<String, String> {
+    let pipes = find_pipes();
+    match (pid, pipes.as_slice()) {
+        (Some(p), _) => Ok(pipe_name(p)),
+        (None, [(_, n)]) => Ok(n.clone()),
+        (None, []) => Err(NOT_RUNNING.into()),
+        (None, many) => {
+            let list: Vec<String> = many.iter().map(|(p, _)| format!("pid {p}")).collect();
+            Err(format!("several LabSetup windows are running, pick one with --pid:\n{}", list.join("\n")))
+        }
+    }
+}
+
 /// Live-control pipes of the current user, as (pid, full pipe name).
 pub fn find_pipes() -> Vec<(u32, String)> {
     let prefix = format!("labsetup-{}-", user_name());

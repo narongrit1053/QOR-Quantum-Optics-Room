@@ -22,59 +22,6 @@ usage:
   labsetup-cli live     <command> [--pid N] [--doc TOKEN] [--json ARGS] [--arg value ...]
                         (drives the running app; see 'labsetup-cli live --help')";
 
-const LIVE_HELP: &str = r#"labsetup-cli live <command> [--pid N] [--doc TOKEN] [--json ARGS] [--arg-name value ...]
-
-Read `status` first and pass its doc token with --doc on writes. Use `features <node>` before `constrain`. Units are mm and degrees.
-
-Flags become args one-to-one, with - turned into _ (--axis-height 75 sends axis_height: 75). A value that is
-a JSON number, array or object (--position "[10,0,0]", --to '{"node":4}') is sent as one, anything else as a
-string (--to room). String-valued options (part, id, name, text, search, hole, ...) are always sent as text, except
---hole "[col,row]", which goes as an array. --json merges a
-JSON object of args over the flags. Prints the reply line; exit 0 if ok, 1 on an error reply, 2 on usage or
-connection failure. --pid picks the app when several run.
-
-Reads:
-  status                                              live status
-  list       [--platform ID]                          live list --platform 1
-  platforms                                           live platforms
-  holes      --platform ID                            live holes --platform 1
-  part       --id CATALOG_ID                          live part --id thorlabs:KM100
-  catalog    --search TEXT [--limit N]                parts in the library: live catalog --search "post holder" --limit 10
-  features   --node ID                                live features --node 5
-  beams                                               live beams
-  bundles                                             saved library bundles (name, group, parts): live bundles
-  snapshot   [--path FILE] [--width N] [--height N]   live snapshot --path view.png
-
-Writes (each is one undo step, labelled "Agent: ..."):
-  place      --part ID, then one of --platform ID --hole C14 | --on NODE --conn NAME --parent-conn NAME [--slide MM] [--twist DEG]
-             | --position "[x,y,z]" [--rotation "[z,y,x]"]; optional --name TEXT --rotate-z DEG
-             live place --part thorlabs:KM100 --platform 1 --hole C14 --rotate-z 90 --doc TOKEN
-  stack      --platform ID --hole C14 --holder ID --post ID --mount ID [--base ID] [--optic ID] (--axis-height MM | --slide MM) [--rotate-z DEG]
-             live stack --platform 1 --hole C14 --holder H --post P --mount M --axis-height 75 --doc TOKEN
-  place-bundle --name NAME --platform ID --hole C14 [--rotate-z DEG]
-             a saved bundle, its first part on the hole as when dropped, turned about the hole
-             live place-bundle --name "QWP set" --platform 1 --hole C14 --rotate-z 90 --doc TOKEN
-  constrain  --node ID, --to room | {"platform":ID} | {"node":ID}, --constraints [{child,parent,kind?,offset?,angle?,flip?,lock_rotation?}]
-             live constrain --node 5 --json '{"to":{"node":4},"constraints":[{"child":"bottom","parent":"top","kind":"mate"}]}' --doc TOKEN
-  move       --node ID [--position "[x,y,z]"] [--rotation "[z,y,x]"]
-             live move --node 5 --position "[10,0,0]" --doc TOKEN
-  set-params --node ID --params {...}
-             live set-params --node 2 --params '{"beam_wavelength_nm":532}' --doc TOKEN
-  rename     --node ID --name TEXT                    live rename --node 5 --name "Fold mirror" --doc TOKEN
-  note       --node ID --text TEXT                    live note --node 5 --text "Check angle" --doc TOKEN
-  remove     --nodes "[ID,...]"                       live remove --nodes "[5,6]" --doc TOKEN
-  undo                                                live undo
-  redo                                                live redo
-
-Downloadable catalog and reloading (no undo step, no --doc needed; book-add, book-remove, book-import
-and reload are refused as busy while LabSetup is busy, importing or updating the catalog):
-  book       --search TEXT [--limit N]   catalog rows: vendor, part, name, has_step, in_library, listed
-  book-list                              the download list and the Download & import progress
-  book-add   --parts '["PBS122"]'        put parts with a STEP file on the download list
-  book-remove --parts '["PBS122"]'       take parts off the download list
-  book-import                            Download & import the list, as in the Catalog window; poll book-list
-  reload                                 re-read catalog files and the part library, then recompute the beam"#;
-
 #[derive(Debug, PartialEq)]
 enum Cmd {
     Help,
@@ -139,14 +86,7 @@ fn parse_live(rest: &[String]) -> Result<Live, String> {
         }
     }
     args.extend(over.unwrap_or_default());
-    let mut env = serde_json::Map::new();
-    env.insert("v".into(), 1.into());
-    env.insert("cmd".into(), cmd.replace('-', "_").into());
-    env.insert("args".into(), args.into());
-    if let Some(d) = doc {
-        env.insert("doc".into(), d.into());
-    }
-    Ok(Live::Call { pid, line: serde_json::Value::Object(env).to_string() })
+    Ok(Live::Call { pid, line: lab_app::live::tools::request_line(cmd, args, doc.as_deref()) })
 }
 
 fn parse(args: &[String]) -> Result<Cmd, String> {
@@ -234,16 +174,7 @@ fn parent_text(doc: &Document, parent: &Parent) -> String {
 #[cfg(windows)]
 fn run_live(pid: Option<u32>, line: &str) -> Result<u8, String> {
     use lab_app::live::pipe;
-    let pipes = pipe::find_pipes();
-    let name = match (pid, pipes.as_slice()) {
-        (Some(p), _) => pipe::pipe_name(p),
-        (None, [(_, n)]) => n.clone(),
-        (None, []) => return Err("LabSetup isn't running, or 'Allow AI agents' is off in Settings.".into()),
-        (None, many) => {
-            let list: Vec<String> = many.iter().map(|(p, _)| format!("pid {p}")).collect();
-            return Err(format!("several LabSetup windows are running, pick one with --pid:\n{}", list.join("\n")));
-        }
-    };
+    let name = pipe::pick(pid)?;
     let reply = pipe::call(&name, line, std::time::Duration::from_secs(2)).map_err(|e| format!("live: {e}"))?;
     println!("{reply}");
     let ok = serde_json::from_str::<serde_json::Value>(&reply).is_ok_and(|v| v["ok"] == true);
@@ -257,7 +188,7 @@ fn run_live(_: Option<u32>, _: &str) -> Result<u8, String> {
 
 fn run(cmd: Cmd) -> Result<u8, String> {
     match cmd {
-        Cmd::Live(Live::Help) => println!("{LIVE_HELP}"),
+        Cmd::Live(Live::Help) => println!("{}", lab_app::live::tools::help_text()),
         Cmd::Live(Live::Call { pid, line }) => return run_live(pid, &line),
         Cmd::Help => println!("{USAGE}"),
         Cmd::Version => println!("labsetup-cli {}", env!("CARGO_PKG_VERSION")),
