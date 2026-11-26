@@ -25,7 +25,14 @@ over placing part by part. Find parts with labsetup_catalog.\n\
 - Units are mm and degrees; rotations are [z,y,x]. Each write is one undo step the user can undo.\n\
 - Check your work with labsetup_snapshot and labsetup_list.\n\
 - If a call says LabSetup isn't running, ask the user to open LabSetup and turn on \
-'Allow AI agents' in Settings. If several windows run, pass `pid`.";
+'Allow AI agents' in Settings. If several windows run, pass `pid`.\n\
+Rules:\n\
+- Do only what the user asked. Don't move, rename or rearrange parts they didn't mention.\n\
+- Ask the user before removing parts, and never undo the user's own edits; undo only your own steps.\n\
+- Before a change of many parts, say what you will do and wait for a yes.\n\
+- Ask before downloading catalog parts (labsetup_book_add, labsetup_book_import).\n\
+- Never guess catalog ids or node ids: look them up. When a call fails, read its error before trying again.\n\
+- You can't save; the user saves. When done, tell the user what changed.";
 
 fn tool_name(cmd: &str) -> String {
     format!("labsetup_{}", cmd.replace('-', "_"))
@@ -159,6 +166,14 @@ mod tests {
         assert_eq!(r["result"]["serverInfo"]["name"], "labsetup");
         let odd = json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"1999-01-01"}});
         assert_eq!(handle(&odd, &mut ok_send("")).unwrap()["result"]["protocolVersion"], "2025-06-18");
+    }
+
+    #[test]
+    fn instructions_carry_the_agent_rules() {
+        for rule in ["Rules:", "only what the user asked", "Ask the user before removing", "never undo the user's own", "before downloading", "Never guess catalog ids", "tell the user what changed"] {
+            assert!(INSTRUCTIONS.contains(rule), "missing: {rule}");
+        }
+        assert!(INSTRUCTIONS.len() < 2000, "instructions are sent at every connect; keep them short");
     }
 
     #[test]
