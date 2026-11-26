@@ -71,6 +71,7 @@ pub fn known_agents(home: &Path, appdata: &Path) -> Vec<Agent> {
     let gemini = home.join(".gemini");
     vec![
         a("Claude Code", home.join(".claude"), home.join(".claude.json"), Format::McpServers),
+        a("Claude desktop app", appdata.join("Claude"), appdata.join("Claude").join("claude_desktop_config.json"), Format::McpServers),
         a("Codex CLI", home.join(".codex"), home.join(".codex").join("config.toml"), Format::CodexToml),
         a("Gemini CLI", gemini.clone(), gemini.join("settings.json"), Format::McpServers),
         a("Antigravity", gemini.join("antigravity"), gemini.join("config").join("mcp_config.json"), Format::McpServers),
@@ -464,7 +465,7 @@ mod tests {
     #[test]
     fn known_agents_include_the_main_clis() {
         let names: Vec<_> = known_agents(Path::new(r"C:\Users\u"), Path::new(r"C:\Users\u\AppData\Roaming")).iter().map(|a| a.name).collect();
-        for n in ["Claude Code", "Codex CLI", "Gemini CLI", "Antigravity", "Cursor", "GitHub Copilot CLI", "VS Code"] {
+        for n in ["Claude Code", "Claude desktop app", "Codex CLI", "Gemini CLI", "Antigravity", "Cursor", "GitHub Copilot CLI", "VS Code"] {
             assert!(names.contains(&n), "{n}");
         }
     }
