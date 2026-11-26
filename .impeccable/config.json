@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "ui variable text\",\"segoe ui\",system-ui,sans-serif",
+        "createdAt": "2026-11-26T06:35:58.850Z",
+        "reason": "Claude: pre-existing style.css:36 fallback stack, documented in DESIGN.md typography (Geist, Segoe UI Variable Text, Segoe UI, system-ui)"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "code\",consolas,monospace",
+        "createdAt": "2026-11-26T06:35:58.980Z",
+        "reason": "Claude: pre-existing style.css:48 code font fallback (Cascadia Code, Consolas), unchanged by this edit"
+      }
+    ]
+  }
+}
