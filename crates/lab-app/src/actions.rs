@@ -54,6 +54,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("view.theme.dark", "Dark Theme", "View", "appearance colour color", ""),
     a("view.theme.light", "Light Theme", "View", "appearance colour color", ""),
     a("view.theme.contrast", "High Contrast Theme", "View", "appearance accessibility colour color", ""),
+    a("agents.connect", "Connect AI Agents", "File", "ai agent mcp claude codex gemini cursor copilot antigravity connect", ""),
     a("app.settings", "Settings…", "File", "preferences options graphics gpu quality anti-aliasing msaa shadows", "Ctrl+,"),
     a("help.shortcuts", "Keyboard Shortcuts", "View", "keys help cheat sheet", "?"),
     a("help.changelog", "What's New", "Help", "changelog release notes version history", ""),

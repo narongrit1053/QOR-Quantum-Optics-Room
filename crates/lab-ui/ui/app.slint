@@ -429,6 +429,7 @@ export component AppWindow inherits Window {
     in property <int> settings-gpu;
     in property <[string]> settings-gpus;
     in property <bool> settings-allow-agents;
+    in property <string> settings-agents-result;
     in property <string> app-version;
     callback settings-apply(int, int, int, int, bool);
     // "" ok, else error text (the sheet stays open).
@@ -1820,6 +1821,7 @@ export component AppWindow inherits Window {
             gpu: root.settings-gpu;
             gpus: root.settings-gpus;
             allow-agents: root.settings-allow-agents;
+            agents-result: root.settings-agents-result;
             in-use: root.gpu;
             version: root.app-version;
             update-version: root.update-version;

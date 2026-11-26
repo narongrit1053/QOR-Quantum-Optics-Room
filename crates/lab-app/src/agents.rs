@@ -279,6 +279,19 @@ pub fn status(exe: &Path, agents: &[Agent]) -> Vec<(&'static str, String)> {
         .collect()
 }
 
+/// The Settings result text: one line per agent found, then the switch hint when it is off.
+pub fn summary(results: &[(&str, Outcome)], allow_agents: bool) -> String {
+    let mut lines: Vec<String> =
+        results.iter().filter(|(_, o)| *o != Outcome::NotFound).map(|(n, o)| format!("{n}: {o}")).collect();
+    if lines.is_empty() {
+        lines.push("No coding-agent CLI found on this PC. Run 'labsetup-cli agents install' to see a config snippet for others.".into());
+    }
+    if !allow_agents {
+        lines.push("Agents can connect once 'Allow AI agents' is On.".into());
+    }
+    lines.join("\n")
+}
+
 /// The `mcpServers` block for agents LabSetup doesn't know.
 pub fn snippet(exe: &Path) -> String {
     let mut m = Map::new();
@@ -445,6 +458,15 @@ mod tests {
         let s = status(Path::new(EXE), &agents);
         assert_eq!(s[0], ("Cursor", format!("stale: {OTHER}")));
         assert_eq!(s[1], ("Gone", "not found".to_string()));
+    }
+
+    #[test]
+    fn summary_lists_found_agents_and_the_switch_hint() {
+        let r = vec![("Claude Code", Outcome::Added), ("Cursor", Outcome::NotFound), ("Codex CLI", Outcome::Failed("x".into()))];
+        assert_eq!(summary(&r, true), "Claude Code: added\nCodex CLI: failed: x");
+        assert_eq!(summary(&r, false), "Claude Code: added\nCodex CLI: failed: x\nAgents can connect once 'Allow AI agents' is On.");
+        let none = vec![("Cursor", Outcome::NotFound)];
+        assert!(summary(&none, true).starts_with("No coding-agent CLI found on this PC."));
     }
 
     #[test]
