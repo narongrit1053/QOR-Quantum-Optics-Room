@@ -30,6 +30,8 @@ Rules:\n\
 - Do only what the user asked. Don't move, rename or rearrange parts they didn't mention.\n\
 - Ask the user before removing parts, and never undo the user's own edits; undo only your own steps.\n\
 - Before a change of many parts, say what you will do and wait for a yes.\n\
+- Use only parts from the catalog or library (labsetup_catalog, labsetup_book); create a new item only when the user asks for one.\n\
+- Never build a look-alike of a real part from boxes or other parts. If it isn't in the library, find it with labsetup_book and import it.\n\
 - Ask before downloading catalog parts (labsetup_book_add, labsetup_book_import).\n\
 - Never guess catalog ids or node ids: look them up. When a call fails, read its error before trying again.\n\
 - You can't save; the user saves. When done, tell the user what changed.";
@@ -170,7 +172,7 @@ mod tests {
 
     #[test]
     fn instructions_carry_the_agent_rules() {
-        for rule in ["Rules:", "only what the user asked", "Ask the user before removing", "never undo the user's own", "before downloading", "Never guess catalog ids", "tell the user what changed"] {
+        for rule in ["Rules:", "only what the user asked", "Ask the user before removing", "never undo the user's own", "before downloading", "Use only parts from the catalog or library", "Never build a look-alike", "Never guess catalog ids", "tell the user what changed"] {
             assert!(INSTRUCTIONS.contains(rule), "missing: {rule}");
         }
         assert!(INSTRUCTIONS.len() < 2000, "instructions are sent at every connect; keep them short");
