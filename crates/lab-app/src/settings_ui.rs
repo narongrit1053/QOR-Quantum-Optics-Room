@@ -67,8 +67,8 @@ pub fn connect_agents(ui: &AppWindow, app: &AppState) {
     let cli = std::env::current_exe().map(|e| e.with_file_name("labsetup-cli.exe"));
     let text = match cli {
         Ok(cli) if cli.is_file() => {
-            let (home, appdata) = lab_app::agents::home_dirs();
-            let results = lab_app::agents::install(&cli, &lab_app::agents::known_agents(&home, &appdata));
+            let (home, appdata, local) = lab_app::agents::home_dirs();
+            let results = lab_app::agents::install(&cli, &lab_app::agents::known_agents(&home, &appdata, &local));
             lab_app::agents::summary(&results, app.settings.allow_agents)
         }
         _ => "labsetup-cli.exe wasn't found next to LabSetup; reinstall LabSetup.".into(),

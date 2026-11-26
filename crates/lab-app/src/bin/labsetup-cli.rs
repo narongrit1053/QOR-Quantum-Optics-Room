@@ -203,8 +203,8 @@ fn run_live(pid: Option<u32>, line: &str) -> Result<u8, String> {
 fn run_agents(cmd: AgentsCmd) -> Result<u8, String> {
     use lab_app::agents::{home_dirs, install, known_agents, snippet, status, uninstall, Outcome};
     let exe = std::env::current_exe().map_err(|e| format!("can't find this program's path: {e}"))?;
-    let (home, appdata) = home_dirs();
-    let agents = known_agents(&home, &appdata);
+    let (home, appdata, local) = home_dirs();
+    let agents = known_agents(&home, &appdata, &local);
     let results = match cmd {
         AgentsCmd::Status => {
             for (name, s) in status(&exe, &agents) {
