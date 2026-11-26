@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.0.13
 
 - **Any AI agent can find LabSetup.** Click *Connect AI agents…* in Settings, and coding agents on this PC (Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot CLI, Windsurf, Devin, VS Code) get LabSetup as a tool. Open the agent in any folder, ask it to build your setup, and it already knows how; no need to point it at `labsetup-cli` or explain the commands. Agents can also see a picture of the view.
+- **Agents follow your lead.** Every agent gets the same rules when it connects: do only what you asked, use only catalog and library parts (importing a real part, never building a look-alike), ask before removing parts or downloading, and never undo your own edits.
+- **Agents can place your saved bundles.** An agent can list your library bundles and drop one onto a hole in one step, instead of rebuilding the assembly part by part.
 - **`labsetup-cli` works from any folder.** The installer adds LabSetup to `PATH`.
 
 ## v0.0.12
