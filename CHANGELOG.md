@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.0.14
+
+- **Agents build like a real lab.** Two more rules for every agent: attach every part it places with constraints (no parts left floating), and lay setups out as the real experiment is built, with one beam height and real spacings, asking you when it doesn't know.
+- **A LabSetup slash command.** Agents that show MCP prompts as slash commands get one for LabSetup (in Claude Code: `/mcp__labsetup__labsetup`, with what you want built). It starts the agent on your open project with the working rules.
+- **More agent apps.** *Connect AI agents…* now also adds LabSetup to the Claude desktop app (not only Claude Code), Trae, opencode and Hermes Agent. Restart an agent after connecting so it loads LabSetup.
+
 ## v0.0.13
 
 - **Any AI agent can find LabSetup.** Click *Connect AI agents…* in Settings, and coding agents on this PC (Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot CLI, Windsurf, Devin, VS Code) get LabSetup as a tool. Open the agent in any folder, ask it to build your setup, and it already knows how; no need to point it at `labsetup-cli` or explain the commands. Agents can also see a picture of the view.

@@ -21,8 +21,12 @@ pub enum Format {
     Copilot,
     /// `{"servers": {"labsetup": {"type": "stdio", "command": exe, "args": ["mcp"]}}}`
     VsCode,
+    /// `{"mcp": {"servers": {"labsetup": {"type": "local", "command": [exe, "mcp"]}}}}` (opencode 2.x)
+    Opencode,
     /// `[mcp_servers.labsetup]` with `command` and `args`
     CodexToml,
+    /// `mcp_servers:` mapping in Hermes Agent's `config.yaml`
+    HermesYaml,
 }
 
 pub struct Agent {
@@ -58,19 +62,20 @@ impl fmt::Display for Outcome {
     }
 }
 
-/// `%USERPROFILE%` and `%APPDATA%`.
-pub fn home_dirs() -> (PathBuf, PathBuf) {
+/// `%USERPROFILE%`, `%APPDATA%` and `%LOCALAPPDATA%`.
+pub fn home_dirs() -> (PathBuf, PathBuf, PathBuf) {
     let get = |k: &str| std::env::var_os(k).map(PathBuf::from).unwrap_or_default();
-    (get("USERPROFILE"), get("APPDATA"))
+    (get("USERPROFILE"), get("APPDATA"), get("LOCALAPPDATA"))
 }
 
-/// The agent CLIs LabSetup registers with (paths checked against each tool's docs, 2026-11).
-/// opencode is left out: its docs disagree on the entry shape and it rejects unknown config.
-pub fn known_agents(home: &Path, appdata: &Path) -> Vec<Agent> {
+/// The agent CLIs and apps LabSetup registers with (paths checked against each tool's docs or
+/// its own files, 2026-11).
+pub fn known_agents(home: &Path, appdata: &Path, local: &Path) -> Vec<Agent> {
     let a = |name, detect: PathBuf, config: PathBuf, format| Agent { name, detect, config, format };
     let gemini = home.join(".gemini");
     vec![
         a("Claude Code", home.join(".claude"), home.join(".claude.json"), Format::McpServers),
+        a("Claude desktop app", appdata.join("Claude"), appdata.join("Claude").join("claude_desktop_config.json"), Format::McpServers),
         a("Codex CLI", home.join(".codex"), home.join(".codex").join("config.toml"), Format::CodexToml),
         a("Gemini CLI", gemini.clone(), gemini.join("settings.json"), Format::McpServers),
         a("Antigravity", gemini.join("antigravity"), gemini.join("config").join("mcp_config.json"), Format::McpServers),
@@ -79,14 +84,18 @@ pub fn known_agents(home: &Path, appdata: &Path) -> Vec<Agent> {
         a("Windsurf", home.join(".codeium").join("windsurf"), home.join(".codeium").join("windsurf").join("mcp_config.json"), Format::McpServers),
         a("Devin CLI", home.join(".config").join("devin"), home.join(".config").join("devin").join("mcp_config.json"), Format::McpServers),
         a("VS Code", appdata.join("Code").join("User"), appdata.join("Code").join("User").join("mcp.json"), Format::VsCode),
+        a("Trae", appdata.join("Trae").join("User"), appdata.join("Trae").join("User").join("mcp.json"), Format::McpServers),
+        a("opencode", home.join(".config").join("opencode"), home.join(".config").join("opencode").join("opencode.json"), Format::Opencode),
+        a("Hermes Agent", local.join("hermes"), local.join("hermes").join("config.yaml"), Format::HermesYaml),
     ]
 }
 
-fn section(format: Format) -> &'static str {
+/// Where the servers map sits in a JSON config.
+fn section(format: Format) -> &'static [&'static str] {
     match format {
-        Format::VsCode => "servers",
-        Format::CodexToml => "mcp_servers",
-        _ => "mcpServers",
+        Format::VsCode => &["servers"],
+        Format::Opencode => &["mcp", "servers"],
+        _ => &["mcpServers"],
     }
 }
 
@@ -94,6 +103,7 @@ fn entry(format: Format, exe: &str) -> Value {
     match format {
         Format::VsCode | Format::Cursor => json!({"type": "stdio", "command": exe, "args": ["mcp"]}),
         Format::Copilot => json!({"type": "local", "command": exe, "args": ["mcp"], "tools": ["*"]}),
+        Format::Opencode => json!({"type": "local", "command": [exe, "mcp"]}),
         _ => json!({"command": exe, "args": ["mcp"]}),
     }
 }
@@ -114,22 +124,125 @@ fn parse_toml(text: &str) -> Result<toml::Table, String> {
 }
 
 fn check(text: &str, format: Format) -> Result<(), String> {
-    if format == Format::CodexToml {
-        parse_toml(text).map(drop)
-    } else {
-        parse_json(text).map(drop)
+    match format {
+        Format::CodexToml => parse_toml(text).map(drop),
+        // shortcut: YAML isn't parsed (no YAML crate); edit_yaml refuses forms it doesn't know, add a YAML crate if users hit that
+        Format::HermesYaml => Ok(()),
+        _ => parse_json(text).map(drop),
     }
 }
 
 /// The registered command path, if any.
 pub fn current(text: &str, format: Format) -> Option<String> {
     let text = strip_bom(text);
-    if format == Format::CodexToml {
-        let t = parse_toml(text).ok()?;
-        return t.get(section(format))?.get(NAME)?.get("command")?.as_str().map(String::from);
+    match format {
+        Format::CodexToml => {
+            let t = parse_toml(text).ok()?;
+            return t.get("mcp_servers")?.get(NAME)?.get("command")?.as_str().map(String::from);
+        }
+        Format::HermesYaml => return yaml_current(text),
+        _ => {}
     }
-    let m = parse_json(text).ok()?;
-    m.get(section(format))?.get(NAME)?.get("command")?.as_str().map(String::from)
+    let m = Value::Object(parse_json(text).ok()?);
+    let c = section(format).iter().try_fold(&m, |v, k| v.get(k))?.get(NAME)?.get("command")?;
+    c.as_str().or_else(|| c.get(0).and_then(Value::as_str)).map(String::from)
+}
+
+/// The servers map inside a JSON config, created when missing.
+fn servers_mut(m: &mut Map<String, Value>, format: Format) -> Result<&mut Map<String, Value>, String> {
+    let mut cur = m;
+    for k in section(format) {
+        cur = cur
+            .entry(*k)
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or_else(|| format!("its \"{k}\" is not an object, left unchanged"))?;
+    }
+    Ok(cur)
+}
+
+fn indent(l: &str) -> usize {
+    l.len() - l.trim_start().len()
+}
+
+/// Lines of the top-level `mcp_servers:` mapping: its key line up to the next top-level key.
+fn yaml_section(lines: &[&str]) -> Option<(usize, usize)> {
+    let s = lines.iter().position(|l| l.starts_with("mcp_servers:"))?;
+    let e = lines[s + 1..]
+        .iter()
+        .position(|l| !l.trim().is_empty() && indent(l) == 0 && !l.starts_with('#'))
+        .map_or(lines.len(), |i| s + 1 + i);
+    Some((s, e))
+}
+
+/// Indent of the section's server keys, if it has any.
+fn yaml_child_indent(lines: &[&str], s: usize, e: usize) -> Option<usize> {
+    lines[s + 1..e].iter().find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).map(|l| indent(l))
+}
+
+/// Our `labsetup:` entry inside the section (start, end, indent), without trailing blank lines.
+fn yaml_child(lines: &[&str], s: usize, e: usize) -> Option<(usize, usize, usize)> {
+    let ci = yaml_child_indent(lines, s, e)?;
+    let c = (s + 1..e).find(|&i| indent(lines[i]) == ci && lines[i].trim() == "labsetup:")?;
+    let mut end = (c + 1..e).find(|&i| !lines[i].trim().is_empty() && indent(lines[i]) <= ci).unwrap_or(e);
+    while end > c + 1 && lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+    Some((c, end, ci))
+}
+
+fn yaml_current(text: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let (s, e) = yaml_section(&lines)?;
+    let (c, end, _) = yaml_child(&lines, s, e)?;
+    let v = lines[c + 1..end].iter().find_map(|l| l.trim().strip_prefix("command:"))?.trim();
+    Some(if let Some(x) = v.strip_prefix('\'').and_then(|x| x.strip_suffix('\'')) {
+        x.replace("''", "'")
+    } else if let Some(x) = v.strip_prefix('"').and_then(|x| x.strip_suffix('"')) {
+        x.replace("\\\\", "\\")
+    } else {
+        v.to_owned()
+    })
+}
+
+fn yaml_entry(exe: &str, ci: usize) -> Vec<String> {
+    let (pad, inner) = (" ".repeat(ci), " ".repeat(ci * 2));
+    vec![
+        format!("{pad}labsetup:"),
+        format!("{inner}command: '{}'", exe.replace('\'', "''")),
+        format!("{inner}args: [mcp]"),
+    ]
+}
+
+/// A text edit of the `mcp_servers:` mapping that keeps the rest of the file as it is; `None`
+/// removes our entry.
+fn edit_yaml(text: &str, exe: Option<&str>) -> Result<String, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some((s, e)) = yaml_section(&lines) else {
+        return Ok(match exe {
+            None => text.to_owned(),
+            Some(x) => {
+                let sep = if text.is_empty() || text.ends_with('\n') { "" } else { "\n" };
+                format!("{text}{sep}mcp_servers:\n{}\n", yaml_entry(x, 2).join("\n"))
+            }
+        });
+    };
+    let head = lines[s]["mcp_servers:".len()..].trim();
+    if !matches!(head, "" | "{}" | "~" | "null") && !head.starts_with('#') {
+        return Err("its mcp_servers is written in a form LabSetup can't edit; add the entry by hand".into());
+    }
+    let mut v: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    match (yaml_child(&lines, s, e), exe) {
+        (Some((c, end, ci)), Some(x)) => drop(v.splice(c..end, yaml_entry(x, ci))),
+        (Some((c, end, _)), None) => drop(v.drain(c..end)),
+        (None, Some(x)) => {
+            v[s] = "mcp_servers:".into();
+            let ci = yaml_child_indent(&lines, s, e).unwrap_or(2);
+            drop(v.splice(s + 1..s + 1, yaml_entry(x, ci)));
+        }
+        (None, None) => {}
+    }
+    Ok(v.join("\n") + "\n")
 }
 
 // shortcut: key order not kept (serde_json without preserve_order); switch to an order-keeping writer if users complain
@@ -190,15 +303,17 @@ pub fn merge(text: &str, format: Format, exe: &Path) -> Result<(String, Outcome)
         Some(c) => Outcome::Updated { was: c },
         None => Outcome::Added,
     };
-    let new = if format == Format::CodexToml {
-        let block = format!("{TOML_HEADER}\ncommand = {}\nargs = [\"mcp\"]\n", toml::Value::String(exe.to_string()));
-        edit_toml(text, Some(&block))?
-    } else {
-        let mut m = parse_json(text)?;
-        let s = m.entry(section(format)).or_insert_with(|| json!({}));
-        let s = s.as_object_mut().ok_or_else(|| format!("its \"{}\" is not an object, left unchanged", section(format)))?;
-        s.insert(NAME.into(), entry(format, &exe));
-        json_text(m)
+    let new = match format {
+        Format::CodexToml => {
+            let block = format!("{TOML_HEADER}\ncommand = {}\nargs = [\"mcp\"]\n", toml::Value::String(exe.to_string()));
+            edit_toml(text, Some(&block))?
+        }
+        Format::HermesYaml => edit_yaml(text, Some(&exe))?,
+        _ => {
+            let mut m = parse_json(text)?;
+            servers_mut(&mut m, format)?.insert(NAME.into(), entry(format, &exe));
+            json_text(m)
+        }
     };
     Ok((new, outcome))
 }
@@ -210,14 +325,14 @@ pub fn remove(text: &str, format: Format) -> Result<(String, Outcome), String> {
     if current(text, format).is_none() {
         return Ok((text.to_owned(), Outcome::NotSet));
     }
-    let new = if format == Format::CodexToml {
-        edit_toml(text, None)?
-    } else {
-        let mut m = parse_json(text)?;
-        if let Some(s) = m.get_mut(section(format)).and_then(Value::as_object_mut) {
-            s.remove(NAME);
+    let new = match format {
+        Format::CodexToml => edit_toml(text, None)?,
+        Format::HermesYaml => edit_yaml(text, None)?,
+        _ => {
+            let mut m = parse_json(text)?;
+            servers_mut(&mut m, format)?.remove(NAME);
+            json_text(m)
         }
-        json_text(m)
     };
     Ok((new, Outcome::Removed))
 }
@@ -419,6 +534,52 @@ mod tests {
     }
 
     #[test]
+    fn opencode_uses_the_nested_servers_shape_it_writes_itself() {
+        let before = r#"{"$schema":"https://opencode.ai/config.json","provider":{"x":1}}"#;
+        let (t, out) = merge(before, Format::Opencode, Path::new(EXE)).unwrap();
+        assert_eq!(out, Outcome::Added);
+        assert_eq!(j(&t)["mcp"]["servers"]["labsetup"], json!({"type":"local","command":[EXE,"mcp"]}));
+        assert_eq!(j(&t)["provider"]["x"], 1);
+        assert_eq!(current(&t, Format::Opencode).as_deref(), Some(EXE));
+        let (t, out) = remove(&t, Format::Opencode).unwrap();
+        assert_eq!(out, Outcome::Removed);
+        assert!(j(&t)["mcp"]["servers"].get("labsetup").is_none());
+    }
+
+    #[test]
+    fn hermes_yaml_append_insert_update_remove() {
+        let exe = r"C:\Program Files\Lab's\labsetup-cli.exe";
+        let before = "model:\n  default: x\ntimezone: Asia/Bangkok\n";
+        let (t, out) = merge(before, Format::HermesYaml, Path::new(exe)).unwrap();
+        assert_eq!(out, Outcome::Added);
+        assert!(t.starts_with(before), "{t}");
+        assert!(t.ends_with("mcp_servers:\n  labsetup:\n    command: 'C:\\Program Files\\Lab''s\\labsetup-cli.exe'\n    args: [mcp]\n"), "{t}");
+        assert_eq!(current(&t, Format::HermesYaml).as_deref(), Some(exe));
+
+        // Existing section with its own indent and another server: insert as a sibling, keep the rest.
+        let with_other = "a: 1\nmcp_servers:\n    fusion:\n        command: python\n        args: [x.py]\nb: 2\n";
+        let (t, out) = merge(with_other, Format::HermesYaml, Path::new(OTHER)).unwrap();
+        assert_eq!(out, Outcome::Added);
+        assert!(t.contains("mcp_servers:\n    labsetup:\n        command: 'D:\\old\\labsetup-cli.exe'\n        args: [mcp]\n    fusion:\n        command: python\n"), "{t}");
+        assert!(t.ends_with("b: 2\n"), "{t}");
+
+        let (t2, out) = merge(&t, Format::HermesYaml, Path::new(EXE)).unwrap();
+        assert_eq!(out, Outcome::Updated { was: OTHER.into() });
+        assert_eq!(current(&t2, Format::HermesYaml).as_deref(), Some(EXE));
+        assert_eq!(t2.matches("labsetup:").count(), 1);
+        let (_, again) = merge(&t2, Format::HermesYaml, Path::new(EXE)).unwrap();
+        assert_eq!(again, Outcome::AlreadySet);
+
+        let (t3, out) = remove(&t2, Format::HermesYaml).unwrap();
+        assert_eq!(out, Outcome::Removed);
+        assert_eq!(t3, with_other);
+
+        let (t4, _) = merge("mcp_servers: {}\n", Format::HermesYaml, Path::new(EXE)).unwrap();
+        assert_eq!(current(&t4, Format::HermesYaml).as_deref(), Some(EXE));
+        assert!(merge("mcp_servers: {fusion: {command: x}}\n", Format::HermesYaml, Path::new(EXE)).is_err());
+    }
+
+    #[test]
     fn json_with_bom_is_read() {
         let (t, out) = merge("\u{feff}{\"mcpServers\":{\"other\":{\"command\":\"x\"}}}", Format::McpServers, Path::new(EXE)).unwrap();
         assert_eq!(out, Outcome::Added);
@@ -463,8 +624,8 @@ mod tests {
 
     #[test]
     fn known_agents_include_the_main_clis() {
-        let names: Vec<_> = known_agents(Path::new(r"C:\Users\u"), Path::new(r"C:\Users\u\AppData\Roaming")).iter().map(|a| a.name).collect();
-        for n in ["Claude Code", "Codex CLI", "Gemini CLI", "Antigravity", "Cursor", "GitHub Copilot CLI", "VS Code"] {
+        let names: Vec<_> = known_agents(Path::new(r"C:\Users\u"), Path::new(r"C:\Users\u\AppData\Roaming"), Path::new(r"C:\Users\u\AppData\Local")).iter().map(|a| a.name).collect();
+        for n in ["Claude Code", "Claude desktop app", "Codex CLI", "Gemini CLI", "Antigravity", "Cursor", "GitHub Copilot CLI", "VS Code", "Trae", "opencode", "Hermes Agent"] {
             assert!(names.contains(&n), "{n}");
         }
     }

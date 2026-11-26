@@ -32,6 +32,8 @@ Rules:\n\
 - Before a change of many parts, say what you will do and wait for a yes.\n\
 - Use only parts from the catalog or library (labsetup_catalog, labsetup_book); create a new item only when the user asks for one.\n\
 - Never build a look-alike of a real part from boxes or other parts. If it isn't in the library, find it with labsetup_book and import it.\n\
+- Always attach what you place with constraints: holes, labsetup_stack, labsetup_place_bundle, or labsetup_constrain (read labsetup_features first). Never leave a part at a free position.\n\
+- Build setups as they are in a real experiment: the real optical layout and beam path, one beam height, real spacings, mounts and posts. If you don't know how the experiment is built, ask.\n\
 - Ask before downloading catalog parts (labsetup_book_add, labsetup_book_import).\n\
 - Never guess catalog ids or node ids: look them up. When a call fails, read its error before trying again.\n\
 - You can't save; the user saves. When done, tell the user what changed.";
@@ -54,6 +56,28 @@ fn tool_list() -> Value {
         })
         .collect();
     json!({ "tools": list })
+}
+
+/// The one MCP prompt; clients show it as a slash command (Claude Code: /mcp__labsetup__labsetup).
+fn prompt_list() -> Value {
+    json!({"prompts": [{
+        "name": "labsetup",
+        "title": "LabSetup",
+        "description": "Build or change the setup open in LabSetup",
+        "arguments": [{"name": "request", "description": "What to build or change", "required": false}],
+    }]})
+}
+
+/// Repeats the instructions in the message, for clients that don't pass the server's on.
+fn get_prompt(params: &Value) -> Result<Value, (i64, String)> {
+    let name = params["name"].as_str().unwrap_or_default();
+    if name != "labsetup" {
+        return Err((-32602, format!("unknown prompt '{name}'")));
+    }
+    let request = params["arguments"]["request"].as_str().map(str::trim).filter(|r| !r.is_empty());
+    let task = request.map_or("Then ask me what to build or change.".to_string(), |r| format!("Then do this: {r}"));
+    let body = format!("Work on the project open in LabSetup with the labsetup_* tools. Start with labsetup_status. {task}\n\n{INSTRUCTIONS}");
+    Ok(json!({"description": "LabSetup", "messages": [{"role": "user", "content": text(&body)}]}))
 }
 
 fn text(s: &str) -> Value {
@@ -93,7 +117,7 @@ pub fn handle(msg: &Value, send: &mut SendFn) -> Option<Value> {
             let version = VERSIONS.iter().find(|v| **v == asked).unwrap_or(&VERSIONS[0]);
             Ok(json!({
                 "protocolVersion": version,
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {}, "prompts": {}},
                 "serverInfo": {"name": "labsetup", "version": env!("CARGO_PKG_VERSION")},
                 "instructions": INSTRUCTIONS,
             }))
@@ -101,6 +125,8 @@ pub fn handle(msg: &Value, send: &mut SendFn) -> Option<Value> {
         "ping" => Ok(json!({})),
         "tools/list" => Ok(tool_list()),
         "tools/call" => call_tool(&msg["params"], send),
+        "prompts/list" => Ok(prompt_list()),
+        "prompts/get" => get_prompt(&msg["params"]),
         other => Err((-32601, format!("method not found: {other}"))),
     };
     Some(match result {
@@ -172,10 +198,39 @@ mod tests {
 
     #[test]
     fn instructions_carry_the_agent_rules() {
-        for rule in ["Rules:", "only what the user asked", "Ask the user before removing", "never undo the user's own", "before downloading", "Use only parts from the catalog or library", "Never build a look-alike", "Never guess catalog ids", "tell the user what changed"] {
+        for rule in ["Rules:", "only what the user asked", "Ask the user before removing", "never undo the user's own", "before downloading", "Use only parts from the catalog or library", "Never build a look-alike", "Always attach what you place with constraints", "Build setups as they are in a real experiment", "Never guess catalog ids", "tell the user what changed"] {
             assert!(INSTRUCTIONS.contains(rule), "missing: {rule}");
         }
-        assert!(INSTRUCTIONS.len() < 2000, "instructions are sent at every connect; keep them short");
+        assert!(INSTRUCTIONS.len() < 2500, "instructions are sent at every connect; keep them short");
+    }
+
+    #[test]
+    fn labsetup_prompt_is_listed_as_a_slash_command() {
+        let init = handle(&json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}), &mut ok_send("")).unwrap();
+        assert!(init["result"]["capabilities"]["prompts"].is_object());
+        let r = handle(&json!({"jsonrpc":"2.0","id":1,"method":"prompts/list"}), &mut ok_send("")).unwrap();
+        let p = &r["result"]["prompts"][0];
+        assert_eq!(p["name"], "labsetup");
+        assert_eq!(p["arguments"][0]["name"], "request");
+        assert_eq!(p["arguments"][0]["required"], false);
+    }
+
+    #[test]
+    fn labsetup_prompt_carries_the_request_and_the_rules() {
+        let get = |args: Value| {
+            let msg = json!({"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"labsetup","arguments":args}});
+            handle(&msg, &mut ok_send("")).unwrap()
+        };
+        let r = get(json!({"request": "add a PBS at C14"}));
+        let text = r["result"]["messages"][0]["content"]["text"].as_str().unwrap().to_string();
+        assert_eq!(r["result"]["messages"][0]["role"], "user");
+        assert!(text.contains("add a PBS at C14"), "{text}");
+        assert!(text.contains("labsetup_status"), "{text}");
+        assert!(text.contains(INSTRUCTIONS), "{text}");
+        let empty = get(json!({}));
+        assert!(empty["result"]["messages"][0]["content"]["text"].as_str().unwrap().contains("ask me what to build or change"));
+        let bad = handle(&json!({"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"nope"}}), &mut ok_send("")).unwrap();
+        assert_eq!(bad["error"]["code"], -32602);
     }
 
     #[test]
