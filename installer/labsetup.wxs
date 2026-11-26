@@ -25,6 +25,8 @@
         <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="LabSetup"
                   WorkingDirectory="INSTALLFOLDER" Advertise="no" Icon="AppIcon" />
       </File>
+      <!-- labsetup-cli on PATH, so agents and shells find it from any folder. -->
+      <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
       <ProgId Id="LabSetup.Project" Description="LabSetup project" Advertise="no" Icon="LabSetupExe" IconIndex="0">
         <Extension Id="labsetup" ContentType="application/x-labsetup">
           <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" TargetFile="LabSetupExe" />

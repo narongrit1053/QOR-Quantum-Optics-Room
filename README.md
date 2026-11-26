@@ -75,9 +75,16 @@ labsetup-cli list     <project> [--json]   one line per part: id, name, vendor/p
 labsetup-cli bom      <project> [-o out.csv]   same CSV the app's BOM export writes; stdout when no -o
 labsetup-cli validate <project>            load and report problems; exit 0 ok, 1 problems, 2 usage/IO error
 labsetup-cli catalog  [--search <text>]    built-in + user catalog parts (vendor, part number, name)
+labsetup-cli live     <command> ...         drive the running app (see `labsetup-cli live --help`)
+labsetup-cli mcp                            MCP server on stdin/stdout: the live commands as tools for AI agents
+labsetup-cli agents   install|uninstall|status   register `labsetup-cli mcp` with the coding-agent CLIs on this PC
 ```
 
-Errors go to stderr with a non-zero exit code.
+Errors go to stderr with a non-zero exit code. The installer puts the LabSetup folder on `PATH`.
+
+### Connecting an AI agent
+
+Turn on *Allow AI agents to control LabSetup* in Settings and click *Connect AI agents…* (or run `labsetup-cli agents install`). This adds a `labsetup` MCP server to the user config of each agent CLI it finds: Claude Code, Codex CLI, Gemini CLI, Antigravity, Cursor, GitHub Copilot CLI, Windsurf, Devin CLI and VS Code. Only that entry is touched, and each file is backed up once to `<file>.labsetup-bak`. For other MCP-capable agents, `labsetup-cli agents install` prints a JSON snippet to paste into their config. Then any agent, opened in any folder, can see and edit the project open in LabSetup; each step is one undo entry.
 
 ## Packaging
 
