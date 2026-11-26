@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.14
 
 - **Agents build like a real lab.** Two more rules for every agent: attach every part it places with constraints (no parts left floating), and lay setups out as the real experiment is built, with one beam height and real spacings, asking you when it doesn't know.
 - **A LabSetup slash command.** Agents that show MCP prompts as slash commands get one for LabSetup (in Claude Code: `/mcp__labsetup__labsetup`, with what you want built). It starts the agent on your open project with the working rules.
