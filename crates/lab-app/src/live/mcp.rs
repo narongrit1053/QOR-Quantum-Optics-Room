@@ -56,6 +56,28 @@ fn tool_list() -> Value {
     json!({ "tools": list })
 }
 
+/// The one MCP prompt; clients show it as a slash command (Claude Code: /mcp__labsetup__labsetup).
+fn prompt_list() -> Value {
+    json!({"prompts": [{
+        "name": "labsetup",
+        "title": "LabSetup",
+        "description": "Build or change the setup open in LabSetup",
+        "arguments": [{"name": "request", "description": "What to build or change", "required": false}],
+    }]})
+}
+
+/// Repeats the instructions in the message, for clients that don't pass the server's on.
+fn get_prompt(params: &Value) -> Result<Value, (i64, String)> {
+    let name = params["name"].as_str().unwrap_or_default();
+    if name != "labsetup" {
+        return Err((-32602, format!("unknown prompt '{name}'")));
+    }
+    let request = params["arguments"]["request"].as_str().map(str::trim).filter(|r| !r.is_empty());
+    let task = request.map_or("Then ask me what to build or change.".to_string(), |r| format!("Then do this: {r}"));
+    let body = format!("Work on the project open in LabSetup with the labsetup_* tools. Start with labsetup_status. {task}\n\n{INSTRUCTIONS}");
+    Ok(json!({"description": "LabSetup", "messages": [{"role": "user", "content": text(&body)}]}))
+}
+
 fn text(s: &str) -> Value {
     json!({"type": "text", "text": s})
 }
@@ -93,7 +115,7 @@ pub fn handle(msg: &Value, send: &mut SendFn) -> Option<Value> {
             let version = VERSIONS.iter().find(|v| **v == asked).unwrap_or(&VERSIONS[0]);
             Ok(json!({
                 "protocolVersion": version,
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {}, "prompts": {}},
                 "serverInfo": {"name": "labsetup", "version": env!("CARGO_PKG_VERSION")},
                 "instructions": INSTRUCTIONS,
             }))
@@ -101,6 +123,8 @@ pub fn handle(msg: &Value, send: &mut SendFn) -> Option<Value> {
         "ping" => Ok(json!({})),
         "tools/list" => Ok(tool_list()),
         "tools/call" => call_tool(&msg["params"], send),
+        "prompts/list" => Ok(prompt_list()),
+        "prompts/get" => get_prompt(&msg["params"]),
         other => Err((-32601, format!("method not found: {other}"))),
     };
     Some(match result {
@@ -176,6 +200,35 @@ mod tests {
             assert!(INSTRUCTIONS.contains(rule), "missing: {rule}");
         }
         assert!(INSTRUCTIONS.len() < 2000, "instructions are sent at every connect; keep them short");
+    }
+
+    #[test]
+    fn labsetup_prompt_is_listed_as_a_slash_command() {
+        let init = handle(&json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}), &mut ok_send("")).unwrap();
+        assert!(init["result"]["capabilities"]["prompts"].is_object());
+        let r = handle(&json!({"jsonrpc":"2.0","id":1,"method":"prompts/list"}), &mut ok_send("")).unwrap();
+        let p = &r["result"]["prompts"][0];
+        assert_eq!(p["name"], "labsetup");
+        assert_eq!(p["arguments"][0]["name"], "request");
+        assert_eq!(p["arguments"][0]["required"], false);
+    }
+
+    #[test]
+    fn labsetup_prompt_carries_the_request_and_the_rules() {
+        let get = |args: Value| {
+            let msg = json!({"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"labsetup","arguments":args}});
+            handle(&msg, &mut ok_send("")).unwrap()
+        };
+        let r = get(json!({"request": "add a PBS at C14"}));
+        let text = r["result"]["messages"][0]["content"]["text"].as_str().unwrap().to_string();
+        assert_eq!(r["result"]["messages"][0]["role"], "user");
+        assert!(text.contains("add a PBS at C14"), "{text}");
+        assert!(text.contains("labsetup_status"), "{text}");
+        assert!(text.contains(INSTRUCTIONS), "{text}");
+        let empty = get(json!({}));
+        assert!(empty["result"]["messages"][0]["content"]["text"].as_str().unwrap().contains("ask me what to build or change"));
+        let bad = handle(&json!({"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"nope"}}), &mut ok_send("")).unwrap();
+        assert_eq!(bad["error"]["code"], -32602);
     }
 
     #[test]

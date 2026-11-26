@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A LabSetup slash command.** Agents that show MCP prompts as slash commands get one for LabSetup (in Claude Code: `/mcp__labsetup__labsetup`, with what you want built). It starts the agent on your open project with the working rules.
 - **Claude desktop app too.** *Connect AI agents…* now also adds LabSetup to the Claude desktop app, not only Claude Code. Restart an agent after connecting so it loads LabSetup.
 
 ## v0.0.13
