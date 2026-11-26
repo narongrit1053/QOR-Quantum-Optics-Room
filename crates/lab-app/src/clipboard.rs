@@ -89,57 +89,7 @@ pub fn bundle_nodes(mut nodes: Vec<Node>) -> Vec<Node> {
     nodes
 }
 
-/// POLA-203: bundle nodes placed where the anchor was dropped (`parent`, `attach`, `position`):
-/// fresh ids from `next`, parents remapped, roots re-parented to `parent`; hole roots shift by the
-/// drop hole, all roots by the drop point. Nodes `keep` rejects are skipped with their descendants.
-/// Returns the nodes and the number skipped.
-pub fn place_bundle(
-    nodes: &[Node],
-    mut next: u64,
-    parent: Parent,
-    attach: &Attach,
-    position: lab_core::glam::DVec3,
-    keep: impl Fn(&Node) -> bool,
-) -> (Vec<Node>, usize) {
-    let mut map: HashMap<NodeId, NodeId> = HashMap::new();
-    let (mut out, mut skipped) = (Vec::new(), 0);
-    for (k, n) in nodes.iter().enumerate() {
-        let mut node = n.clone();
-        let inner = matches!(n.parent, Parent::Node(p) if nodes.iter().any(|m| m.id == p));
-        if inner {
-            let Parent::Node(p) = n.parent else { unreachable!() };
-            match map.get(&p) {
-                Some(&np) => node.parent = Parent::Node(np),
-                None => {
-                    skipped += 1;
-                    continue;
-                }
-            }
-        } else {
-            node.parent = parent;
-            node.position += position;
-            match (&mut node.attach, attach) {
-                (Attach::Hole { hole }, Attach::Hole { hole: at }) => {
-                    hole.i += at.i;
-                    hole.j += at.j;
-                }
-                // The anchor dropped onto a part: it takes the drop's own mate.
-                (a, at @ (Attach::Mate { .. } | Attach::Constrained { .. } | Attach::Joint(_))) if k == 0 => *a = at.clone(),
-                (a @ Attach::Hole { .. }, _) => *a = Attach::Free,
-                _ => {}
-            }
-        }
-        if !keep(n) {
-            skipped += 1;
-            continue;
-        }
-        node.id = NodeId(next);
-        map.insert(n.id, node.id);
-        next += 1;
-        out.push(node);
-    }
-    (out, skipped)
-}
+pub use lab_app::bundle::place_bundle;
 
 #[cfg(test)]
 mod tests {

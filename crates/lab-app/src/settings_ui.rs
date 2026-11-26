@@ -57,7 +57,26 @@ pub fn open(ui: &AppWindow, app: &AppState) {
     ui.set_settings_gpu(gpu);
     ui.set_settings_allow_agents(s.allow_agents);
     ui.set_app_version(env!("CARGO_PKG_VERSION").into());
+    ui.set_settings_agents_result("".into());
     ui.set_settings_open(true);
+}
+
+/// Registers the sibling `labsetup-cli.exe` with every agent CLI found and shows the result in
+/// Settings (opening it when run from the command palette).
+pub fn connect_agents(ui: &AppWindow, app: &AppState) {
+    let cli = std::env::current_exe().map(|e| e.with_file_name("labsetup-cli.exe"));
+    let text = match cli {
+        Ok(cli) if cli.is_file() => {
+            let (home, appdata) = lab_app::agents::home_dirs();
+            let results = lab_app::agents::install(&cli, &lab_app::agents::known_agents(&home, &appdata));
+            lab_app::agents::summary(&results, app.settings.allow_agents)
+        }
+        _ => "labsetup-cli.exe wasn't found next to LabSetup; reinstall LabSetup.".into(),
+    };
+    if !ui.get_settings_open() {
+        open(ui, app);
+    }
+    ui.set_settings_agents_result(text.into());
 }
 
 pub fn connect(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &Rc<UiModels>) {

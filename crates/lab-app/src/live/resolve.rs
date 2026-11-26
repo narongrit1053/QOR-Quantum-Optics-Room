@@ -13,7 +13,7 @@ use lab_optics::PortKind;
 
 use super::features::{FeatureLookup, node_features, platform_features};
 use super::protocol::{
-    ConstrainArgs, ErrorCode, HoleArg, LiveError, ParentArg, PlaceArgs, PlaceAt, StackArgs, WriteRequest,
+    ConstrainArgs, ErrorCode, HoleArg, LiveError, ParentArg, PlaceArgs, PlaceAt, PlaceBundleArgs, StackArgs, WriteRequest,
 };
 
 pub struct Ctx<'a> {
@@ -22,6 +22,8 @@ pub struct Ctx<'a> {
     pub holes: &'a dyn Fn(PlatformId) -> Option<Rc<HoleSet>>,
     pub features: &'a dyn FeatureLookup,
     pub trace: &'a lab_optics::Trace,
+    /// The library's saved bundles (assemblies), by name.
+    pub bundles: &'a [lab_file::Bundle],
 }
 
 pub struct Resolved {
@@ -181,6 +183,7 @@ pub fn resolve(req: &WriteRequest, ctx: &Ctx) -> Result<Resolved, LiveError> {
             return Err(err(ErrorCode::BadRequest, "undo and redo are handled by the app"));
         }
         WriteRequest::Stack(args) => stack(args, ctx)?,
+        WriteRequest::PlaceBundle(args) => place_bundle(args, ctx)?,
         WriteRequest::Constrain(args) => constrain(args, ctx)?,
     };
     command.clone().apply(&mut ctx.doc.clone()).map_err(|e| err(ErrorCode::Refused, e.to_string()))?;
@@ -454,6 +457,38 @@ fn stack(args: &StackArgs, ctx: &Ctx) -> Result<(Command, String, Option<Selecti
     Ok((Command::PlaceAssembly { nodes }, format!("Agent: stack {mount} at {at}"), Some(SelectionTarget::Node(NodeId(first)))))
 }
 
+fn place_bundle(args: &PlaceBundleArgs, ctx: &Ctx) -> Result<(Command, String, Option<SelectionTarget>), LiveError> {
+    let bundle = ctx.bundles.iter().find(|b| b.name == args.name).ok_or_else(|| {
+        let names: Vec<&str> = ctx.bundles.iter().map(|b| b.name.as_str()).collect();
+        err(ErrorCode::NotFound, format!("no bundle named {:?}; saved bundles: {}", args.name, names.join(", ")))
+    })?;
+    // As a drop: the anchor (first node) takes the hole's seat pose; the rest follow it.
+    let anchor = bundle.nodes.first().ok_or_else(|| err(ErrorCode::Refused, format!("bundle {} is empty", bundle.name)))?;
+    let anchor_def = ctx
+        .catalog
+        .get(&anchor.part)
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("bundle {} starts with {}, which is not in the catalog", bundle.name, anchor.part)))?;
+    let (parent, attach, position, _) = hole_pose(ctx, anchor_def, args.platform, &args.hole, None)?;
+    let keep = |n: &Node| !matches!(n.shape, Shape::Part) || ctx.catalog.get(&n.part).is_some();
+    let next = ctx.doc.next_free_id();
+    let (mut nodes, skipped) = crate::bundle::place_bundle(&bundle.nodes, next, parent, &attach, position, keep);
+    if skipped > 0 {
+        // A half-placed assembly is worse than none: name what is missing instead.
+        let missing: Vec<&str> = bundle.nodes.iter().filter(|n| !keep(n)).map(|n| n.part.as_str()).collect();
+        return Err(err(ErrorCode::NotFound, format!("bundle {} uses parts not in the catalog: {}", bundle.name, missing.join(", "))));
+    }
+    if let Some(angle) = args.rotate_z.filter(|a| a.abs() > 1e-9) {
+        crate::bundle::turn_roots(&mut nodes, position, angle);
+    }
+    let at = match &args.hole {
+        HoleArg::Label(s) => s.clone(),
+        HoleArg::Index([i, j]) => format!("[{i},{j}]"),
+    };
+    let first = nodes[0].id;
+    let command = crate::bundle::bundle_place_command(bundle, nodes, next);
+    Ok((command, format!("Agent: place bundle {} at {at}", bundle.name), Some(SelectionTarget::Node(first))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +598,7 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         catalog: Catalog,
         table: PlatformId,
         holes: Rc<HoleSet>,
+        bundles: Vec<lab_file::Bundle>,
     }
 
     impl World {
@@ -570,7 +606,7 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
             let doc = lab_core::sample::demo_document();
             let table = doc.platforms[0].id;
             let holes = Rc::new(lab_core::compute_holes(&doc.platforms[0]).unwrap());
-            World { doc, catalog: catalog(), table, holes }
+            World { doc, catalog: catalog(), table, holes, bundles: Vec::new() }
         }
         fn run(&self, req: WriteRequest) -> Result<Resolved, LiveError> {
             self.run_with(req, &NoFeatures)
@@ -578,7 +614,7 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         fn run_with(&self, req: WriteRequest, features: &dyn FeatureLookup) -> Result<Resolved, LiveError> {
             let holes = |_: PlatformId| Some(self.holes.clone());
             let trace = lab_optics::Trace::default();
-            resolve(&req, &Ctx { doc: &self.doc, catalog: &self.catalog, holes: &holes, features, trace: &trace })
+            resolve(&req, &Ctx { doc: &self.doc, catalog: &self.catalog, holes: &holes, features, trace: &trace, bundles: &self.bundles })
         }
         fn free_id(&self) -> u64 {
             self.doc.next_free_id()
@@ -760,6 +796,75 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         Command::AddNode { node: laser, index: None }.apply(&mut w.doc).unwrap();
         assert!(w.run(WriteRequest::SetParams { node: id, params: params("beam_wavelength_nm") }).is_ok());
         assert!(w.run(WriteRequest::SetParams { node: id, params: params("length") }).is_ok());
+    }
+
+    /// A holder with a post on it, and a second root (a mount) 25 mm along +X of the holder.
+    fn pair_bundle(w: &World) -> lab_file::Bundle {
+        let part = |part: &str, id: u64, parent: Parent, at: DVec3| {
+            new_part_node(&w.catalog, part, id, parent, Attach::Free, at, DQuat::IDENTITY).unwrap()
+        };
+        lab_file::Bundle {
+            name: "Pair".into(),
+            nodes: vec![
+                part("test:holder", 7, Parent::Platform(w.table), DVec3::ZERO),
+                part("test:post", 8, Parent::Node(NodeId(7)), DVec3::new(0.0, 0.0, 10.0)),
+                part("test:mount", 9, Parent::Platform(w.table), DVec3::new(25.0, 0.0, 0.0)),
+            ],
+            group: None,
+        }
+    }
+
+    fn bundle_args(w: &World, name: &str, rotate_z: Option<f64>) -> WriteRequest {
+        WriteRequest::PlaceBundle(PlaceBundleArgs { name: name.into(), platform: w.table.0, hole: HoleArg::Label("C14".into()), rotate_z })
+    }
+
+    #[test]
+    fn place_bundle_puts_the_anchor_on_the_hole_with_fresh_ids() {
+        let mut w = World::new();
+        w.bundles = vec![pair_bundle(&w)];
+        let r = w.run(bundle_args(&w, "Pair", None)).unwrap();
+        let Command::PlaceAssembly { nodes } = &r.command else { panic!("{:?}", r.command) };
+        let first = w.free_id();
+        assert_eq!(nodes.iter().map(|n| n.id.0).collect::<Vec<_>>(), [first, first + 1, first + 2]);
+        assert_eq!(nodes[1].parent, Parent::Node(NodeId(first)), "child follows its remapped parent");
+        assert_eq!(nodes[1].position, DVec3::new(0.0, 0.0, 10.0), "child pose stays parent-relative");
+        // The anchor lands where a single holder placed on C14 would.
+        let single = w.run(WriteRequest::Place(PlaceArgs {
+            part: "test:holder".into(),
+            at: PlaceAt::Hole { platform: w.table.0, hole: HoleArg::Label("C14".into()) },
+            name: None,
+            rotate_z: None,
+        }));
+        let Command::AddNode { node, .. } = single.unwrap().command else { panic!() };
+        assert!((nodes[0].position - node.position).length() < 1e-9);
+        assert!((nodes[2].position - node.position - DVec3::new(25.0, 0.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn place_bundle_turns_roots_about_the_hole() {
+        let mut w = World::new();
+        w.bundles = vec![pair_bundle(&w)];
+        let Command::PlaceAssembly { nodes } = w.run(bundle_args(&w, "Pair", Some(90.0))).unwrap().command else { panic!() };
+        let pivot = nodes[0].position;
+        assert!((nodes[2].position - pivot - DVec3::new(0.0, 25.0, 0.0)).length() < 1e-9, "{:?}", nodes[2].position - pivot);
+        let turned = nodes[0].rotation * DVec3::X;
+        assert!((turned - DVec3::Y).length() < 1e-9, "anchor turned 90 deg: {turned:?}");
+        assert_eq!(nodes[1].position, DVec3::new(0.0, 0.0, 10.0), "children are not turned twice");
+    }
+
+    #[test]
+    fn place_bundle_refuses_unknown_names_and_missing_parts() {
+        let mut w = World::new();
+        let mut broken = pair_bundle(&w);
+        broken.name = "Broken".into();
+        broken.nodes[2].part = "nope:gone".into();
+        w.bundles = vec![pair_bundle(&w), broken];
+        let e = w.run(bundle_args(&w, "Nope", None)).err().unwrap();
+        assert_eq!(e.code, ErrorCode::NotFound);
+        assert!(e.message.contains("Pair"), "lists saved bundles: {}", e.message);
+        let e = w.run(bundle_args(&w, "Broken", None)).err().unwrap();
+        assert_eq!(e.code, ErrorCode::NotFound);
+        assert!(e.message.contains("nope:gone"), "{}", e.message);
     }
 
     fn stack_args(axis_height: Option<f64>, slide: Option<f64>) -> StackArgs {
@@ -979,7 +1084,7 @@ frame = { origin = [0, 0, 50], z = [0, 0, 1], x = [1, 0, 0] }
         let (w, _, post) = holder_and_post();
         let no_grid = |_: PlatformId| None;
         let trace = lab_optics::Trace::default();
-        let ctx = Ctx { doc: &w.doc, catalog: &w.catalog, holes: &no_grid, features: &Plane, trace: &trace };
+        let ctx = Ctx { doc: &w.doc, catalog: &w.catalog, holes: &no_grid, features: &Plane, trace: &trace, bundles: &[] };
         let to = || ParentArg::Platform(w.table.0);
         assert!(resolve(&constrain_req(post, to(), "f1", "top", Some(ConstraintKind::Flush)), &ctx).is_ok());
         let e = resolve(&constrain_req(post, to(), "f1", "hole:C14", None), &ctx).err().unwrap();

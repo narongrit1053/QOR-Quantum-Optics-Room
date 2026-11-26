@@ -6,8 +6,9 @@ use std::rc::Rc;
 
 use lab_core::part::{Frame, ParamValue};
 use lab_catalog::Catalog;
+use lab_app::bundle::bundle_place_command;
 use lab_app::live::resolve::new_part_node;
-use lab_core::{Attach, Command, Group, GroupId, Node, NodeId, Parent, SelectionTarget, Shape};
+use lab_core::{Attach, Command, Node, NodeId, Parent, SelectionTarget, Shape};
 use lab_ui::AppWindow;
 use lab_core::glam::{DQuat, DVec3};
 use lab_viewport::{DragItem, PlaceRequest, stack_chain};
@@ -70,28 +71,6 @@ pub fn on_place_requested(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
     if let Some(text) = toast {
         controller::show_toast(ui, &app.borrow(), &text, false);
     }
-}
-
-/// Builds the command for placing a bundle: `PlaceAssembly`, wrapped in a `Batch` with `AddGroup`
-/// when the bundle carries a group name and at least two document chain roots were placed.
-fn bundle_place_command(bundle: &lab_file::Bundle, nodes: Vec<Node>, next: u64) -> Command {
-    if let Some(group_name) = &bundle.group {
-        // Placed roots on a platform or the room are document chain roots; dropping onto a part
-        // parents them under that part, where they cannot form a group.
-        let roots: Vec<NodeId> = nodes.iter().filter(|n| !matches!(n.parent, Parent::Node(_))).map(|n| n.id).collect();
-        if !roots.is_empty() {
-            let group = Group {
-                id: GroupId(next + nodes.len() as u64),
-                name: group_name.clone(),
-                members: roots,
-            };
-            return Command::Batch(vec![
-                Command::PlaceAssembly { nodes },
-                Command::AddGroup { group, index: None },
-            ]);
-        }
-    }
-    Command::PlaceAssembly { nodes }
 }
 
 /// POLA-203: a library bundle dropped where its ghost (anchor) part would go: one `PlaceAssembly`
@@ -161,7 +140,7 @@ fn riser_for(catalog: &Catalog, part: &str, lift: f64, head: &Node) -> Option<No
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lab_core::History;
+    use lab_core::{GroupId, History};
     use lab_file::Bundle;
 
     #[test]

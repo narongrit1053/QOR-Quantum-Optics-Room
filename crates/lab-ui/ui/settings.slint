@@ -18,6 +18,7 @@ export component SettingsSheet inherits Rectangle {
     in property <int> gpu;       // 0 Auto, 1 High performance, 2 Power saving, 3+ adapters
     in property <[string]> gpus;
     in property <bool> allow-agents;
+    in property <string> agents-result;
     // "<adapter> · <backend> · …" from the viewport's Ready event.
     in property <string> in-use;
     in property <string> version;
@@ -137,6 +138,15 @@ export component SettingsSheet inherits Rectangle {
                     selected(i) => { ag = i == 1; }
                 }
                 Label { text: "Agents on this PC can read and edit the open project through labsetup-cli."; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: start;
+                    PillButton {
+                        label: "Connect AI agents…";
+                        enabled: root.open;
+                        clicked => { root.action("agents.connect"); }
+                    }
+                }
+                if root.agents-result != "": Label { text: root.agents-result; wrap: word-wrap; }
                 Text { text: "Updates"; color: Theme.text; font-size: Theme.font-body; font-weight: 700; }
                 HorizontalLayout {
                     spacing: 8px;

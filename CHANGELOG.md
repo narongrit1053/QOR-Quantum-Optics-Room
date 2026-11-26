@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Any AI agent can find LabSetup.** Click *Connect AI agents…* in Settings, and coding agents on this PC (Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot CLI, Windsurf, Devin, VS Code) get LabSetup as a tool. Open the agent in any folder, ask it to build your setup, and it already knows how; no need to point it at `labsetup-cli` or explain the commands. Agents can also see a picture of the view.
+- **`labsetup-cli` works from any folder.** The installer adds LabSetup to `PATH`.
+
 ## v0.0.12
 
 - **Group a single stack.** Ctrl+G now works when everything you selected is one stack (for example base → post holder → post → mount), and makes it a group folder. Before, it said "Select at least two parts to group".

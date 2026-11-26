@@ -33,6 +33,7 @@ pub enum ReadRequest {
     Catalog { search: String, limit: Option<usize> },
     Features { node: u64 },
     Beams,
+    Bundles,
     Snapshot { path: Option<PathBuf>, width: Option<u32>, height: Option<u32> },
 }
 
@@ -41,6 +42,7 @@ pub enum ReadRequest {
 pub enum WriteRequest {
     Place(PlaceArgs),
     Stack(StackArgs),
+    PlaceBundle(PlaceBundleArgs),
     Constrain(ConstrainArgs),
     Move { node: u64, position: Option<[f64; 3]>, rotation: Option<[f64; 3]> },
     SetParams { node: u64, params: Map<String, Value> },
@@ -62,6 +64,48 @@ pub enum AppRequest {
     BookRemove { parts: Vec<String> },
     BookImport,
     Reload,
+}
+
+impl Request {
+    /// The wire command name. Exhaustive on purpose: a new command must get a name here and a
+    /// row in `live::tools`.
+    pub fn cmd_name(&self) -> &'static str {
+        match self {
+            Self::Read(r) => match r {
+                ReadRequest::Status => "status",
+                ReadRequest::List { .. } => "list",
+                ReadRequest::Platforms => "platforms",
+                ReadRequest::Holes { .. } => "holes",
+                ReadRequest::Part { .. } => "part",
+                ReadRequest::Catalog { .. } => "catalog",
+                ReadRequest::Features { .. } => "features",
+                ReadRequest::Beams => "beams",
+                ReadRequest::Bundles => "bundles",
+                ReadRequest::Snapshot { .. } => "snapshot",
+            },
+            Self::Write(w) => match w {
+                WriteRequest::Place(_) => "place",
+                WriteRequest::Stack(_) => "stack",
+                WriteRequest::PlaceBundle(_) => "place_bundle",
+                WriteRequest::Constrain(_) => "constrain",
+                WriteRequest::Move { .. } => "move",
+                WriteRequest::SetParams { .. } => "set_params",
+                WriteRequest::Rename { .. } => "rename",
+                WriteRequest::Note { .. } => "note",
+                WriteRequest::Remove { .. } => "remove",
+                WriteRequest::Undo => "undo",
+                WriteRequest::Redo => "redo",
+            },
+            Self::App(a) => match a {
+                AppRequest::Book { .. } => "book",
+                AppRequest::BookList => "book_list",
+                AppRequest::BookAdd { .. } => "book_add",
+                AppRequest::BookRemove { .. } => "book_remove",
+                AppRequest::BookImport => "book_import",
+                AppRequest::Reload => "reload",
+            },
+        }
+    }
 }
 
 impl AppRequest {
@@ -116,6 +160,15 @@ pub struct StackArgs {
     pub optic: Option<String>,
     pub axis_height: Option<f64>,
     pub slide: Option<f64>,
+    pub rotate_z: Option<f64>,
+}
+
+/// A saved library bundle with its anchor on a platform hole, turned about the hole by `rotate_z`.
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct PlaceBundleArgs {
+    pub name: String,
+    pub platform: u64,
+    pub hole: HoleArg,
     pub rotate_z: Option<f64>,
 }
 

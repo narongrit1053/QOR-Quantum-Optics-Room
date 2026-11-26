@@ -356,7 +356,7 @@ impl FeatureLookup for Features {
 
 fn with_ctx<R>(a: &AppState, f: impl FnOnce(&Ctx) -> R) -> R {
     let holes = |id| a.session.doc.platform(id).map(|p| a.holes_for(p));
-    f(&Ctx { doc: &a.session.doc, catalog: &a.catalog, holes: &holes, features: &Features, trace: &a.beams })
+    f(&Ctx { doc: &a.session.doc, catalog: &a.catalog, holes: &holes, features: &Features, trace: &a.beams, bundles: &a.settings.bundles })
 }
 
 fn snapshot(app: &Rc<RefCell<AppState>>, path: Option<PathBuf>, width: Option<u32>, height: Option<u32>, reply: Sender<String>) {

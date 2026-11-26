@@ -644,6 +644,7 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
         "catalog.open" => crate::catalog_book::open(ui, &app.borrow()),
         id if id.starts_with("open.url:") => crate::catalog_book::open_url(&id["open.url:".len()..]),
         "help.changelog" => crate::update::show_whats_new(ui),
+        "agents.connect" => crate::settings_ui::connect_agents(ui, &app.borrow()),
         "app.check_updates" => crate::update::check_now(ui, app, true),
         "app.auto_updates" => {
             let on = crate::update::toggle_auto(app);

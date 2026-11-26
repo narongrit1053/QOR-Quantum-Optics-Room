@@ -146,6 +146,15 @@ pub fn read(req: &ReadRequest, ctx: &Ctx, status: &StatusInfo) -> Result<Value, 
                 })
                 .collect(),
         ),
+        ReadRequest::Bundles => Value::Array(
+            ctx.bundles
+                .iter()
+                .map(|b| {
+                    let parts: Vec<&str> = b.nodes.iter().map(|n| n.part.as_str()).collect();
+                    json!({"name": b.name, "group": b.group, "anchor": parts.first(), "parts": parts})
+                })
+                .collect(),
+        ),
         ReadRequest::Snapshot { .. } => return Err(err(ErrorCode::BadRequest, "snapshot is handled by the app")),
     })
 }
@@ -186,7 +195,7 @@ mod tests {
         }
         fn read(&self, req: ReadRequest) -> Result<Value, LiveError> {
             let holes = |_: PlatformId| Some(self.holes.clone());
-            let ctx = Ctx { doc: &self.doc, catalog: &self.catalog, holes: &holes, features: &NoFeatures, trace: &self.trace };
+            let ctx = Ctx { doc: &self.doc, catalog: &self.catalog, holes: &holes, features: &NoFeatures, trace: &self.trace, bundles: &[] };
             read(&req, &ctx, &status())
         }
         fn table(&self) -> u64 {
