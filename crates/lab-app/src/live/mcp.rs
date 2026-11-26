@@ -41,7 +41,7 @@ fn tool_list() -> Value {
             if t.group == Group::Write {
                 props.insert("doc".into(), json!({"type": "string", "description": "doc token from labsetup_status"}));
             }
-            json!({"name": tool_name(t.cmd), "description": format!("{}\nExample: {}", t.summary, t.example), "inputSchema": schema})
+            json!({"name": tool_name(t.cmd), "description": format!("{}\nExample arguments: {}", t.summary, (t.example_args)()), "inputSchema": schema})
         })
         .collect();
     json!({ "tools": list })
@@ -170,11 +170,19 @@ mod tests {
         let place = get("labsetup_place");
         assert!(place["inputSchema"]["properties"]["doc"].is_object());
         assert!(place["inputSchema"]["properties"]["pid"].is_object());
-        assert!(place["description"].as_str().unwrap().contains("Example: live place"));
         let status = get("labsetup_status");
         assert!(status["inputSchema"]["properties"]["pid"].is_object());
         assert!(status["inputSchema"]["properties"].get("doc").is_none());
         assert!(list.iter().any(|t| t["name"] == "labsetup_place_bundle"));
+    }
+
+    #[test]
+    fn descriptions_show_json_args_not_cli_flags() {
+        let r = handle(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}), &mut ok_send("")).unwrap();
+        let place = r["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "labsetup_place").unwrap().clone();
+        let d = place["description"].as_str().unwrap();
+        assert!(d.contains(r#"Example arguments: {"#), "{d}");
+        assert!(!d.contains("--"), "{d}");
     }
 
     #[test]

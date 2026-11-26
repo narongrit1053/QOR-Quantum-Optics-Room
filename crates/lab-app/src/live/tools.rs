@@ -50,10 +50,10 @@ fn empty() -> Value {
 }
 // shortcut: no oneOf/anyOf in schemas (some agent CLIs reject them); alternatives are told in descriptions.
 fn hole() -> Value {
-    text("hole label like C14 (a [col,row] array also works)")
+    text("hole label like C14")
 }
 fn parent() -> Value {
-    json!({"description": "\"room\", {\"platform\": ID} or {\"node\": ID}"})
+    json!({"type": "object", "description": "{\"platform\": ID}, {\"node\": ID}, or {\"room\": null} for the room"})
 }
 
 const TOOLS: &[Tool] = &[
@@ -148,7 +148,7 @@ const TOOLS: &[Tool] = &[
         example_args: || json!({"path": "view.png"}),
         schema: || {
             obj(
-                json!({"path": text("PNG file to write; a temp file when left out"), "width": int("pixels, default 1280"), "height": int("pixels, default 800")}),
+                json!({"path": text("absolute PNG path to write; a temp file when left out"), "width": int("pixels, default 1280"), "height": int("pixels, default 800")}),
                 &[],
             )
         },
@@ -466,6 +466,17 @@ mod tests {
         for t in tools() {
             assert!(h.contains(t.example), "{}", t.cmd);
         }
+    }
+
+    #[test]
+    fn to_and_parent_are_typed_objects_and_room_object_parses() {
+        assert_eq!((find("place").unwrap().schema)()["properties"]["parent"]["type"], "object");
+        assert_eq!((find("constrain").unwrap().schema)()["properties"]["to"]["type"], "object");
+        let mut args = serde_json::Map::new();
+        args.insert("node".into(), json!(5));
+        args.insert("to".into(), json!({"room": null}));
+        args.insert("constraints".into(), json!([{"child": "bottom", "parent": "top"}]));
+        protocol::parse_line(&request_line("constrain", args, Some("T"))).unwrap();
     }
 
     #[test]

@@ -123,6 +123,7 @@ fn check(text: &str, format: Format) -> Result<(), String> {
 
 /// The registered command path, if any.
 pub fn current(text: &str, format: Format) -> Option<String> {
+    let text = strip_bom(text);
     if format == Format::CodexToml {
         let t = parse_toml(text).ok()?;
         return t.get(section(format))?.get(NAME)?.get("command")?.as_str().map(String::from);
@@ -136,11 +137,23 @@ fn json_text(m: Map<String, Value>) -> String {
     serde_json::to_string_pretty(&Value::Object(m)).expect("a JSON map serializes") + "\n"
 }
 
-/// Line range of the `[mcp_servers.labsetup]` table: its header up to the next table header.
+/// Line range of the `[mcp_servers.labsetup]` table and its subtables, up to the next other table
+/// header; blank and comment lines just above that header stay with it.
 fn toml_block(lines: &[&str]) -> Option<(usize, usize)> {
     let start = lines.iter().position(|l| l.trim() == TOML_HEADER)?;
-    let end = lines[start + 1..].iter().position(|l| l.trim_start().starts_with('[')).map_or(lines.len(), |i| start + 1 + i);
+    let ours = |l: &str| l.trim_start().starts_with("[mcp_servers.labsetup.");
+    let mut end = lines[start + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('[') && !ours(l))
+        .map_or(lines.len(), |i| start + 1 + i);
+    while end > start + 1 && (lines[end - 1].trim().is_empty() || lines[end - 1].trim_start().starts_with('#')) {
+        end -= 1;
+    }
     Some((start, end))
+}
+
+fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
 /// A text edit, so the user's comments and layout survive; the result is re-parsed as a check.
@@ -151,9 +164,6 @@ fn edit_toml(text: &str, block: Option<&str>) -> Result<String, String> {
             let mut v: Vec<String> = lines[..s].iter().map(|l| l.to_string()).collect();
             if let Some(b) = new {
                 v.extend(b.lines().map(String::from));
-                if e < lines.len() {
-                    v.push(String::new());
-                }
             }
             v.extend(lines[e..].iter().map(|l| l.to_string()));
             v.join("\n") + "\n"
@@ -172,6 +182,7 @@ fn edit_toml(text: &str, block: Option<&str>) -> Result<String, String> {
 
 /// Adds or updates the `labsetup` entry. Empty text means a new file.
 pub fn merge(text: &str, format: Format, exe: &Path) -> Result<(String, Outcome), String> {
+    let text = strip_bom(text);
     check(text, format)?;
     let exe = exe.to_string_lossy();
     let outcome = match current(text, format) {
@@ -194,6 +205,7 @@ pub fn merge(text: &str, format: Format, exe: &Path) -> Result<(String, Outcome)
 
 /// Removes the `labsetup` entry only.
 pub fn remove(text: &str, format: Format) -> Result<(String, Outcome), String> {
+    let text = strip_bom(text);
     check(text, format)?;
     if current(text, format).is_none() {
         return Ok((text.to_owned(), Outcome::NotSet));
@@ -391,6 +403,26 @@ mod tests {
         assert!(!t3.contains("labsetup"));
         assert!(t3.starts_with("# mine\n[model]\nx = 1\n"));
         assert!(t3.contains("[other]\ny = 2"));
+    }
+
+    #[test]
+    fn codex_keeps_comment_above_next_table_and_drops_our_subtables() {
+        let before = "[mcp_servers.labsetup]\ncommand = 'old'\nargs = ['mcp']\n\n[mcp_servers.labsetup.env]\nX = '1'\n\n# GitHub server\n[mcp_servers.github]\ncommand = 'gh'\n";
+        let (t, _) = merge(before, Format::CodexToml, Path::new(EXE)).unwrap();
+        assert!(t.contains("# GitHub server\n[mcp_servers.github]"), "{t}");
+        let (t, out) = remove(before, Format::CodexToml).unwrap();
+        assert_eq!(out, Outcome::Removed);
+        assert!(!t.contains("labsetup"), "{t}");
+        assert!(t.contains("# GitHub server\n[mcp_servers.github]"), "{t}");
+        let v: toml::Table = t.parse().unwrap();
+        assert!(v["mcp_servers"].get("labsetup").is_none());
+    }
+
+    #[test]
+    fn json_with_bom_is_read() {
+        let (t, out) = merge("\u{feff}{\"mcpServers\":{\"other\":{\"command\":\"x\"}}}", Format::McpServers, Path::new(EXE)).unwrap();
+        assert_eq!(out, Outcome::Added);
+        assert_eq!(j(&t)["mcpServers"]["other"]["command"], "x");
     }
 
     #[test]
