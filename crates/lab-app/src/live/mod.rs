@@ -1,4 +1,5 @@
 pub mod features;
+pub mod mcp;
 #[cfg(windows)]
 pub mod pipe;
 pub mod protocol;

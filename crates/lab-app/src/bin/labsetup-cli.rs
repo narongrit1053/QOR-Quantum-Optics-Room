@@ -20,7 +20,8 @@ usage:
   labsetup-cli validate <project>
   labsetup-cli catalog  [--search <text>]
   labsetup-cli live     <command> [--pid N] [--doc TOKEN] [--json ARGS] [--arg value ...]
-                        (drives the running app; see 'labsetup-cli live --help')";
+                        (drives the running app; see 'labsetup-cli live --help')
+  labsetup-cli mcp      MCP server on stdin/stdout for AI agents (the live commands as tools)";
 
 #[derive(Debug, PartialEq)]
 enum Cmd {
@@ -32,6 +33,7 @@ enum Cmd {
     Validate { path: PathBuf },
     Catalog { search: Option<String> },
     Live(Live),
+    Mcp,
 }
 
 #[derive(Debug, PartialEq)]
@@ -118,6 +120,7 @@ fn parse(args: &[String]) -> Result<Cmd, String> {
         "bom" => Cmd::Bom { path: need(path)?, out },
         "validate" => Cmd::Validate { path: need(path)? },
         "catalog" => Cmd::Catalog { search },
+        "mcp" if rest.is_empty() => Cmd::Mcp,
         other => return Err(format!("unknown command '{other}'")),
     })
 }
@@ -181,6 +184,22 @@ fn run_live(pid: Option<u32>, line: &str) -> Result<u8, String> {
     Ok(if ok { 0 } else { 1 })
 }
 
+/// Nothing but protocol lines may reach stdout here.
+#[cfg(windows)]
+fn run_mcp() -> Result<u8, String> {
+    use lab_app::live::{mcp, pipe};
+    let mut send = |pid: Option<u32>, line: &str| {
+        pipe::pick(pid).and_then(|n| pipe::call(&n, line, std::time::Duration::from_secs(2)).map_err(|e| format!("live: {e}")))
+    };
+    mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), &mut send).map_err(|e| format!("mcp: {e}"))?;
+    Ok(0)
+}
+
+#[cfg(not(windows))]
+fn run_mcp() -> Result<u8, String> {
+    Err("live control needs Windows".into())
+}
+
 #[cfg(not(windows))]
 fn run_live(_: Option<u32>, _: &str) -> Result<u8, String> {
     Err("live control needs Windows".into())
@@ -190,6 +209,7 @@ fn run(cmd: Cmd) -> Result<u8, String> {
     match cmd {
         Cmd::Live(Live::Help) => println!("{}", lab_app::live::tools::help_text()),
         Cmd::Live(Live::Call { pid, line }) => return run_live(pid, &line),
+        Cmd::Mcp => return run_mcp(),
         Cmd::Help => println!("{USAGE}"),
         Cmd::Version => println!("labsetup-cli {}", env!("CARGO_PKG_VERSION")),
         Cmd::Info { path, json } => {
@@ -315,6 +335,8 @@ mod tests {
         assert!(parse(&args("bom x -o")).is_err());
         assert!(parse(&args("validate x --json")).is_err());
         assert!(parse(&[]).is_err());
+        assert_eq!(parse(&args("mcp")), Ok(Cmd::Mcp));
+        assert!(parse(&args("mcp extra")).is_err());
     }
 
     fn live_line(s: &str) -> serde_json::Value {
