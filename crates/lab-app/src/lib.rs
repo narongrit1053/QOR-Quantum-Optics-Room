@@ -3,6 +3,7 @@
 //! Holds the pure, testable application layer: session management, edit pipeline
 //! and UI view-models. Free of Slint runtime types, windowing and GPU dependencies.
 
+pub mod agents;
 pub mod block_move;
 pub mod bundle;
 pub mod bom_rows;

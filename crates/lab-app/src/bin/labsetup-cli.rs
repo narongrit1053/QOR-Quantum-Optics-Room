@@ -21,7 +21,9 @@ usage:
   labsetup-cli catalog  [--search <text>]
   labsetup-cli live     <command> [--pid N] [--doc TOKEN] [--json ARGS] [--arg value ...]
                         (drives the running app; see 'labsetup-cli live --help')
-  labsetup-cli mcp      MCP server on stdin/stdout for AI agents (the live commands as tools)";
+  labsetup-cli mcp      MCP server on stdin/stdout for AI agents (the live commands as tools)
+  labsetup-cli agents   install | uninstall | status
+                        (registers 'labsetup-cli mcp' with the coding-agent CLIs on this PC)";
 
 #[derive(Debug, PartialEq)]
 enum Cmd {
@@ -34,6 +36,14 @@ enum Cmd {
     Catalog { search: Option<String> },
     Live(Live),
     Mcp,
+    Agents(AgentsCmd),
+}
+
+#[derive(Debug, PartialEq)]
+enum AgentsCmd {
+    Install,
+    Uninstall,
+    Status,
 }
 
 #[derive(Debug, PartialEq)]
@@ -121,6 +131,12 @@ fn parse(args: &[String]) -> Result<Cmd, String> {
         "validate" => Cmd::Validate { path: need(path)? },
         "catalog" => Cmd::Catalog { search },
         "mcp" if rest.is_empty() => Cmd::Mcp,
+        "agents" => match rest {
+            [a] if a == "install" => Cmd::Agents(AgentsCmd::Install),
+            [a] if a == "uninstall" => Cmd::Agents(AgentsCmd::Uninstall),
+            [a] if a == "status" => Cmd::Agents(AgentsCmd::Status),
+            _ => return Err("'agents' needs install, uninstall or status".into()),
+        },
         other => return Err(format!("unknown command '{other}'")),
     })
 }
@@ -184,6 +200,31 @@ fn run_live(pid: Option<u32>, line: &str) -> Result<u8, String> {
     Ok(if ok { 0 } else { 1 })
 }
 
+fn run_agents(cmd: AgentsCmd) -> Result<u8, String> {
+    use lab_app::agents::{home_dirs, install, known_agents, snippet, status, uninstall, Outcome};
+    let exe = std::env::current_exe().map_err(|e| format!("can't find this program's path: {e}"))?;
+    let (home, appdata) = home_dirs();
+    let agents = known_agents(&home, &appdata);
+    let results = match cmd {
+        AgentsCmd::Status => {
+            for (name, s) in status(&exe, &agents) {
+                println!("{name}: {s}");
+            }
+            return Ok(0);
+        }
+        AgentsCmd::Install => install(&exe, &agents),
+        AgentsCmd::Uninstall => uninstall(&agents),
+    };
+    for (name, o) in &results {
+        println!("{name}: {o}");
+    }
+    if cmd == AgentsCmd::Install {
+        println!("\nOther MCP-capable agents: add this to their MCP config:\n{}", snippet(&exe));
+        println!("Agents can control LabSetup while it runs with 'Allow AI agents' On in Settings.");
+    }
+    Ok(if results.iter().any(|(_, o)| matches!(o, Outcome::Failed(_))) { 1 } else { 0 })
+}
+
 /// Nothing but protocol lines may reach stdout here.
 #[cfg(windows)]
 fn run_mcp() -> Result<u8, String> {
@@ -210,6 +251,7 @@ fn run(cmd: Cmd) -> Result<u8, String> {
         Cmd::Live(Live::Help) => println!("{}", lab_app::live::tools::help_text()),
         Cmd::Live(Live::Call { pid, line }) => return run_live(pid, &line),
         Cmd::Mcp => return run_mcp(),
+        Cmd::Agents(a) => return run_agents(a),
         Cmd::Help => println!("{USAGE}"),
         Cmd::Version => println!("labsetup-cli {}", env!("CARGO_PKG_VERSION")),
         Cmd::Info { path, json } => {
@@ -337,6 +379,10 @@ mod tests {
         assert!(parse(&[]).is_err());
         assert_eq!(parse(&args("mcp")), Ok(Cmd::Mcp));
         assert!(parse(&args("mcp extra")).is_err());
+        assert_eq!(parse(&args("agents install")), Ok(Cmd::Agents(AgentsCmd::Install)));
+        assert_eq!(parse(&args("agents status")), Ok(Cmd::Agents(AgentsCmd::Status)));
+        assert!(parse(&args("agents")).is_err());
+        assert!(parse(&args("agents frob")).is_err());
     }
 
     fn live_line(s: &str) -> serde_json::Value {
