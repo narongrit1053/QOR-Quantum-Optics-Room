@@ -1,7 +1,7 @@
 //! Hover and click selection by ray casting against scene meshes, and selection highlights
 //! (M1-SPEC §5.7).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::{
     picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
@@ -17,6 +17,8 @@ use crate::scene::SceneIndex;
 use crate::{FrameRequest, Modifiers, ViewportEvent, ViewportInput};
 
 pub(crate) const ACCENT: Color = Color::srgb(10.0 / 255.0, 132.0 / 255.0, 1.0);
+/// Collision tint.
+const COLLIDE: Color = Color::srgb(0.95, 0.2, 0.2);
 
 /// What a click on this entity selects.
 #[derive(Component, Clone, Copy)]
@@ -73,7 +75,8 @@ impl Plugin for PickingPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::outline::OutlinePlugin)
             .init_resource::<Selection>()
-            .add_systems(Update, (pick.after(handle_input), apply_highlight.after(pick)));
+            .add_systems(Update, pick.after(handle_input))
+            .add_systems(PostUpdate, apply_highlight);
     }
 }
 
@@ -200,33 +203,43 @@ type Variants = HashMap<(AssetId<StandardMaterial>, [u32; 4], [u32; 4], bool), H
 
 type Looks<'w, 's> = Query<'w, 's, (Entity, &'static HighlightLook, Has<SharedMaterial>, Option<&'static MeshMaterial3d<StandardMaterial>>)>;
 
-/// Applies the current selection and hover to every look. Runs when the selection changed or
-/// new looks were spawned (a rebuilt platform keeps its highlight); writes only changed values.
+/// Applies the current selection, hover and collision tint to every look. Runs when any of them
+/// or `Capturing` changed, or new looks were spawned (a rebuilt platform keeps its highlight);
+/// writes only changed values.
 #[allow(clippy::too_many_arguments)]
-fn apply_highlight(
+pub(crate) fn apply_highlight(
     mut commands: Commands,
     selection: Res<Selection>,
     capturing: Res<crate::export::Capturing>,
+    collisions: Res<crate::collide::Collisions>,
     looks: Looks,
     added: Query<(), Added<HighlightLook>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hole_materials: ResMut<Assets<HoleTopMaterial>>,
     mut variants: Local<Variants>,
 ) {
-    if !selection.is_changed() && !capturing.is_changed() && added.is_empty() {
+    if !selection.is_changed() && !capturing.is_changed() && !collisions.is_changed() && added.is_empty() {
         return;
     }
     let none = Selection::default();
     let selection = if capturing.0 { &none } else { &*selection };
+    let colliding: HashSet<NodeId> = if capturing.0 {
+        HashSet::new()
+    } else {
+        collisions.0.iter().flat_map(|&(a, b)| [a, b]).collect()
+    };
     for (entity, look, shared, shown) in &looks {
         match look {
             HighlightLook::Standard { material, base_color, owner } => {
                 let is_selected = selection.is_selected(*owner);
+                let is_colliding = matches!(owner, SelectionTarget::Node(id) if colliding.contains(id));
                 let color = if is_selected {
                     let t = if matches!(owner, SelectionTarget::Node(_)) { 0.65 } else { 0.25 };
                     mix(*base_color, ACCENT, t)
                 } else if selection.hovered == Some(*owner) {
                     mix(*base_color, Color::WHITE, 0.4)
+                } else if is_colliding {
+                    mix(*base_color, COLLIDE, 0.6)
                 } else {
                     *base_color
                 };
@@ -372,5 +385,39 @@ mod tests {
             resolve_left_click(primary, &extra, None, false),
             (None, Some(ViewportEvent::SelectionChanged(None)))
         );
+    }
+
+    #[test]
+    fn colliding_node_gets_tinted_and_selection_wins() {
+        let mut app = App::new();
+        let base = Color::srgb(0.5, 0.5, 0.5);
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mat = materials.add(StandardMaterial { base_color: base, ..default() });
+        app.insert_resource(Selection::default())
+            .insert_resource(crate::export::Capturing::default())
+            .insert_resource(crate::collide::Collisions(vec![(NodeId(1), NodeId(2))]))
+            .insert_resource(materials)
+            .insert_resource(Assets::<HoleTopMaterial>::default())
+            .add_systems(Update, apply_highlight);
+        app.world_mut().spawn(HighlightLook::Standard {
+            material: mat.clone(),
+            base_color: base,
+            owner: SelectionTarget::Node(NodeId(1)),
+        });
+
+        app.update();
+        let tinted = app.world().resource::<Assets<StandardMaterial>>().get(&mat).unwrap().base_color;
+        assert_ne!(tinted, base);
+        assert_eq!(tinted, mix(base, COLLIDE, 0.6));
+
+        app.world_mut().resource_mut::<Selection>().selected = Some(SelectionTarget::Node(NodeId(1)));
+        app.update();
+        let selected = app.world().resource::<Assets<StandardMaterial>>().get(&mat).unwrap().base_color;
+        assert_eq!(selected, mix(base, ACCENT, 0.65));
+
+        app.world_mut().resource_mut::<crate::export::Capturing>().0 = true;
+        app.update();
+        let captured = app.world().resource::<Assets<StandardMaterial>>().get(&mat).unwrap().base_color;
+        assert_eq!(captured, base);
     }
 }

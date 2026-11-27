@@ -31,7 +31,7 @@ impl Plugin for CollidePlugin {
             detect_collisions
                 .after(VisibilitySystems::CalculateBounds)
                 .after(TransformSystems::Propagate)
-                .before(crate::outline::rebuild_outline),
+                .before(crate::picking::apply_highlight),
         );
     }
 }
