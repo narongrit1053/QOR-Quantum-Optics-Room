@@ -17,7 +17,7 @@
 <meta property="og:image:height" content="650">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"LabSetup","description":"LabSetup is a free, offline Windows app for planning optical tables and quantum-optics lab setups in 3D and top view.","url":"https://narongrit1053.github.io/QOR-Quantum-Optics-Room/","applicationCategory":"DesignApplication","operatingSystem":"Windows 10, Windows 11","softwareVersion":"0.0.14","downloadUrl":"https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.14/LabSetup-0.0.14.msi","image":"https://narongrit1053.github.io/QOR-Quantum-Optics-Room/img/og.jpg","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"LabSetup","description":"LabSetup is a free, offline Windows app for planning optical tables and quantum-optics lab setups in 3D and top view.","url":"https://narongrit1053.github.io/QOR-Quantum-Optics-Room/","applicationCategory":"DesignApplication","operatingSystem":"Windows 10, Windows 11","softwareVersion":"0.0.15","downloadUrl":"https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.15/LabSetup-0.0.15.msi","image":"https://narongrit1053.github.io/QOR-Quantum-Optics-Room/img/og.jpg","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
 </script>
 <link rel="preload" href="fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
@@ -40,7 +40,7 @@
       <a href="#features">Features</a>
       <a href="#samples">Samples</a>
     </nav>
-    <a class="btn btn-small" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.14/LabSetup-0.0.14.msi">Download</a>
+    <a class="btn btn-small" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.15/LabSetup-0.0.15.msi">Download</a>
   </div>
 </header>
 
@@ -50,8 +50,8 @@
       <h1>Plan the optical table before you build&nbsp;it.</h1>
       <p class="pitch">Lay out your quantum-optics experiment on a real hole grid, in 3D and top view, and watch the beam trace through every optic.</p>
       <div class="cta">
-        <a class="btn" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.14/LabSetup-0.0.14.msi">
-          <svg class="ico"><use href="#i-download"/></svg>Download v0.0.14
+        <a class="btn" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.15/LabSetup-0.0.15.msi">
+          <svg class="ico"><use href="#i-download"/></svg>Download v0.0.15
         </a>
         <p class="meta">Free · Windows 10/11 x64 · 56 MB installer · runs offline</p>
       </div>
@@ -69,15 +69,17 @@
   <section id="new" class="new">
     <div class="wrap new-grid">
       <div>
-        <h2>New in v0.0.14</h2>
-        <p class="lede">Released 26 November 2026. Any AI agent on your PC can find LabSetup and build the setup with you.</p>
+        <h2>New in v0.0.15</h2>
+        <p class="lede">Released 27 November 2026. Beams stop at the parts in their way, and parts that overlap turn red.</p>
         <ul class="changes">
-          <li><strong>Connect AI agents.</strong> One click in Settings adds LabSetup to the agents on your PC: Claude Code and the Claude app, Codex, Gemini CLI, Antigravity, Cursor, Copilot CLI, VS Code, Windsurf, Trae, opencode, Hermes Agent and more. Open one in any folder and ask; it already knows how to drive LabSetup.</li>
-          <li><strong>Agents build like a real lab.</strong> Every agent gets the same rules: only real catalog and library parts, never a look-alike; every part attached with constraints; setups laid out as the real experiment is built; and it asks before removing parts or downloading.</li>
-          <li><strong>You stay in charge.</strong> You watch each step appear, each one is its own Ctrl+Z, and agents can&rsquo;t save. A LabSetup slash command starts an agent on your open project.</li>
+          <li><strong>Parts block the beam.</strong> A beam stops where it hits a post, a holder, a mount body or any other part that isn&rsquo;t an optic, at the part&rsquo;s real shape, so a beam through a mount&rsquo;s opening still gets through.</li>
+          <li><strong>Recalculate when you&rsquo;re ready.</strong> Beams follow your edits instantly. Which parts block them is checked when a project opens and when you click <em>Recalculate</em> next to <em>Beams</em>, so even a very large lab stays responsive.</li>
+          <li><strong>Collision warning.</strong> Parts that overlap are tinted red, and a message names them. Parts mounted on each other, and parts that only touch, don&rsquo;t count.</li>
+          <li><strong>Solid beams.</strong> Every beam is drawn as a continuous ray, IR and UV included.</li>
         </ul>
         <h3>Since v0.0.9</h3>
         <ul class="changes changes-quiet">
+          <li>Connect the AI agents on your PC in one click; they build setups like a real lab, with real parts and constraints, and every step undoes with Ctrl+Z.</li>
           <li>Select several parts, group them, and save a whole assembly as a bundle; agents can place your bundles too.</li>
           <li>Check for updates and install them from Settings.</li>
           <li>The installer puts <code>labsetup-cli</code> on your <code>PATH</code>.</li>
@@ -93,7 +95,7 @@
   <section id="features" class="features">
     <div class="wrap">
       <h2>What it does</h2>
-      <p class="lede">Everything below is in the download. The close-ups come from earlier builds; the parts of the window they show work the same way in v0.0.14.</p>
+      <p class="lede">Everything below is in the download. The close-ups come from earlier builds; the parts of the window they show work the same way in v0.0.15.</p>
     </div>
 
     <article class="row wrap">
@@ -170,22 +172,22 @@
 
   <section class="get">
     <div class="wrap get-inner">
-      <h2>Download LabSetup v0.0.14</h2>
+      <h2>Download LabSetup v0.0.15</h2>
       <ul class="reqs">
         <li><svg class="ico"><use href="#i-check"/></svg><span>Windows 10 or 11, 64-bit</span></li>
         <li><svg class="ico"><use href="#i-check"/></svg><span>A GPU with DirectX 12</span></li>
         <li><svg class="ico"><use href="#i-check"/></svg><span>Installer (<code>.msi</code>) with a Start-menu shortcut; later versions update from inside the app</span></li>
         <li><svg class="ico"><use href="#i-check"/></svg><span>Runs offline; projects are plain files on your disk</span></li>
       </ul>
-      <a class="btn" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.14/LabSetup-0.0.14.msi"><svg class="ico"><use href="#i-download"/></svg>Download v0.0.14 · 56 MB</a>
-      <p class="meta">Free download. Early preview build. Prefer no installer? Get the <a href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.14">portable zip</a>.</p>
+      <a class="btn" href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/download/v0.0.15/LabSetup-0.0.15.msi"><svg class="ico"><use href="#i-download"/></svg>Download v0.0.15 · 56 MB</a>
+      <p class="meta">Free download. Early preview build. Prefer no installer? Get the <a href="https://github.com/narongrit1053/QOR-Quantum-Optics-Room/releases/tag/v0.0.15">portable zip</a>.</p>
     </div>
   </section>
 </main>
 
 <footer class="foot">
   <div class="wrap">
-    <p>LabSetup v0.0.14. Set in Geist (SIL Open Font License, <a href="fonts/OFL.txt">license</a>). Thorlabs is a trademark of Thorlabs, Inc.; LabSetup is not affiliated with Thorlabs.</p>
+    <p>LabSetup v0.0.15. Set in Geist (SIL Open Font License, <a href="fonts/OFL.txt">license</a>). Thorlabs is a trademark of Thorlabs, Inc.; LabSetup is not affiliated with Thorlabs.</p>
   </div>
 </footer>
 </body>
