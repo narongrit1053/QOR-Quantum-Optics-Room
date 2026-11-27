@@ -51,6 +51,7 @@ pub const ACTIONS: &[ActionInfo] = &[
     a("library.save_bundle", "Save Selection as Bundle…", "Edit", "bundle set group assembly library reuse save", ""),
     a("library.find", "Find Part", "View", "library search part catalog", "Ctrl+F"),
     a("view.beams", "Show beams", "View", "laser beam path optics trace", ""),
+    a("view.beams_recalc", "Recalculate beam blocking", "View", "laser beam path optics trace block mesh", ""),
     a("view.theme.dark", "Dark Theme", "View", "appearance colour color", ""),
     a("view.theme.light", "Light Theme", "View", "appearance colour color", ""),
     a("view.theme.contrast", "High Contrast Theme", "View", "appearance accessibility colour color", ""),

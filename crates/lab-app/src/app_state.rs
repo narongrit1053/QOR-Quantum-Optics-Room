@@ -124,6 +124,8 @@ pub struct AppState {
     pub drag_refusal_shown: bool,
     /// Default agent snapshot names count up per process, across agent restarts.
     pub agent_snapshots: u32,
+    /// True after the user requested a manual beam recalculation, cleared on the next full trace.
+    pub beams_recalc_requested: bool,
 }
 
 fn now_nanos() -> u128 {
@@ -173,6 +175,7 @@ impl AppState {
             dragging: false,
             drag_refusal_shown: false,
             agent_snapshots: 0,
+            beams_recalc_requested: false,
         }
     }
 

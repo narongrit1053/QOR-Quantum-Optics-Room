@@ -244,6 +244,8 @@ export component AppWindow inherits Window {
     in property <bool> beam-on;
     // M6 `view.beams` (saved in Settings).
     in property <bool> show-beams: true;
+    // True after a cheap trace when blocker parts exist and need a full raycast.
+    in property <bool> beams-stale: false;
     // POLA-154 `library.show_builtin` (saved in Settings).
     in property <bool> show-builtin-parts: false;
     // POLA-154 Ctrl+F / `library.find`: focus the library search.
@@ -1474,6 +1476,14 @@ export component AppWindow inherits Window {
                     label: "Beams";
                     active: root.show-beams;
                     clicked => { root.action("view.beams"); }
+                }
+            }
+            if root.show-beams: VerticalLayout {
+                alignment: center;
+                ToolButton {
+                    label: "Recalculate";
+                    active: root.beams-stale;
+                    clicked => { root.action("view.beams_recalc"); }
                 }
             }
             VerticalLayout {

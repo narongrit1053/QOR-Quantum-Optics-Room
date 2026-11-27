@@ -16,6 +16,7 @@
 
 mod beams;
 mod blueprint;
+mod collide;
 mod export;
 mod camera;
 mod feature_pick;
@@ -176,6 +177,8 @@ pub enum ViewportRequest {
     ExportImage { path: std::path::PathBuf, width: u32, height: u32 },
     /// M6. Show or hide the traced laser beams (default shown).
     SetBeams(bool),
+    /// Re-run the full beam trace with mesh blocking for non-optical parts.
+    RecalculateBeams,
     /// Beam Profiler: remove probe `i` (as `OverlayItem::Probe` numbers them), or all with `None`.
     ClearProbes(Option<usize>),
     /// M8 view cube. Ease the 3D camera to this direction (as `CameraOrient` reports it) around
@@ -353,6 +356,11 @@ pub enum ViewportEvent {
     FeatureHover { target: SelectionTarget, point: bevy::math::DVec3, normal: bevy::math::DVec3 },
     /// M9 E2. A gizmo/DOF drag began (the app shows the numeric field).
     DragStarted { id: lab_core::NodeId, unit: DragUnit },
+    /// Pairs of placed part nodes whose bounding boxes overlap (sorted, deduped).
+    Collisions(Vec<(lab_core::NodeId, lab_core::NodeId)>),
+    /// Sent after a beam trace runs when `blocking_current` changed or a full mesh-blocking trace
+    /// completed (`full_ms` is `Some(ms)` for a full trace, `None` for a fast optical-only trace).
+    BeamsTraced { blocking_current: bool, full_ms: Option<f64> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -403,6 +411,7 @@ pub(crate) enum FrameRequest {
     RenderThumbnail(String, std::path::PathBuf, Vec<SetPart>),
     ExportImage(std::path::PathBuf, u32, u32),
     SetBeams(bool),
+    RecalculateBeams,
     ClearProbes(Option<usize>),
     ViewDirection(f32, f32),
     HighlightFeature(Option<(SelectionTarget, lab_core::part::Feature)>),

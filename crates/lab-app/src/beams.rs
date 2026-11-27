@@ -208,7 +208,7 @@ mod tests {
         use lab_optics::{Field, Segment};
         let seg = |hit| Segment {
             source: NodeId(1), start: DVec3::ZERO, end: DVec3::X * 100.0, w_start: 0.5, w_end: 0.5, waist: None,
-            hit: Some((hit, "p".into())), depth: 0, field: Field { re: DVec3::Y, im: DVec3::ZERO }, power: 1.0, q_start: (0.0, 1.0), lm2: 1e-3,
+            hit: Some((hit, "p".into())), blocked: None, depth: 0, field: Field { re: DVec3::Y, im: DVec3::ZERO }, power: 1.0, q_start: (0.0, 1.0), lm2: 1e-3,
             frame_x: DVec3::X,
             path_start: 0.0,
         };

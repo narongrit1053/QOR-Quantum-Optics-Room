@@ -2,25 +2,30 @@
 //! segment as an unlit truncated cone of the 1/e² radius. Traced only on document, catalog,
 //! isolation and `SetBeams` changes, never on a timer. Beams carry no `PickId`, so picking skips them.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::time::Instant;
 
 use bevy::{
-    camera::visibility::VisibilitySystems, light::NotShadowCaster, math::DVec3, mesh::ConicalFrustumMeshBuilder,
-    mesh::MeshBuilder, prelude::*,
+    camera::visibility::VisibilitySystems,
+    ecs::system::ParamSet,
+    light::NotShadowCaster,
+    math::DVec3,
+    mesh::{ConicalFrustumMeshBuilder, MeshBuilder},
+    picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings, RayCastVisibility},
+    prelude::*,
 };
+use lab_core::{NodeId, Shape};
 use lab_optics::{Segment, Trace};
 
-use crate::host::{PendingRequests, SettleFrames};
+use crate::glb::GlbLoading;
+use crate::host::{EventSender, PendingRequests, SettleFrames};
 use crate::isolate::{Isolated, apply_isolation, kept_platforms};
-use crate::scene::{MM, SceneIndex, to_render};
-use crate::{CatalogRes, FrameRequest};
+use crate::scene::{MM, SceneIndex, SceneNode, normal_to_render, to_render};
+use crate::{CatalogRes, FrameRequest, ViewportEvent};
 
 /// Thinnest drawn radius, so a focused beam stays visible.
 const MIN_RADIUS_MM: f64 = 0.3;
-/// IR/UV beams are dashed (DESIGN.md §7: never colour alone): drawn, then gap, in mm.
-const DASH_MM: f64 = 6.0;
-const GAP_MM: f64 = 4.0;
-const MAX_DASHES: f64 = 400.0;
 
 #[derive(Resource)]
 pub(crate) struct Beams {
@@ -44,9 +49,20 @@ impl Plugin for BeamsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Beams>().add_systems(
             PostUpdate,
-            update_beams.after(apply_isolation).before(VisibilitySystems::VisibilityPropagate),
+            update_beams
+                .after(apply_isolation)
+                .after(VisibilitySystems::CalculateBounds)
+                .after(TransformSystems::Propagate)
+                .before(VisibilitySystems::VisibilityPropagate),
         );
     }
+}
+
+#[derive(Default)]
+struct BeamTraceState {
+    full_dirty: bool,
+    cheap_dirty: bool,
+    last_blocking_current: Option<bool>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -56,41 +72,115 @@ fn update_beams(
     index: Res<SceneIndex>,
     catalog: Res<CatalogRes>,
     isolated: Res<Isolated>,
+    loading: Res<GlbLoading>,
     mut beams: ResMut<Beams>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    scene_meshes: Query<(Entity, &SceneNode), With<Mesh3d>>,
+    mut sets: ParamSet<(MeshRayCast, ResMut<Assets<Mesh>>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut settle: ResMut<SettleFrames>,
+    events: Res<EventSender>,
+    mut state: Local<BeamTraceState>,
 ) {
-    let mut dirty = catalog.is_changed() || isolated.is_changed();
+    if catalog.is_changed() || isolated.is_changed() {
+        state.cheap_dirty = true;
+    }
     for request in &pending.0 {
         match request {
             FrameRequest::SetBeams(on) => {
                 beams.show = *on;
-                dirty = true;
+                state.cheap_dirty = true;
             }
             FrameRequest::InspectPart(part) => {
                 beams.inspecting = part.is_some();
-                dirty = true;
+                state.cheap_dirty = true;
             }
-            FrameRequest::LoadDocument(_) | FrameRequest::ApplyChanges(..) => dirty = true,
+            FrameRequest::ApplyChanges(..) => state.cheap_dirty = true,
+            FrameRequest::LoadDocument(_) | FrameRequest::RecalculateBeams => state.full_dirty = true,
             _ => {}
         }
     }
-    if !dirty {
+    if !beams.show || beams.inspecting {
+        if state.full_dirty || state.cheap_dirty {
+            state.full_dirty = false;
+            state.cheap_dirty = false;
+            if let Some(root) = beams.root.take() {
+                commands.entity(root).try_despawn();
+            }
+            settle.0 = settle.0.max(2);
+            beams.trace = Trace::default();
+        }
         return;
     }
+    if (!state.full_dirty && !state.cheap_dirty) || (state.full_dirty && loading.0) {
+        return;
+    }
+    let full = state.full_dirty;
+    state.full_dirty = false;
+    state.cheap_dirty = false;
     if let Some(root) = beams.root.take() {
         commands.entity(root).try_despawn();
     }
     settle.0 = settle.0.max(2);
     beams.trace = Trace::default();
-    let Some(doc) = index.snapshot.as_ref().filter(|_| beams.show && !beams.inspecting) else { return };
-    let trace = lab_optics::trace_document(doc, &|id| catalog.0.get(id).cloned());
+    let Some(doc) = index.snapshot.as_ref() else { return };
+    let (trace, blocking_current, full_ms) = if full {
+        // Unregistered parts (empty optical_ports) block beams with their actual mesh geometry.
+        let blockers: HashMap<Entity, NodeId> = scene_meshes
+            .iter()
+            .filter_map(|(entity, scene_node)| {
+                let node = doc.node(scene_node.0)?;
+                if !matches!(node.shape, Shape::Part) {
+                    return None;
+                }
+                catalog.0.get(&node.part).is_some_and(|d| d.optical_ports.is_empty()).then_some((entity, scene_node.0))
+            })
+            .collect();
+        let ray_cast = RefCell::new(sets.p0());
+        let block = |origin: DVec3, unit_dir: DVec3, max_dist: f64| -> Option<(NodeId, f64)> {
+            if blockers.is_empty() {
+                return None;
+            }
+            let dir = Dir3::new(normal_to_render(unit_dir)).ok()?;
+            let ray = Ray3d::new(to_render(origin), dir);
+            let filter = |e: Entity| blockers.contains_key(&e);
+            let settings = MeshRayCastSettings::default()
+                .with_filter(&filter)
+                .with_visibility(RayCastVisibility::Any)
+                .never_early_exit();
+            let mut rc = ray_cast.borrow_mut();
+            for (entity, hit) in rc.cast_ray(ray, &settings) {
+                let dist_mm = hit.distance as f64 / MM as f64;
+                if dist_mm < 0.01 {
+                    continue;
+                }
+                if dist_mm < max_dist {
+                    return blockers.get(entity).copied().map(|id| (id, dist_mm));
+                }
+                break;
+            }
+            None
+        };
+        let t0 = Instant::now();
+        let trace = lab_optics::trace_document_with(doc, &|id| catalog.0.get(id).cloned(), &block);
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        (trace, true, Some(ms))
+    } else {
+        let trace = lab_optics::trace_document(doc, &|id| catalog.0.get(id).cloned());
+        let has_blockers = doc.nodes.iter().any(|n| {
+            matches!(n.shape, Shape::Part) && catalog.0.get(&n.part).is_some_and(|d| d.optical_ports.is_empty())
+        });
+        (trace, !has_blockers, None)
+    };
+    if full_ms.is_some() || state.last_blocking_current != Some(blocking_current) {
+        state.last_blocking_current = Some(blocking_current);
+        events.send(ViewportEvent::BeamsTraced { blocking_current, full_ms });
+    }
     if trace.segments.is_empty() {
         return;
     }
     let kept = isolated.0.map(|p| kept_platforms(doc, p));
     let root = commands.spawn((Transform::default(), Visibility::Inherited)).id();
+    let mut meshes = sets.p1();
     for segment in &trace.segments {
         if let Some(kept) = &kept
             && !doc.root_platform(segment.source).is_some_and(|p| kept.contains(&p))
@@ -114,8 +204,7 @@ fn update_beams(
                 })
             })
             .clone();
-        let dashed = !(400.0..=700.0).contains(&wavelength);
-        for (a, wa, b, wb) in pieces(segment, dashed) {
+        for (a, wa, b, wb) in pieces(segment) {
             let (ra, rb) = (to_render(a), to_render(b));
             let height = ra.distance(rb);
             if height < 1e-6 {
@@ -137,35 +226,18 @@ fn update_beams(
     beams.root = Some(root);
 }
 
-/// The drawn pieces of a segment `(start, w, end, w)`: split at the waist so a focus narrows, and
-/// into dashes when `dashed`. Radii between known points are linear.
-fn pieces(s: &Segment, dashed: bool) -> Vec<(DVec3, f64, DVec3, f64)> {
+/// The drawn pieces of a segment `(start, w, end, w)`: split at the waist so a focus narrows.
+/// Radii between known points are linear.
+fn pieces(s: &Segment) -> Vec<(DVec3, f64, DVec3, f64)> {
     let mut spans = vec![(s.start, s.w_start)];
     if let Some(waist) = s.waist {
         spans.push(waist);
     }
     spans.push((s.end, s.w_end));
-    let mut out = Vec::new();
-    for pair in spans.windows(2) {
-        let ((a, wa), (b, wb)) = (pair[0], pair[1]);
-        let length = a.distance(b);
-        if !dashed || length <= DASH_MM {
-            out.push((a, wa, b, wb));
-            continue;
-        }
-        let period = (DASH_MM + GAP_MM).max(length / MAX_DASHES);
-        let at = |t: f64| (a.lerp(b, t / length), wa + (wb - wa) * t / length);
-        let mut t = 0.0;
-        while t < length {
-            let ((p, wp), (q, wq)) = (at(t), at((t + period * 0.6).min(length)));
-            out.push((p, wp, q, wq));
-            t += period;
-        }
-    }
-    out
+    spans.windows(2).map(|pair| (pair[0].0, pair[0].1, pair[1].0, pair[1].1)).collect()
 }
 
-/// Visible light: its hue. IR and UV: the false-colour accent (the beams are dashed too).
+/// Visible light: its hue. IR and UV: the false-colour accent.
 fn beam_color(nm: f64) -> Color {
     if !(400.0..=700.0).contains(&nm) {
         return Color::srgb(1.0, 0.25, 0.8);
@@ -187,7 +259,7 @@ mod tests {
     use lab_core::NodeId;
 
     #[test]
-    fn focus_splits_and_ir_dashes() {
+    fn focus_splits_at_the_waist() {
         let s = Segment {
             source: NodeId(1),
             start: DVec3::ZERO,
@@ -196,6 +268,7 @@ mod tests {
             w_end: 0.5,
             waist: Some((DVec3::new(0.0, 100.0, 0.0), 0.05)),
             hit: None,
+            blocked: None,
             depth: 0,
             field: lab_optics::Field { re: DVec3::X, im: DVec3::ZERO },
             power: 1.0,
@@ -204,10 +277,8 @@ mod tests {
             frame_x: DVec3::X,
             path_start: 0.0,
         };
-        let solid = pieces(&s, false);
+        let solid = pieces(&s);
         assert_eq!(solid.len(), 2);
         assert!((solid[0].3 - 0.05).abs() < 1e-12);
-        let dashed = pieces(&s, true);
-        assert_eq!(dashed.len(), 20);
     }
 }

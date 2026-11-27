@@ -440,6 +440,13 @@ pub(crate) fn run_action(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &R
                 eprintln!("settings not saved: {error}");
             }
         }
+        "view.beams_recalc" => {
+            let mut a = app.borrow_mut();
+            if a.settings.show_beams {
+                a.beams_recalc_requested = true;
+                a.send(ViewportRequest::RecalculateBeams);
+            }
+        }
         "library.show_builtin" => {
             let settings = {
                 let mut a = app.borrow_mut();
