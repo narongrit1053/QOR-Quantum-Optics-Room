@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.0.15
+
+- **Beams are solid rays.** Every laser beam is drawn as a continuous ray, including IR and UV beams (which keep their false colour).
+- **Parts block the beam.** A beam now stops where it hits a part that isn't an optic (a post, a holder, a mount body, an imported part without optical ports), at the part's real shape, so a beam passing through a mount's opening still gets through.
+- **Recalculate beam blocking.** Beams follow your edits instantly; which parts block them is checked after a project opens and when you click *Recalculate* next to *Beams* (also in the command list). The button lights up while blocking is out of date, and tells you how long the check took.
+- **Collision warning.** Parts that overlap each other are tinted red, and a message names the first pair. Parts mounted on each other (a post in its holder, an optic in its mount) and parts that only touch don't count.
+- **Fixed:** a one-frame flash of the outline colour across the whole view when a part's outline appeared.
+
 ## v0.0.14
 
 - **Agents build like a real lab.** Two more rules for every agent: attach every part it places with constraints (no parts left floating), and lay setups out as the real experiment is built, with one beam height and real spacings, asking you when it doesn't know.
