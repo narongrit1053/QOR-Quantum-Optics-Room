@@ -115,8 +115,10 @@ pub struct Segment {
     pub w_end: f64,
     /// Waist position and radius when the waist lies inside the segment.
     pub waist: Option<(DVec3, f64)>,
-    /// The port the segment ends on; `None` when it runs out into free space.
+    /// The port the segment ends on; `None` when it runs out into free space or is blocked.
     pub hit: Option<(NodeId, String)>,
+    /// The unregistered part that stopped the beam.
+    pub blocked: Option<NodeId>,
     /// 0 for the main beam, +1 per splitter reflection or transmission.
     pub depth: u32,
     pub field: Field,
@@ -260,6 +262,16 @@ struct Ray {
 
 /// Traces every source through `ports`.
 pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
+    trace_with(sources, ports, &|_, _, _| None)
+}
+
+/// Traces every source through `ports`, stopping early when `block(origin, unit_dir, max_dist)`
+/// returns a closer blocking part `(node, distance_mm)`.
+pub fn trace_with(
+    sources: &[Source],
+    ports: &[Port],
+    block: &dyn Fn(DVec3, DVec3, f64) -> Option<(NodeId, f64)>,
+) -> Trace {
     let mut segments = Vec::new();
     for s in sources {
         let dir = s.dir.normalize_or_zero();
@@ -278,8 +290,16 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
                 break;
             }
             count += 1;
-            let hit = nearest_hit(&ray, ports);
-            let d = hit.map_or(MAX_SEGMENT_LENGTH, |(_, t)| t);
+            let mut hit = nearest_hit(&ray, ports);
+            let mut d = hit.map_or(MAX_SEGMENT_LENGTH, |(_, t)| t);
+            let mut blocked = None;
+            if let Some((node, t)) = block(ray.origin, ray.dir, d)
+                && t < d
+            {
+                d = t;
+                hit = None;
+                blocked = Some(node);
+            }
             let end = ray.origin + ray.dir * d;
             let out = ray.beam.propagate(d);
             let waist = (ray.beam.re < 0.0 && -ray.beam.re < d).then(|| {
@@ -294,6 +314,7 @@ pub fn trace(sources: &[Source], ports: &[Port]) -> Trace {
                 w_end: out.w(),
                 waist,
                 hit: hit.map(|(i, _)| (ports[i].node, ports[i].port.clone())),
+                blocked,
                 depth: ray.depth,
                 field: ray.field,
                 power: ray.field.power(),
@@ -447,8 +468,17 @@ pub fn scene(doc: &Document, part: &dyn Fn(&str) -> Option<PartDef>) -> (Vec<Sou
 
 /// [`scene`] + [`trace`].
 pub fn trace_document(doc: &Document, part: &dyn Fn(&str) -> Option<PartDef>) -> Trace {
+    trace_document_with(doc, part, &|_, _, _| None)
+}
+
+/// [`scene`] + [`trace_with`].
+pub fn trace_document_with(
+    doc: &Document,
+    part: &dyn Fn(&str) -> Option<PartDef>,
+    block: &dyn Fn(DVec3, DVec3, f64) -> Option<(NodeId, f64)>,
+) -> Trace {
     let (sources, ports) = scene(doc, part);
-    trace(&sources, &ports)
+    trace_with(&sources, &ports, block)
 }
 
 #[cfg(test)]
@@ -979,5 +1009,16 @@ mod tests {
         let p = state(s);
         assert!(s.field.re.is_finite() && s.field.im.is_finite());
         assert!(p.azimuth_deg.is_finite() && p.ellipticity_deg.is_finite());
+    }
+
+    #[test]
+    fn unregistered_part_blocks_beam_before_mirror() {
+        let m = port(2, PortKind::Mirror, DVec3::new(0.0, 200.0, 0.0), DVec3::new(1.0, -1.0, 0.0));
+        let t = trace_with(&[source()], &[m], &|_, _, _| Some((NodeId(99), 50.0)));
+        assert_eq!(t.segments.len(), 1);
+        let s = &t.segments[0];
+        assert!(s.end.distance(DVec3::new(0.0, 50.0, 0.0)) < 1e-9, "{}", s.end);
+        assert_eq!(s.hit, None);
+        assert_eq!(s.blocked, Some(NodeId(99)));
     }
 }

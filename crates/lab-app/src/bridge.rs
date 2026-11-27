@@ -136,6 +136,36 @@ pub fn listen_to_viewport(ui: &AppWindow, app: &Rc<RefCell<AppState>>, models: &
                     eprintln!("viewport: {message}");
                     controller::show_toast(&ui, &app.borrow(), &message, false);
                 }
+                ViewportEvent::Collisions(pairs) => {
+                    if let Some(&(a, b)) = pairs.first() {
+                        let state = app.borrow();
+                        let name = |id| {
+                            state.session.doc.node(id).map_or_else(
+                                || format!("#{}", id.0),
+                                |n| if n.name.is_empty() { n.part.clone() } else { n.name.clone() },
+                            )
+                        };
+                        let mut msg = format!("{} collides with {}", name(a), name(b));
+                        if pairs.len() > 1 {
+                            msg.push_str(&format!(" (and {} more)", pairs.len() - 1));
+                        }
+                        controller::show_toast(&ui, &state, &msg, false);
+                    }
+                }
+                ViewportEvent::BeamsTraced { blocking_current, full_ms } => {
+                    ui.set_beams_stale(!blocking_current);
+                    if let Some(ms) = full_ms {
+                        eprintln!("beams: full trace {ms:.1} ms");
+                        let requested = {
+                            let mut state = app.borrow_mut();
+                            std::mem::take(&mut state.beams_recalc_requested)
+                        };
+                        if requested {
+                            let state = app.borrow();
+                            controller::show_toast(&ui, &state, &format!("Beams recalculated ({ms:.0} ms)"), false);
+                        }
+                    }
+                }
             }
         }
     };

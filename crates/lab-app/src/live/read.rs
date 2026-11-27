@@ -316,6 +316,7 @@ mod tests {
             w_end: 0.6,
             waist: None,
             hit,
+            blocked: None,
             depth: 0,
             field: lab_optics::Field { re: DVec3::Y, im: DVec3::ZERO },
             power: 1.0,

@@ -112,13 +112,15 @@ fn rebuild_outline(
         } else {
             continue;
         };
+        let transform = camera.map_or(Transform::IDENTITY, |c| hull_transform(c, aabb, global, px));
         commands.spawn((
             Outline(px),
             ChildOf(piece),
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(material.clone()),
             NotShadowCaster,
-            camera.map_or(Transform::IDENTITY, |c| hull_transform(c, aabb, global, px)),
+            transform,
+            global.mul_transform(transform),
         ));
     }
 }

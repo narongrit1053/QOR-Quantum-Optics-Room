@@ -231,7 +231,7 @@ fn add_scene_plugins(app: &mut App, document: Document) {
     app.add_plugins((crate::hole_material::HoleGridPlugin, crate::room::RoomPlugin, crate::glb::GlbPlugin, crate::thumbnail::ThumbnailPlugin, crate::export::ExportPlugin));
     app.add_plugins((crate::scene::ScenePlugin { document }, crate::camera::CameraPlugin, crate::picking::PickingPlugin));
     app.add_plugins((crate::place::PlacePlugin, crate::gizmo::GizmoPlugin, crate::blueprint::BlueprintPlugin, crate::isolate::IsolatePlugin, crate::measure::MeasurePlugin, crate::probe::ProbePlugin, crate::overlay::OverlayPlugin, crate::inspect::InspectPlugin, crate::feature_pick::FeaturePickPlugin, crate::feature_pick::DofGlyphPlugin));
-    app.add_plugins(crate::beams::BeamsPlugin);
+    app.add_plugins((crate::beams::BeamsPlugin, crate::collide::CollidePlugin));
     app.add_plugins(crate::part_box::PartBoxPlugin);
 }
 
@@ -461,6 +461,7 @@ fn run_on_demand(
                 ViewportRequest::InspectPart(id) => pending.push(FrameRequest::InspectPart(id)),
                 ViewportRequest::InspectMarkers(frames) => pending.push(FrameRequest::InspectMarkers(frames)),
                 ViewportRequest::SetBeams(on) => pending.push(FrameRequest::SetBeams(on)),
+                ViewportRequest::RecalculateBeams => pending.push(FrameRequest::RecalculateBeams),
                 ViewportRequest::ClearProbes(i) => pending.push(FrameRequest::ClearProbes(i)),
                 ViewportRequest::ViewDirection { yaw, pitch } => pending.push(FrameRequest::ViewDirection(yaw, pitch)),
                 ViewportRequest::HighlightFeature(h) => pending.push(FrameRequest::HighlightFeature(h)),
